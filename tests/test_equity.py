@@ -1,12 +1,33 @@
 import pytest
 import numpy as np
 
-from plorangelab.cards import encode_board, encode_card, encode_hand
+from plorangelab.encoder import encode_board, encode_range
 from plorangelab.equity import evaluate_hand, rank_combination
 
 
 # Each entry is ordered strongest, weaker, then (where applicable) the
 # strongest made hand with a lower kicker. Card order is descending by ID.
+RANKS_ENCODE = {
+    "2": 0,
+    "3": 1,
+    "4": 2,
+    "5": 3,
+    "6": 4,
+    "7": 5,
+    "8": 6,
+    "9": 7,
+    "T": 8,
+    "J": 9,
+    "Q": 10,
+    "K": 11,
+    "A": 12,
+}
+SUITS_ENCODE = {
+    "c": 0,
+    "d": 1,
+    "h": 2,
+    "s": 3,
+}
 COMBINATIONS = {
     "high_card": (
         "AsKdJh9c7s",
@@ -119,44 +140,44 @@ def test_rank_combination_equal_for_same_ranks_different_suits(
 
 
 def test_evaluate_hand_uses_exactly_two_hole_and_three_board_cards() -> None:
-    hand = encode_hand("AsAhQsJd", 4)
+    hand, _ = encode_range("AsAhQsJd", 4)
     board = encode_board("AcKdKh2c3d")
     best_five = encode_board("AsAhAcKdKh")
 
-    assert evaluate_hand(hand, board) == rank_combination(best_five)
+    assert evaluate_hand(hand[0], board) == rank_combination(best_five)
 
 
 def test_evaluate_hand_supports_five_hole_cards() -> None:
-    hand = encode_hand("AsAhQsJdTc", 5)
+    hand, _ = encode_range("AsAhQsJdTc", 5)
     board = encode_board("AcKdKh2c3d")
 
-    assert evaluate_hand(hand, board) == rank_combination(encode_board("AsAhAcKdKh"))
+    assert evaluate_hand(hand[0], board) == rank_combination(encode_board("AsAhAcKdKh"))
 
 
 def test_evaluate_hand_requires_exactly_two_hole_cards_and_three_board_cards() -> None:
     # The board alone is a spade flush, but Omaha rules require two hole cards;
     # only one hole card is a spade, so the player cannot make a flush.
-    hand = encode_hand("AsKdQhJc", 4)
+    hand, _ = encode_range("AsKdQhJc", 4)
     board = encode_board("2s3s4s5s6s")
     best_allowed = encode_board("AsKd6s5s4s")
 
-    assert evaluate_hand(hand, board) == rank_combination(best_allowed)
+    assert evaluate_hand(hand[0], board) == rank_combination(best_allowed)
 
 
 def test_evaluate_hand_equal_rank_hands_with_different_suits_tie() -> None:
     board = encode_board("2c3d5h7s9c")
-    first_hand = encode_hand("AsAhKdQc", 4)
-    second_hand = encode_hand("AdAcKsQh", 4)
+    first_hand, _ = encode_range("AsAhKdQc", 4)
+    second_hand, _ = encode_range("AdAcKsQh", 4)
 
-    assert evaluate_hand(first_hand, board) == evaluate_hand(second_hand, board)
+    assert evaluate_hand(first_hand[0], board) == evaluate_hand(second_hand[0], board)
 
 
 def test_evaluate_hand_compares_kickers() -> None:
     board = encode_board("2c3d5h7s9c")
-    higher_kickers = encode_hand("As9hKdQc", 4)
-    lower_kickers = encode_hand("Kd9sJhTh", 4)
+    higher_kickers, _ = encode_range("As9hKdQc", 4)
+    lower_kickers, _ = encode_range("Kd9sJhTh", 4)
 
-    assert evaluate_hand(higher_kickers, board) > evaluate_hand(lower_kickers, board)
+    assert evaluate_hand(higher_kickers[0], board) > evaluate_hand(lower_kickers[0], board)
 
 
 @pytest.mark.parametrize(
@@ -171,10 +192,10 @@ def test_evaluate_hand_compares_kickers() -> None:
 def test_evaluate_hand_recognizes_wheel_and_ace_high_straights(
     hand_string: str, board_string: str, best_five: str
 ) -> None:
-    hand = encode_hand(hand_string, 4)
+    hand, _ = encode_range(hand_string, 4)
     board = encode_board(board_string)
 
-    assert evaluate_hand(hand, board) == rank_combination(encode_board(best_five))
+    assert evaluate_hand(hand[0], board) == rank_combination(encode_board(best_five))
 
 
 @pytest.mark.parametrize(
@@ -188,10 +209,10 @@ def test_evaluate_hand_recognizes_wheel_and_ace_high_straights(
 def test_evaluate_hand_handles_varied_board_textures(
     hand_string: str, board_string: str
 ) -> None:
-    hand = encode_hand(hand_string, 4)
+    hand, _ = encode_range(hand_string, 4)
     board = encode_board(board_string)
 
-    assert isinstance(evaluate_hand(hand, board), int)
+    assert isinstance(evaluate_hand(hand[0], board), int)
 
 
 @pytest.mark.parametrize(
@@ -222,10 +243,21 @@ def test_evaluate_hand_rejects_invalid_card_sets(
 
 
 def test_evaluate_hand_rejects_out_of_range_card_id() -> None:
-    hand = encode_hand("AsAhKdQc", 4)
+    hand, _ = encode_range("AsAhKdQc", 4)
     board = encode_board("2c3d5h7s9c")
     board[0] = np.uint8(52)
 
     with pytest.raises(ValueError):
-        evaluate_hand(hand, board)
+        evaluate_hand(hand[0], board)
+
+def encode_card(card: str) -> int:
+    """Encode a two-character card as an integer from 0 to 51.
+
+    Example: ``encode_card("As")`` returns ``51``.
+    """
+    rank, suit = card[0], card[1]
+    try:
+        return 4 * RANKS_ENCODE[rank] + SUITS_ENCODE[suit]
+    except KeyError as exc:
+        raise ValueError(f"invalid card: {card!r}") from exc
 

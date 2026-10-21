@@ -163,3 +163,10 @@ def evaluate_hand(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> int:
                 best_score = score
 
     return best_score    
+
+def evaluate_hands(hands: NDArray[np.uint8], board: NDArray[np.uint8]) -> NDArray[np.uint32]:
+    evaluations = np.empty(len(hands), dtype=np.uint32)
+    for i, hand in enumerate(hands):
+        evaluations[i] = evaluate_hand(hand, board)
+
+    return evaluations
