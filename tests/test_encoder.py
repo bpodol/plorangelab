@@ -5,18 +5,18 @@ from plorangelab.encoder import encode_board, encode_range
 
 
 def test_valid_input_range() -> None:
-    hands, weights = encode_range(
+    encoded = encode_range(
         "AsKsQhJhTs@100,AdKdQcJcTs@43,2c3c4c5c6c", 5
     )
-    assert hands.dtype == np.uint8
-    assert hands.shape == (3, 5)
-    assert hands.tolist() == [
+    assert encoded.hands.dtype == np.uint8
+    assert encoded.hands.shape == (3, 5)
+    assert encoded.hands.tolist() == [
         [51, 47, 42, 38, 35],
         [49, 45, 40, 36, 35],
         [16, 12, 8, 4, 0],
     ]
-    assert weights.dtype == np.float32
-    np.testing.assert_allclose(weights, [1.0, 0.43, 1.0])
+    assert encoded.weights.dtype == np.float32
+    np.testing.assert_allclose(encoded.weights, [1.0, 0.43, 1.0])
 
     board = encode_board("AsKdQhJcTs")
     assert board.dtype == np.uint8
@@ -25,20 +25,20 @@ def test_valid_input_range() -> None:
 
 
 def test_valid_plo4_single_hand() -> None:
-    hands, weights = encode_range("AsKsQhJh", 4)
+    encoded = encode_range("AsKsQhJh", 4)
 
-    assert hands.shape == (1, 4)
-    assert hands.tolist() == [[51, 47, 42, 38]]
-    np.testing.assert_array_equal(weights, [1.0])
+    assert encoded.hands.shape == (1, 4)
+    assert encoded.hands.tolist() == [[51, 47, 42, 38]]
+    np.testing.assert_array_equal(encoded.weights, [1.0])
 
 
 def test_zero_and_full_weights() -> None:
-    hands, weights = encode_range(
+    encoded = encode_range(
         "AsKsQhJh@0,AdKdQcJc@100", 4
     )
 
-    assert hands.tolist() == [[51, 47, 42, 38], [49, 45, 40, 36]]
-    np.testing.assert_array_equal(weights, [0.0, 1.0])
+    assert encoded.hands.tolist() == [[51, 47, 42, 38], [49, 45, 40, 36]]
+    np.testing.assert_array_equal(encoded.weights, [0.0, 1.0])
 
 
 @pytest.mark.parametrize(
@@ -79,15 +79,15 @@ def test_duplicate_hands_with_different_weights_are_rejected() -> None:
 
 
 def test_multiple_hands_keep_weights_aligned_with_rows() -> None:
-    hands, weights = encode_range(
+    encoded = encode_range(
         "AsKsQhJh@25,AdKdQcJc@100,2c3c4c5c@0", 4
     )
 
-    assert hands.tolist() == [
+    assert encoded.hands.tolist() == [
         [51, 47, 42, 38],
         [49, 45, 40, 36],
         [12, 8, 4, 0],
     ]
-    np.testing.assert_array_equal(weights, [0.25, 1.0, 0.0])
+    np.testing.assert_array_equal(encoded.weights, [0.25, 1.0, 0.0])
 
 

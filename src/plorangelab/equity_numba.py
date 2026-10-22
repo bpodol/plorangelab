@@ -200,10 +200,19 @@ def numba_evaluate_hands(hands: NDArray[np.uint8], board: NDArray[np.uint8]) -> 
     return evaluations
 
 @njit(parallel=True, cache=True)
-def numba_evaluate_hands_parallel(hands, board):
+def numba_evaluate_hands_parallel(hands: NDArray[np.uint8], board: NDArray[np.uint8]) -> NDArray[np.uint32]:
     evaluations = np.empty(hands.shape[0], dtype=np.uint32)
 
     for i in prange(hands.shape[0]):
         evaluations[i] = _evaluate_hand_core(hands[i], board)
 
     return evaluations
+
+def compute_equity(
+    ranges: list[tuple[NDArray[np.uint8], NDArray[np.uint8]]],
+    board: NDArray[np.uint8] | None = None,
+    samples: int = 100_000,
+    seed: int | None = None,
+):
+    
+    pass

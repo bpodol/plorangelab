@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 from typing import Literal
+from dataclasses import dataclass
 
 Mode = Literal[4, 5]
 
@@ -28,6 +29,20 @@ SUITS_ENCODE = {
 
 RANKS_DECODE = ("2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A")
 SUITS_DECODE = ("c", "d", "h", "s")
+
+@dataclass
+class EncodedRange:
+    hands: NDArray[np.uint8]
+    masks: NDArray[np.uint64]
+    weights: NDArray[np.float32]
+
+def build_mask(hand: NDArray[np.uint8]) -> NDArray[np.uint64]:
+    mask = 0
+
+    for card in hand:
+        mask |= 1 << int(card)
+
+    return np.uint64(mask)
 
 def _encode_card(card: str) -> int:
     """Encode a two-character card as an integer from 0 to 51.
@@ -63,6 +78,31 @@ def encode_board(board: str) -> NDArray[np.uint8]:
         raise ValueError("board cannot contain duplicate cards")
 
     return np.array(encoded_cards, dtype=np.uint8)
+
+
+def decode_card(card_id: int) -> str:
+    """Decode an integer from 0 to 51 into its two-character card representation.
+
+    Example: ``decode_card(51)`` returns ``"As"``.
+    """
+    if not isinstance(card_id, int) or isinstance(card_id, bool) or not 0 <= card_id < 52:
+        raise ValueError("card_id must be an integer from 0 to 51")
+
+    rank, suit = divmod(card_id, 4)
+    return RANKS_DECODE[rank] + SUITS_DECODE[suit]
+
+def decode_hand(hand: NDArray[np.uint8], mode: Mode) -> str:
+    """Decode a 4- or 5-card array of card IDs into a concatenated card string.
+
+    Example: ``decode_hand(np.array([51, 44, 41, 38], dtype=np.uint8), 4)``
+    returns ``"AsKcQdJh"``.
+    """
+    if mode not in (4, 5):
+        raise ValueError("mode must be 4 or 5")
+    if hand.ndim != 1 or len(hand) != mode:
+        raise ValueError(f"hand must be a one-dimensional array of exactly {mode} card IDs")
+
+    return "".join(decode_card(int(card_id)) for card_id in hand)
 
 
 def encode_range(
@@ -101,40 +141,16 @@ def encode_range(
 
         hand_strings.append(hand)
         weight_values.append(weight)
-    encoded_hands = np.empty((len(hand_strings), mode), dtype=np.uint8)    
+    encoded_hands = np.empty((len(hand_strings), mode), dtype=np.uint8)   
+    masks = np.empty((len(hand_strings), mode), dtype=np.uint64)  
     seen = set()
     for i, hand in enumerate(hand_strings):
-        encoded = _encode_hand(hand, mode)
-        key = tuple(encoded)
+        encoded_hand = _encode_hand(hand, mode)
+        key = tuple(encoded_hand)
         if key in seen:
             raise ValueError(f"duplicate hand in range: {hand!r}")
         seen.add(key)
-        encoded_hands[i] = encoded
+        encoded_hands[i] = encoded_hand
+        masks[i] = build_mask(encoded_hand)
     weights = np.asarray(weight_values, dtype=np.float32)
-    return encoded_hands, weights
-
-
-def decode_card(card_id: int) -> str:
-    """Decode an integer from 0 to 51 into its two-character card representation.
-
-    Example: ``decode_card(51)`` returns ``"As"``.
-    """
-    if not isinstance(card_id, int) or isinstance(card_id, bool) or not 0 <= card_id < 52:
-        raise ValueError("card_id must be an integer from 0 to 51")
-
-    rank, suit = divmod(card_id, 4)
-    return RANKS_DECODE[rank] + SUITS_DECODE[suit]
-
-def decode_hand(hand: NDArray[np.uint8], mode: Mode) -> str:
-    """Decode a 4- or 5-card array of card IDs into a concatenated card string.
-
-    Example: ``decode_hand(np.array([51, 44, 41, 38], dtype=np.uint8), 4)``
-    returns ``"AsKcQdJh"``.
-    """
-    if mode not in (4, 5):
-        raise ValueError("mode must be 4 or 5")
-    if hand.ndim != 1 or len(hand) != mode:
-        raise ValueError(f"hand must be a one-dimensional array of exactly {mode} card IDs")
-
-    return "".join(decode_card(int(card_id)) for card_id in hand)
-
+    return EncodedRange(hands=encoded_hands, masks=masks, weights=weights)
