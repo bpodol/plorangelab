@@ -2,7 +2,7 @@ from numpy.typing import NDArray
 import numpy as np
 from typing import Literal
 from itertools import combinations
-from numba import njit
+from numba import njit, prange
 
 #0-high card
 #1-one pair
@@ -193,8 +193,17 @@ def _evaluate_hand_core(hand, board):
 
 @njit(cache=True)
 def numba_evaluate_hands(hands: NDArray[np.uint8], board: NDArray[np.uint8]) -> NDArray[np.uint32]:
-    evaluations = np.empty(len(hands), dtype=np.uint32)
-    for i in range(len(hands)):
+    evaluations = np.empty(hands.shape[0], dtype=np.uint32)
+    for i in range(hands.shape[0]):
+        evaluations[i] = _evaluate_hand_core(hands[i], board)
+
+    return evaluations
+
+@njit(parallel=True, cache=True)
+def numba_evaluate_hands_parallel(hands, board):
+    evaluations = np.empty(hands.shape[0], dtype=np.uint32)
+
+    for i in prange(hands.shape[0]):
         evaluations[i] = _evaluate_hand_core(hands[i], board)
 
     return evaluations
