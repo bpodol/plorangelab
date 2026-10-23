@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 
 from plorangelab.encoder import encode_board, encode_range
-from plorangelab.equity_numba import numba_evaluate_hand, numba_rank_combination
+from plorangelab.evaluator import evaluate_hand, rank_combination
 
 
 # Each entry is ordered strongest, weaker, then (where applicable) the
@@ -79,13 +79,13 @@ COMBINATIONS = {
 @pytest.mark.parametrize("category", COMBINATIONS)
 def test_rank_combination_compares_hands_within_category(category: str) -> None:
     combinations = COMBINATIONS[category]
-    stronger = numba_rank_combination(encode_board(combinations[0]))
-    weaker = numba_rank_combination(encode_board(combinations[1]))
+    stronger = rank_combination(encode_board(combinations[0]))
+    weaker = rank_combination(encode_board(combinations[1]))
 
     assert stronger > weaker
 
     if len(combinations) == 3 and category != "straight":
-        lower_kicker = numba_rank_combination(encode_board(combinations[2]))
+        lower_kicker = rank_combination(encode_board(combinations[2]))
         assert stronger > lower_kicker
 
 
@@ -105,8 +105,8 @@ def test_rank_combination_compares_hands_within_category(category: str) -> None:
 def test_rank_combination_compares_category_strength(
     stronger_category: str, weaker_category: str
 ) -> None:
-    stronger = numba_rank_combination(encode_board(COMBINATIONS[stronger_category][0]))
-    weaker = numba_rank_combination(encode_board(COMBINATIONS[weaker_category][0]))
+    stronger = rank_combination(encode_board(COMBINATIONS[stronger_category][0]))
+    weaker = rank_combination(encode_board(COMBINATIONS[weaker_category][0]))
 
     assert stronger > weaker
 
@@ -114,13 +114,13 @@ def test_wheel_is_lower_than_six_high_straight():
     wheel = encode_board("As5h4d3c2s")
     six_high = encode_board("6s5h4d3c2s")
 
-    assert numba_rank_combination(wheel) < numba_rank_combination(six_high)
+    assert rank_combination(wheel) < rank_combination(six_high)
 
 def test_wheel_strflush_is_lower_than_six_high_straight():
     wheel = encode_board("As5s4s3s2s")
     six_high = encode_board("6s5s4s3s2s")
 
-    assert numba_rank_combination(wheel) < numba_rank_combination(six_high)
+    assert rank_combination(wheel) < rank_combination(six_high)
 
 @pytest.mark.parametrize(
     ("first", "same_rank_different_suits"),
@@ -134,7 +134,7 @@ def test_wheel_strflush_is_lower_than_six_high_straight():
 def test_rank_combination_equal_for_same_ranks_different_suits(
     first: str, same_rank_different_suits: str
 ) -> None:
-    assert numba_rank_combination(encode_board(first)) == numba_rank_combination(
+    assert rank_combination(encode_board(first)) == rank_combination(
         encode_board(same_rank_different_suits)
     )
 
@@ -144,14 +144,14 @@ def test_evaluate_hand_uses_exactly_two_hole_and_three_board_cards() -> None:
     board = encode_board("AcKdKh2c3d")
     best_five = encode_board("AsAhAcKdKh")
 
-    assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(best_five)
+    assert evaluate_hand(hand.hands[0], board) == rank_combination(best_five)
 
 
 def test_evaluate_hand_supports_five_hole_cards() -> None:
     hand = encode_range("AsAhQsJdTc", 5)
     board = encode_board("AcKdKh2c3d")
 
-    assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(encode_board("AsAhAcKdKh"))
+    assert evaluate_hand(hand.hands[0], board) == rank_combination(encode_board("AsAhAcKdKh"))
 
 
 def test_evaluate_hand_requires_exactly_two_hole_cards_and_three_board_cards() -> None:
@@ -161,7 +161,7 @@ def test_evaluate_hand_requires_exactly_two_hole_cards_and_three_board_cards() -
     board = encode_board("2s3s4s5s6s")
     best_allowed = encode_board("AsKd6s5s4s")
 
-    assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(best_allowed)
+    assert evaluate_hand(hand.hands[0], board) == rank_combination(best_allowed)
 
 
 def test_evaluate_hand_equal_rank_hands_with_different_suits_tie() -> None:
@@ -169,7 +169,7 @@ def test_evaluate_hand_equal_rank_hands_with_different_suits_tie() -> None:
     first_hand = encode_range("AsAhKdQc", 4)
     second_hand = encode_range("AdAcKsQh", 4)
 
-    assert numba_evaluate_hand(first_hand.hands[0], board) == numba_evaluate_hand(second_hand.hands[0], board)
+    assert evaluate_hand(first_hand.hands[0], board) == evaluate_hand(second_hand.hands[0], board)
 
 
 def test_evaluate_hand_compares_kickers() -> None:
@@ -177,7 +177,7 @@ def test_evaluate_hand_compares_kickers() -> None:
     higher_kickers = encode_range("As9hKdQc", 4)
     lower_kickers = encode_range("Kd9sJhTh", 4)
 
-    assert numba_evaluate_hand(higher_kickers.hands[0], board) > numba_evaluate_hand(lower_kickers.hands[0], board)
+    assert evaluate_hand(higher_kickers.hands[0], board) > evaluate_hand(lower_kickers.hands[0], board)
 
 
 @pytest.mark.parametrize(
@@ -195,7 +195,7 @@ def test_evaluate_hand_recognizes_wheel_and_ace_high_straights(
     hand = encode_range(hand_string, 4)
     board = encode_board(board_string)
 
-    assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(encode_board(best_five))
+    assert evaluate_hand(hand.hands[0], board) == rank_combination(encode_board(best_five))
 
 
 @pytest.mark.parametrize(
@@ -212,7 +212,7 @@ def test_evaluate_hand_handles_varied_board_textures(
     hand = encode_range(hand_string, 4)
     board = encode_board(board_string)
 
-    assert isinstance(numba_evaluate_hand(hand.hands[0], board), int)
+    assert isinstance(evaluate_hand(hand.hands[0], board), int)
 
 
 @pytest.mark.parametrize(
@@ -239,7 +239,7 @@ def test_evaluate_hand_rejects_invalid_card_sets(
     )
 
     with pytest.raises(ValueError):
-        numba_evaluate_hand(hand, board)
+        evaluate_hand(hand, board)
 
 
 def test_evaluate_hand_rejects_out_of_range_card_id() -> None:
@@ -248,7 +248,7 @@ def test_evaluate_hand_rejects_out_of_range_card_id() -> None:
     board[0] = np.uint8(52)
 
     with pytest.raises(ValueError):
-        numba_evaluate_hand(hand.hands[0], board)
+        evaluate_hand(hand.hands[0], board)
 
 def encode_card(card: str) -> int:
     """Encode a two-character card as an integer from 0 to 51.

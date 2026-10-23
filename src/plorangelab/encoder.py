@@ -36,10 +36,23 @@ class EncodedRange:
     masks: NDArray[np.uint64]
     weights: NDArray[np.float32]
 
-def build_mask(hand: NDArray[np.uint8]) -> NDArray[np.uint64]:
+def build_mask(cards: np.uint8) -> np.uint64:
+    """
+    Encode a set of cards as a 64-bit bitmask.
+
+    Each card is represented by its ID (0–51), with the corresponding
+    bit set to 1. The resulting mask allows efficient card overlap
+    detection using bitwise AND.
+
+    Args:
+        hand: A 1D NumPy array of card IDs (np.uint8).
+
+    Returns:
+        np.uint64: A bitmask representing all cards in the hand.
+    """
     mask = 0
 
-    for card in hand:
+    for card in cards:
         mask |= 1 << int(card)
 
     return np.uint64(mask)
@@ -107,10 +120,10 @@ def decode_hand(hand: NDArray[np.uint8], mode: Mode) -> str:
 
 def encode_range(
     hands: str, mode: Mode
-) -> tuple[NDArray[np.uint8], NDArray[np.float32]]:
+) -> EncodedRange:
     """Encode comma-separated hands and optional weights.
 
-    Each entry is a hand optionally followed by ``@weight``. Missing weights
+    Each entry is a hand optionally followed by ``@weight`` in range @1-@100. Missing weights
     default to 1.0. Returns the encoded hands and a parallel weight array.
 
     Example: ``encode_range("AsKsQhJhTh@100,AdKdQcJcTc@43", 5)`` returns
@@ -136,13 +149,13 @@ def encode_range(
                 weight = float(parts[1])/100
             except ValueError as exc:
                 raise ValueError(f"invalid weight in range entry: {entry!r}") from exc
-            if not np.isfinite(weight) or not 0 <= weight <= 1:
-                raise ValueError(f"weight must be in range 0-100: {entry!r}")
+            if not np.isfinite(weight) or not 0 < weight <= 1:
+                raise ValueError(f"weight must be in range 1-100: {entry!r}")
 
         hand_strings.append(hand)
         weight_values.append(weight)
     encoded_hands = np.empty((len(hand_strings), mode), dtype=np.uint8)   
-    masks = np.empty((len(hand_strings), mode), dtype=np.uint64)  
+    masks = np.empty((len(hand_strings)), dtype=np.uint64)  
     seen = set()
     for i, hand in enumerate(hand_strings):
         encoded_hand = _encode_hand(hand, mode)

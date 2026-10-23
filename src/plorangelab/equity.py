@@ -1,172 +1,530 @@
 from numpy.typing import NDArray
 import numpy as np
+from plorangelab.encoder import EncodedRange, build_mask, Mode
+from plorangelab.evaluator_numba import numba_evaluate_hands
+from itertools import combinations, product
+from math import comb, prod
 from typing import Literal
-from itertools import combinations
 
-#0-high card
-#1-one pair
-#2-two pair
-#3-three of a kind
-#4-straight
-#5-flush
-#6-full house
-#7-four of a kind
-#8-straight flush
-CombinationStrength = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
+def check_collisions(masks: NDArray[np.uint64]) -> bool:
+    """Return whether any two selected hand masks contain a shared card.
 
-def calculate_rank(
-    c: CombinationStrength,
-    r1: int = 0,
-    r2: int = 0,
-    r3: int = 0,
-    r4: int = 0,
-    r5: int = 0,
-) -> int:
-    """Encode a category and five rank values as a base-13 integer."""
-    return (((((c * 13 + int(r1)) * 13 + int(r2)) * 13 + int(r3)) * 13 + int(r4)) * 13 + int(r5))
+    Args:
+        masks: One 52-card bitmask per selected player hand.
 
-def rank_combination(cards: NDArray[np.uint8]) -> int:
-    """Evaluate five cards.
-
-    Preconditions:
-        - Exactly 5 valid, distinct cards.
-        - Cards sorted by ID in descending order.
+    Returns:
+        True if at least two hands overlap; otherwise False.
     """
-    ranks = cards // 4
-    suits = cards % 4
+    used_mask = np.uint64(0)
+    for mask in masks:
+        if used_mask & mask:
+            return True
+        used_mask |= mask
 
-    is_flush = True
-    for suit in suits[1:]:
-        if suit != suits[0]:
-            is_flush = False
-            break
+    return False
 
-    is_straight = True
-    for index in range(4):
-        if ranks[index] != ranks[index + 1] + np.uint8(1):
-            is_straight = False
-            break
-    # Ace-low wheel: A-5-4-3-2 (rank values 12, 3, 2, 1, 0).
-    is_wheel = (
-    ranks[0] == 12
-    and ranks[1] == 3
-    and ranks[2] == 2
-    and ranks[3] == 1
-    and ranks[4] == 0
-)
-    if is_wheel:
-        is_straight = True
+def deal_card(deck: np.uint64, rng: np.random.Generator) -> tuple[int, np.uint64]:
+    """Draw one uniformly random available card and return the updated deck mask.
 
-    if is_flush and is_straight:
-        straight_high = 3 if ranks[0] == 12 and ranks[1] == 3 else ranks[0]
-        return calculate_rank(c=8, r1=straight_high)
+    Args:
+        deck: Bitmask whose set bits represent cards still in the deck.
+        rng: Random generator used for reproducible draws.
 
-    # Find repeated ranks by walking the already sorted ranks once.
-    ranks_count: list[tuple[int, int]] = []
-    current_rank = ranks[0]
-    count = 1
-    for rank in ranks[1:]:
-        if rank == current_rank:
-            count += 1
-        else:
-            ranks_count.append((count, current_rank))
-            current_rank = rank
-            count = 1
-    ranks_count.append((count, current_rank))
-    ranks_count.sort(reverse=True)
-    
-    if ranks_count[0][0] == 4:
-        quad_rank = ranks_count[0][1]
-        kicker = ranks_count[1][1]
-        return calculate_rank(c=7, r1=quad_rank, r2=kicker)
-    
-    if ranks_count[0][0] == 3 and ranks_count[1][0] == 2:
-        trips = ranks_count[0][1]
-        pair = ranks_count[1][1]
-        return calculate_rank(c=6, r1=trips, r2=pair)
+    Returns:
+        A tuple of the selected card ID (0–51) and the deck mask with that
+        card's bit cleared.
 
-    if is_flush:
-        return calculate_rank(
-            c=5, 
-            r1=ranks[0], 
-            r2=ranks[1], 
-            r3=ranks[2],
-            r4=ranks[3],
-            r5=ranks[4]
+    Raises:
+        ValueError: If no cards remain in the deck.
+    """
+    if deck == 0:
+        raise ValueError("Deck is empty")
+
+    while True:
+        pos = int(rng.integers(52))
+        bit = np.uint64(1) << pos
+
+        if deck & bit:
+            deck ^= bit
+            return pos, deck
+
+
+def validate_equity_inputs(
+    players: list[EncodedRange],
+    mode: Mode,
+    board: NDArray[np.uint8] | None,
+    samples: int,
+    seed: int,
+    method: Literal["exact", "monte-carlo"]
+) -> None:
+    """Validate the public equity API's parameters and encoded range invariants.
+
+    Checks player count, PLO mode, board cards, sample count, seed, array
+    shapes and dtypes, card uniqueness, hand-mask consistency, and weights.
+    Does not check whether a compatible multi-player matchup exists.
+
+    Raises:
+        ValueError: If any parameter, board, or encoded range is invalid.
+    """
+    if mode not in (4, 5):
+        raise ValueError("Mode must be 4 or 5")
+
+    if not 2 <= len(players) <= 6:
+        raise ValueError("Expected 2 to 6 players")
+
+    if isinstance(samples, (bool, np.bool_)) or not isinstance(samples, (int, np.integer)) or samples <= 0:
+        raise ValueError("Samples must be a positive integer")
+
+    if isinstance(seed, (bool, np.bool_)) or not isinstance(seed, (int, np.integer)) or seed < 0:
+        raise ValueError("Seed must be a non-negative integer")
+
+    if board is not None:
+        if (
+            not isinstance(board, np.ndarray)
+            or board.dtype != np.uint8
+            or board.ndim != 1
+        ):
+            raise ValueError("Board must be a 1D uint8 array")
+
+        if len(board) not in (0, 3, 4, 5):
+            raise ValueError("Board must contain 0, 3, 4, or 5 cards")
+
+        if np.any(board >= 52):
+            raise ValueError("Board contains invalid card IDs")
+
+        if len(np.unique(board)) != len(board):
+            raise ValueError("Board contains duplicate cards")
+
+    for i, player in enumerate(players):
+        if not isinstance(player, EncodedRange):
+            raise ValueError(f"Player {i + 1} must be an EncodedRange")
+
+        if (
+            not isinstance(player.hands, np.ndarray)
+            or player.hands.dtype != np.uint8
+            or player.hands.ndim != 2
+            or player.hands.shape[1] != mode
+        ):
+            raise ValueError(f"Player {i + 1} has invalid hands")
+
+        n = len(player.hands)
+
+        if n == 0:
+            raise ValueError(f"Player {i + 1} has an empty range")
+
+        if (
+            not isinstance(player.masks, np.ndarray)
+            or player.masks.dtype != np.uint64
+            or player.masks.shape != (n,)
+        ):
+            raise ValueError(f"Player {i + 1} has invalid masks")
+
+        if (
+            not isinstance(player.weights, np.ndarray)
+            or player.weights.ndim != 1
+            or player.weights.shape != (n,)
+            or not np.issubdtype(player.weights.dtype, np.floating)
+        ):
+            raise ValueError(f"Player {i + 1} has invalid weights")
+
+        if np.any(player.hands >= 52):
+            raise ValueError(f"Player {i + 1} contains invalid cards")
+
+        sorted_hands = np.sort(player.hands, axis=1)
+
+        if np.any(sorted_hands[:, 1:] == sorted_hands[:, :-1]):
+            raise ValueError(f"Player {i + 1} contains duplicate cards within a hand")
+
+        expected_masks = np.zeros(n, dtype=np.uint64)
+
+        for j in range(mode):
+            expected_masks |= (
+                np.uint64(1) << player.hands[:, j].astype(np.uint64)
+            )
+
+        if not np.array_equal(player.masks, expected_masks):
+            raise ValueError(f"Player {i + 1} contains incorrect masks")
+
+        if len(np.unique(player.masks)) != n:
+            raise ValueError(f"Player {i + 1} contains duplicate hands")
+
+        weights = player.weights.astype(np.float64)
+        total = weights.sum()
+
+        if (
+            not np.all(np.isfinite(weights))
+            or np.any(weights < 0)
+            or not np.isfinite(total)
+            or total <= 0
+        ):
+            raise ValueError(f"Player {i + 1} has invalid weights")
+
+    if not isinstance(method, str) or method not in ("exact", "monte-carlo"):
+        raise ValueError("Method must be 'exact' or 'monte-carlo'")
+
+def sanitize_range(player: EncodedRange, board_mask: np.uint64) -> EncodedRange:
+    """Return a new range with all board-blocked hands removed.
+
+    Preserves alignment between hands, masks, and weights; leaves the original
+    range unchanged.
+
+    Raises:
+        ValueError: If no hands survive board-card filtering.
+    """
+    valid = (player.masks & board_mask) == 0
+
+    if not valid.any():
+        raise ValueError("No combinations left after removing board cards")
+
+    return EncodedRange(
+        hands=player.hands[valid],
+        masks=player.masks[valid],
+        weights=player.weights[valid],
+    )
+
+
+def prepare_ranges(players: list[EncodedRange], board: NDArray[np.uint8] | None) -> list[EncodedRange]:
+    """Filter all player ranges against the known community cards.
+
+    Args:
+        players: Validated encoded ranges.
+        board: Known board cards, or None for a board with no known cards.
+
+    Returns:
+        Board-compatible ranges. With no board, returns a shallow copy of
+        the players list; otherwise returns filtered EncodedRange instances.
+    """
+    if board is None or len(board) == 0:
+        return players.copy()
+
+    board_mask = build_mask(board)
+
+    return [
+        sanitize_range(player, board_mask)
+        for player in players
+    ]
+
+def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float64]]:
+    """Convert each player's hand weights to a probability distribution.
+
+    Weight calculations use float64 for reliable normalization. Zero-weight
+    hands receive zero sampling probability.
+
+    Returns:
+        One float64 probability array per player, aligned with that player's
+        encoded hands and masks.
+
+    Raises:
+        ValueError: If a player has no positive total weight.
+    """
+    probabilities = []
+
+    for i, player in enumerate(players):
+        weights = player.weights.astype(np.float64)
+        total = weights.sum()
+
+        if not np.isfinite(total) or total <= 0:
+            raise ValueError(
+                f"Player {i + 1} has no positive-weight hands "
+                "after board filtering"
+            )
+
+        probabilities.append(weights / total)
+
+    return probabilities
+
+def run_monte_carlo(
+    players: list[EncodedRange],
+    probabilities: list[NDArray[np.float64]],
+    mode: Mode,
+    board: NDArray[np.uint8] | None,
+    samples: int,
+    seed: int,
+) -> dict[str, float]:
+    """Estimate weighted multiway Omaha equity by rejection sampling.
+
+    Each attempt independently draws one weighted hand per player. Colliding
+    hand selections are discarded, and missing board cards are drawn uniformly
+    from the remaining deck. Each valid showdown awards an equal pot fraction
+    to all players tied for the highest hand rank.
+
+    Args:
+        players: Validated ranges with board-blocked hands removed.
+        probabilities: Per-player sampling probabilities aligned with the ranges.
+        mode: Number of hole cards per hand (4 or 5).
+        board: Known community cards, or None before the flop.
+        samples: Number of successful (collision-free) showdowns to evaluate.
+        seed: Seed for reproducible sampling and board completion.
+
+    Returns:
+        A player-to-equity mapping with values in [0, 1].
+
+    Raises:
+        RuntimeError: If the sampling attempt budget is exhausted before
+            collecting the requested number of valid showdowns.
+    """
+    rng = np.random.default_rng(seed)
+
+    player_count = len(players)
+    board_len = 0 if board is None else len(board)
+    missing_board = 5 - board_len
+
+    board_mask = np.uint64(0) if board is None else build_mask(board)
+
+    deck = np.uint64((1 << 52) - 1)
+    deck &= ~board_mask
+
+    current_board = np.empty(5, dtype=np.uint8)
+
+    if board is not None:
+        current_board[:board_len] = board
+
+    selected_masks = np.empty(player_count, dtype=np.uint64)
+    selected_hands = np.empty((player_count, mode), dtype=np.uint8)
+
+    players_won_pots = np.zeros(player_count, dtype=np.float64)
+
+    simulations = 0
+    attempts = 0
+    max_attempts = max(10_000, samples * 20)
+
+    while simulations < samples:
+        if attempts >= max_attempts:
+            raise RuntimeError(
+                f"Sampling limit exceeded: {simulations}/{samples} "
+                f"valid simulations after {attempts} attempts"
+            )
+
+        attempts += 1
+        deck_state = deck
+
+        # Independently sample a weighted hand for each player.
+        for i, player in enumerate(players):
+            choice = rng.choice(len(player.hands), p=probabilities[i])
+
+            selected_masks[i] = player.masks[choice]
+            selected_hands[i] = player.hands[choice]
+
+        # Reject the entire selection if hands overlap.
+        if check_collisions(selected_masks):
+            continue
+
+        # Remove selected hands from the remaining deck.
+        for hand_mask in selected_masks:
+            deck_state &= ~hand_mask
+
+        # Deal any missing community cards.
+        for j in range(missing_board):
+            card, deck_state = deal_card(deck_state, rng)
+            current_board[board_len + j] = card
+
+        # Evaluate all players on the completed board.
+        scores = numba_evaluate_hands(selected_hands, current_board)
+
+        # Determine the winning score.
+        highest_score = -1
+        highest_scores_count = 0
+
+        for score in scores:
+            if score > highest_score:
+                highest_score = score
+                highest_scores_count = 1
+            elif score == highest_score:
+                highest_scores_count += 1
+
+        # Distribute the pot equally among tied winners.
+        for i in range(player_count):
+            if scores[i] == highest_score:
+                players_won_pots[i] += 1.0 / highest_scores_count
+
+        simulations += 1
+
+    return {
+        f"player {i + 1}:": float(players_won_pots[i] / simulations)
+        for i in range(player_count)
+    }
+
+def run_exact_equity(
+    players: list[EncodedRange],
+    mode: Mode,
+    board: NDArray[np.uint8] | None = None,
+    max_showdowns: int | None = 100_000,
+) -> dict[str, float]:
+    """
+    Calculate exact equity by enumerating all compatible hand combinations
+    and all possible remaining board runouts.
+
+    Args:
+        players: Validated, board-filtered player ranges.
+        mode: Number of hole cards per player (4 or 5).
+        board: Known community cards, or None for preflop.
+        max_showdowns: Maximum estimated showdown evaluations.
+            None disables the limit.
+
+    Returns:
+        Exact weighted equity for each player, as a fraction from 0 to 1.
+
+    Raises:
+        ValueError: If no compatible positive-weight matchups exist.
+        RuntimeError: If the estimated workload exceeds max_showdowns.
+    """
+    player_count = len(players)
+    board_len = 0 if board is None else len(board)
+    missing_board = 5 - board_len
+
+    board_mask = 0 if board is None else int(build_mask(board))
+
+    # Only enumerate hands with positive weights.
+    valid_indices = [
+        np.flatnonzero(player.weights > 0)
+        for player in players
+    ]
+
+    # Estimate an upper bound on the number of evaluations.
+    remaining_cards = 52 - board_len - player_count * mode
+
+    estimated_showdowns = (
+        prod(len(indices) for indices in valid_indices)
+        * comb(remaining_cards, missing_board)
+    )
+
+    if (
+        max_showdowns is not None
+        and estimated_showdowns > max_showdowns
+    ):
+        raise RuntimeError(
+            f"Exact calculation exceeds the workload limit: "
+            f"{estimated_showdowns:,} estimated showdowns"
         )
 
-    if is_straight:
-        straight_high = 3 if ranks[0] == 12 and ranks[1] == 3 else ranks[0]
-        return calculate_rank(c=4, r1=straight_high)
+    selected_hands = np.empty(
+        (player_count, mode),
+        dtype=np.uint8,
+    )
 
-    if ranks_count[0][0] == 3 and ranks_count[1][0] == 1:
-        kickers = []
-        for rank in ranks:
-            if rank == ranks_count[0][1]:
-                continue
-            else:
-                kickers.append(rank)
-                
-        return calculate_rank(c=3, r1=ranks_count[0][1], r2=kickers[0], r3=kickers[1])
+    current_board = np.empty(5, dtype=np.uint8)
 
-    if ranks_count[0][0] == 2 and ranks_count[1][0] == 2:
-        first_pair = 0 
-        for count, rank in ranks_count:
-            if count == 2 and rank > first_pair:
-                first_pair = rank
-            elif count == 2 and rank < first_pair:
-                second_pair = rank
-            else:
-                kicker = rank
+    if board is not None:
+        current_board[:board_len] = board
 
-        return calculate_rank(c=2, r1=first_pair, r2=second_pair, r3=kicker)
+    pot_shares = np.zeros(player_count, dtype=np.float64)
+    total_weight = 0.0
 
-    if ranks_count[0][0] == 2 and ranks_count[1][0] == 1:
-        kickers = []
-        for rank in ranks:
-            if rank == ranks_count[0][1]:
-                pair = rank
-            else:
-                kickers.append(rank)
+    # Enumerate every combination of player hands.
+    for indices in product(*valid_indices):
+        used_mask = board_mask
+        matchup_weight = 1.0
 
-        return calculate_rank(c=1, r1=pair, r2=kickers[0], r3=kickers[1], r4=kickers[2])
+        # Check card collisions and calculate matchup weight.
+        for i, hand_index in enumerate(indices):
+            player = players[i]
+            hand_mask = int(player.masks[hand_index])
 
-    return calculate_rank(c=0, r1=ranks[0], r2=ranks[1], r3=ranks[2], r4=ranks[3], r5=ranks[4])
+            if used_mask & hand_mask:
+                break
 
+            used_mask |= hand_mask
+            matchup_weight *= float(player.weights[hand_index])
+            selected_hands[i] = player.hands[hand_index]
+
+        else:
+            # Executed only if no collision caused a break.
+
+            available_cards = [
+                card
+                for card in range(52)
+                if not (used_mask & (1 << card))
+            ]
+
+            # Enumerate every possible board completion.
+            # When missing_board == 0, this yields one empty tuple.
+            for runout in combinations(
+                available_cards,
+                missing_board,
+            ):
+                if missing_board:
+                    current_board[board_len:] = runout
+
+                scores = numba_evaluate_hands(
+                    selected_hands,
+                    current_board,
+                )
+
+                highest_score = max(scores)
+
+                winners_count = sum(
+                    score == highest_score
+                    for score in scores
+                )
+
+                share = matchup_weight / winners_count
+
+                for i, score in enumerate(scores):
+                    if score == highest_score:
+                        pot_shares[i] += share
+
+                total_weight += matchup_weight
+
+    if total_weight == 0:
+        raise ValueError(
+            "No compatible positive-weight hand combinations exist"
+        )
+
+    return {
+        f"player {i + 1}:": float(pot_shares[i] / total_weight)
+        for i in range(player_count)
+    }
+
+def compute_equity(
+    players: list[EncodedRange],
+    mode: Mode,
+    board: NDArray[np.uint8] | None = None,
+    samples: int = 100_000,
+    seed: int = 3,
+    method: Literal["exact", "monte-carlo"] = "monte-carlo"
+) -> dict[str, float]:
+    """Calculate equity for two to six weighted PLO4/PLO5 ranges.
+
+    Validate inputs and remove board-blocked hands before delegating to exact
+    enumeration or Monte Carlo sampling. Input ranges are not modified.
+
+    Args:
+        players: Encoded player ranges, including hands, masks, and weights.
+        mode: Number of hole cards per hand (4 or 5).
+        board: Known community cards (0, 3, 4, or 5), or None preflop.
+        samples: Number of valid Monte Carlo showdowns; ignored for exact equity.
+        seed: Reproducible Monte Carlo seed; ignored for exact equity.
+        method: ``"exact"`` for exhaustive enumeration, or ``"monte-carlo"``
+            for an estimated result. Exact enumeration uses its default
+            workload safeguard.
+
+    Returns:
+        A mapping from player labels to equity shares in [0, 1].
+
+    Raises:
+        ValueError: If inputs are invalid or all eligible matchups are absent
+            (the latter is explicitly detected by the exact method).
+        RuntimeError: If the selected method exceeds its workload or attempt
+            budget.
+    """
+    validate_equity_inputs(players, mode, board, samples, seed, method)
+
+    valid_players = prepare_ranges(players, board)
+
+    if method == "exact":
+        return run_exact_equity(
+            players=valid_players,
+            mode=mode,
+            board=board
+        )
     
+    probabilities = prepare_probabilities(valid_players)
 
-
-def evaluate_hand(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> int:
-    if hand.ndim != 1 or len(hand) not in (4, 5):
-        raise ValueError("hand must be a one-dimensional array of 4 or 5 cards")
-    if board.ndim != 1 or len(board) != 5:
-        raise ValueError("board must be a one-dimensional array of exactly 5 cards")
-    if any(int(card) >= 52 for card in hand) or any(int(card) >= 52 for card in board):
-        raise ValueError("card IDs must be between 0 and 51")
-    if len(set(int(card) for card in hand)) != len(hand):
-        raise ValueError("hand cannot contain duplicate cards")
-    if len(set(int(card) for card in board)) != len(board):
-        raise ValueError("board cannot contain duplicate cards")
-    if set(int(card) for card in hand) & set(int(card) for card in board):
-        raise ValueError("hand and board cannot contain the same card")
-
-    best_score = -1
-
-    for hole_cards in combinations(hand, 2):
-        for board_cards in combinations(board, 3):
-            cards = np.array((*hole_cards, *board_cards), dtype=np.uint8)
-            cards.sort()
-            cards = cards[::-1]  # rank_combination expects descending card IDs
-
-            score = rank_combination(cards)
-            if score > best_score:
-                best_score = score
-
-    return best_score    
-
-def evaluate_hands(hands: NDArray[np.uint8], board: NDArray[np.uint8]) -> NDArray[np.uint32]:
-    evaluations = np.empty(len(hands), dtype=np.uint32)
-    for i, hand in enumerate(hands):
-        evaluations[i] = evaluate_hand(hand, board)
-
-    return evaluations
+    return run_monte_carlo(
+        players=valid_players,
+        probabilities=probabilities,
+        mode=mode,
+        board=board,
+        samples=samples,
+        seed=seed,
+    )

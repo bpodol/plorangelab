@@ -1,8 +1,8 @@
 from numpy.typing import NDArray
 import numpy as np
 from typing import Literal
-from itertools import combinations
 from numba import njit, prange
+from plorangelab.encoder import EncodedRange, build_mask, Mode
 
 #0-high card
 #1-one pair
@@ -14,6 +14,7 @@ from numba import njit, prange
 #7-four of a kind
 #8-straight flush
 CombinationStrength = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
+
 
 @njit(cache=True)
 def numba_calculate_rank(
@@ -168,7 +169,7 @@ def numba_evaluate_hand(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> in
     return _evaluate_hand_core(hand, board)
 
 @njit(cache=True)
-def _evaluate_hand_core(hand, board):
+def _evaluate_hand_core(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> int:
     best_score = -1
     cards = np.empty(5, dtype=np.uint8)
 
@@ -207,12 +208,3 @@ def numba_evaluate_hands_parallel(hands: NDArray[np.uint8], board: NDArray[np.ui
         evaluations[i] = _evaluate_hand_core(hands[i], board)
 
     return evaluations
-
-def compute_equity(
-    ranges: list[tuple[NDArray[np.uint8], NDArray[np.uint8]]],
-    board: NDArray[np.uint8] | None = None,
-    samples: int = 100_000,
-    seed: int | None = None,
-):
-    
-    pass

@@ -32,14 +32,6 @@ def test_valid_plo4_single_hand() -> None:
     np.testing.assert_array_equal(encoded.weights, [1.0])
 
 
-def test_zero_and_full_weights() -> None:
-    encoded = encode_range(
-        "AsKsQhJh@0,AdKdQcJc@100", 4
-    )
-
-    assert encoded.hands.tolist() == [[51, 47, 42, 38], [49, 45, 40, 36]]
-    np.testing.assert_array_equal(encoded.weights, [0.0, 1.0])
-
 
 @pytest.mark.parametrize(
     ("encoder", "value", "mode"),
@@ -75,12 +67,12 @@ def test_invalid_inputs(encoder, value: str, mode: int | None) -> None:
 
 def test_duplicate_hands_with_different_weights_are_rejected() -> None:
     with pytest.raises(ValueError, match="duplicate hand in range"):
-        encode_range("AsKsQhJh@0,JhQhKsAs@100", 4)
+        encode_range("AsKsQhJh@12,JhQhKsAs@100", 4)
 
 
 def test_multiple_hands_keep_weights_aligned_with_rows() -> None:
     encoded = encode_range(
-        "AsKsQhJh@25,AdKdQcJc@100,2c3c4c5c@0", 4
+        "AsKsQhJh@25,AdKdQcJc@100,2c3c4c5c@50", 4
     )
 
     assert encoded.hands.tolist() == [
@@ -88,6 +80,6 @@ def test_multiple_hands_keep_weights_aligned_with_rows() -> None:
         [49, 45, 40, 36],
         [12, 8, 4, 0],
     ]
-    np.testing.assert_array_equal(encoded.weights, [0.25, 1.0, 0.0])
+    np.testing.assert_array_equal(encoded.weights, [0.25, 1.0, 0.5])
 
 
