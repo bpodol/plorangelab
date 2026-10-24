@@ -314,7 +314,7 @@ def benchmark_evaluator_stages() -> None:
 
 
 if __name__ == "__main__":
-    benchmark_evaluator_stages()
+    # benchmark_evaluator_stages()
     benchmark_numba_evaluate_hands_parallel()
     # benchmark_numba_evaluate_hands()
     # Uncomment when needed:

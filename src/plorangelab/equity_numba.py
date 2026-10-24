@@ -5,7 +5,7 @@ from plorangelab.evaluator_numba import numba_evaluate_hands
 from itertools import combinations, product
 from math import comb, prod
 from typing import Literal
-from numba import njit
+from numba import njit, prange
 from numba.typed import List
 
 @njit(cache=True)
@@ -237,7 +237,7 @@ def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float6
 
     return probabilities
 
-@njit(cache=True)
+@njit(parallel=True, cache=True)
 def run_monte_carlo(
     hands: list[NDArray[np.uint8]],
     masks: list[NDArray[np.uint64]],
@@ -287,11 +287,19 @@ def run_monte_carlo(
     selected_masks = np.empty(player_count, dtype=np.uint64)
     selected_hands = np.empty((player_count, mode), dtype=np.uint8)
 
-    players_won_pots = np.zeros(player_count, dtype=np.float64)
-
     simulations = 0
     attempts = 0
     max_attempts = max(10_000, samples * 20)
+
+    sampled_hands = np.empty(
+        (samples, player_count, mode),
+        dtype=np.uint8
+    )    
+
+    sampled_boards = np.empty(
+        (samples, 5),
+        dtype=np.uint8
+    )   
 
     while simulations < samples:
         if attempts >= max_attempts:
@@ -323,31 +331,45 @@ def run_monte_carlo(
             card, deck_state = deal_card(deck_state, rng)
             current_board[board_len + j] = card
 
-        # Evaluate all players on the completed board.
-     
-        scores = numba_evaluate_hands(selected_hands, current_board)
-
-        # Determine the winning score.
-        highest_score = -1
-        highest_scores_count = 0
-
-        for score in scores:
-            if score > highest_score:
-                highest_score = score
-                highest_scores_count = 1
-            elif score == highest_score:
-                highest_scores_count += 1
-
-        # Distribute the pot equally among tied winners.
-        for i in range(player_count):
-            if scores[i] == highest_score:
-                players_won_pots[i] += 1.0 / highest_scores_count
+        sampled_hands[simulations] = selected_hands
+        sampled_boards[simulations] = current_board
 
         simulations += 1
 
+    pot_shares = np.zeros((samples, player_count), dtype=np.float64)    
+
+    for sim in prange(samples):
+
+        scores = numba_evaluate_hands(
+            sampled_hands[sim],
+            sampled_boards[sim],
+        )
+
+        highest_score = scores[0]
+        winners_count = 1
+
+        for player in range(1, player_count):
+            if scores[player] > highest_score:
+                highest_score = scores[player]
+                winners_count = 1
+            elif scores[player] == highest_score:
+                winners_count += 1
+
+        share = 1.0 / winners_count
+
+        for player in range(player_count):
+            if scores[player] == highest_score:
+                pot_shares[sim, player] = share
+
+    players_won_pots = np.zeros(player_count, dtype=np.float64)
+
+    for sim in range(samples):
+        for player in range(player_count):
+            players_won_pots[player] += pot_shares[sim, player]
+
     return {
-        f"player {i + 1}:": float(players_won_pots[i] / simulations)
-        for i in range(player_count)
+        f"player {player + 1}:": float(players_won_pots[player] / simulations)
+        for player in range(player_count)
     }
 
 def run_exact_equity(

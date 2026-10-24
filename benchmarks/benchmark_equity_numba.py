@@ -189,10 +189,14 @@ def main() -> None:
         "--core", action="store_true",
         help="Also benchmark run_monte_carlo() with preparation excluded",
     )
+    parser.add_argument("--threads", type=int, default=8)
     args = parser.parse_args()
     if args.samples <= 0 or args.repeats <= 0:
         parser.error("--samples and --repeats must be positive")
+    if not 1 <= args.threads <= numba.config.NUMBA_NUM_THREADS:
+        parser.error("Invalid Numba thread count")
 
+    numba.set_num_threads(args.threads)
     print(
         f"Python {sys.version.split()[0]} | NumPy {np.__version__} | "
         f"Numba {numba.__version__} | threads {numba.get_num_threads()}\n"

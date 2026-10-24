@@ -99,7 +99,10 @@ def numba_rank_combination(cards: NDArray[np.uint8]) -> int:
         if is_straight:
             straight_high = 3 if r0 == 12 and r1 == 3 else r0
             return numba_calculate_rank(c=4, r1=straight_high)
-
+        
+        # HIGH CARD
+        return numba_calculate_rank(c=0, r1=r0, r2=r1, r3=r2, r4=r3, r5=r4)
+    
     # FOUR OF A KIND
     if pattern == 0b0111:  # AAAAK
         return numba_calculate_rank(7, r0, r4)
@@ -113,7 +116,7 @@ def numba_rank_combination(cards: NDArray[np.uint8]) -> int:
 
     if pattern == 0b1101:  # AAKKK
         return numba_calculate_rank(6, r2, r0)
-
+ 
     # THREE OF A KIND
     if pattern == 0b0011:  # AAAKQ
         return numba_calculate_rank(3, r0, r3, r4)
@@ -147,9 +150,7 @@ def numba_rank_combination(cards: NDArray[np.uint8]) -> int:
     if pattern == 0b1000:  # KQJAA
         return numba_calculate_rank(1, r3, r0, r1, r2)
 
-    # HIGH CARD
-    return numba_calculate_rank(c=0, r1=r0, r2=r1, r3=r2, r4=r3, r5=r4)
-
+    raise ValueError("Invalid five-card rank pattern")
     
 
 
