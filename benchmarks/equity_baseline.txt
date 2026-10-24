@@ -1,0 +1,195 @@
+Python 3.14.7 | NumPy 2.5.4 | Numba 0.68.0 | threads 8
+Platform: Windows-11-10.0.26200-SP0 | suite=full, samples=1000, repeats=5
+
+=== MONTE CARLO: public API (validation + preparation + simulation) ===
+PLO4 | 2 players | preflop | 10 hands/range | disjoint pools
+  Median: 116.70 ms/call | MAD: 1.44 ms | Min/Max: 114.66/132.43 ms
+  Throughput: 8,569 valid simulations/sec
+
+PLO4 | 2 players | preflop | 10 hands/range | disjoint pools | simulation core only
+  Median: 127.23 ms/call | MAD: 3.68 ms | Min/Max: 123.55/151.84 ms
+  Throughput: 7,860 valid simulations/sec
+
+PLO4 | 2 players | flop | 10 hands/range | disjoint pools
+  Median: 113.49 ms/call | MAD: 6.37 ms | Min/Max: 103.80/119.90 ms
+  Throughput: 8,812 valid simulations/sec
+
+PLO4 | 2 players | flop | 10 hands/range | disjoint pools | simulation core only
+  Median: 110.46 ms/call | MAD: 5.89 ms | Min/Max: 104.57/143.11 ms
+  Throughput: 9,053 valid simulations/sec
+
+PLO4 | 2 players | turn | 10 hands/range | disjoint pools
+  Median: 110.25 ms/call | MAD: 8.79 ms | Min/Max: 100.37/125.25 ms
+  Throughput: 9,071 valid simulations/sec
+
+PLO4 | 2 players | turn | 10 hands/range | disjoint pools | simulation core only
+  Median: 104.92 ms/call | MAD: 1.35 ms | Min/Max: 102.48/108.79 ms
+  Throughput: 9,531 valid simulations/sec
+
+PLO4 | 2 players | river | 10 hands/range | disjoint pools
+  Median: 95.24 ms/call | MAD: 0.56 ms | Min/Max: 94.68/116.99 ms
+  Throughput: 10,500 valid simulations/sec
+
+PLO4 | 2 players | river | 10 hands/range | disjoint pools | simulation core only
+  Median: 94.37 ms/call | MAD: 0.75 ms | Min/Max: 93.62/96.42 ms
+  Throughput: 10,596 valid simulations/sec
+
+PLO5 | 2 players | preflop | 10 hands/range | disjoint pools
+  Median: 151.29 ms/call | MAD: 1.66 ms | Min/Max: 149.55/154.70 ms
+  Throughput: 6,610 valid simulations/sec
+
+PLO5 | 2 players | preflop | 10 hands/range | disjoint pools | simulation core only
+  Median: 152.77 ms/call | MAD: 3.70 ms | Min/Max: 148.52/167.06 ms
+  Throughput: 6,546 valid simulations/sec
+
+PLO5 | 2 players | flop | 10 hands/range | disjoint pools
+  Median: 140.88 ms/call | MAD: 0.33 ms | Min/Max: 140.55/141.57 ms
+  Throughput: 7,098 valid simulations/sec
+
+PLO5 | 2 players | flop | 10 hands/range | disjoint pools | simulation core only
+  Median: 176.98 ms/call | MAD: 17.41 ms | Min/Max: 142.97/226.81 ms
+  Throughput: 5,650 valid simulations/sec
+
+PLO5 | 2 players | turn | 10 hands/range | disjoint pools
+  Median: 150.52 ms/call | MAD: 2.42 ms | Min/Max: 148.10/170.52 ms
+  Throughput: 6,643 valid simulations/sec
+
+PLO5 | 2 players | turn | 10 hands/range | disjoint pools | simulation core only
+  Median: 150.32 ms/call | MAD: 12.51 ms | Min/Max: 137.81/171.81 ms
+  Throughput: 6,652 valid simulations/sec
+
+PLO5 | 2 players | river | 10 hands/range | disjoint pools
+  Median: 133.77 ms/call | MAD: 4.32 ms | Min/Max: 129.07/138.75 ms
+  Throughput: 7,475 valid simulations/sec
+
+PLO5 | 2 players | river | 10 hands/range | disjoint pools | simulation core only
+  Median: 141.07 ms/call | MAD: 2.98 ms | Min/Max: 135.39/170.29 ms
+  Throughput: 7,089 valid simulations/sec
+
+PLO4 | 4 players | river | 10 hands/range | disjoint pools
+  Median: 188.78 ms/call | MAD: 2.91 ms | Min/Max: 185.87/204.40 ms
+  Throughput: 5,297 valid simulations/sec
+
+PLO4 | 4 players | river | 10 hands/range | disjoint pools | simulation core only
+  Median: 180.19 ms/call | MAD: 6.20 ms | Min/Max: 173.99/219.56 ms
+  Throughput: 5,550 valid simulations/sec
+
+PLO4 | 6 players | river | 10 hands/range | disjoint pools
+  Median: 259.31 ms/call | MAD: 0.90 ms | Min/Max: 255.24/277.18 ms
+  Throughput: 3,856 valid simulations/sec
+
+PLO4 | 6 players | river | 10 hands/range | disjoint pools | simulation core only
+  Median: 270.97 ms/call | MAD: 15.46 ms | Min/Max: 255.51/297.33 ms
+  Throughput: 3,690 valid simulations/sec
+
+PLO5 | 4 players | river | 10 hands/range | disjoint pools
+  Median: 246.66 ms/call | MAD: 0.29 ms | Min/Max: 246.13/249.25 ms
+  Throughput: 4,054 valid simulations/sec
+
+PLO5 | 4 players | river | 10 hands/range | disjoint pools | simulation core only
+  Median: 247.43 ms/call | MAD: 1.00 ms | Min/Max: 245.71/249.55 ms
+  Throughput: 4,041 valid simulations/sec
+
+PLO5 | 6 players | river | 10 hands/range | disjoint pools
+  Median: 363.23 ms/call | MAD: 1.51 ms | Min/Max: 361.72/377.33 ms
+  Throughput: 2,753 valid simulations/sec
+
+PLO5 | 6 players | river | 10 hands/range | disjoint pools | simulation core only
+  Median: 365.27 ms/call | MAD: 3.50 ms | Min/Max: 361.61/376.79 ms
+  Throughput: 2,738 valid simulations/sec
+
+PLO4 | 2 players | river | 1 hands/range | disjoint pools
+  Median: 98.06 ms/call | MAD: 0.74 ms | Min/Max: 97.32/101.20 ms
+  Throughput: 10,198 valid simulations/sec
+
+PLO4 | 2 players | river | 1 hands/range | disjoint pools | simulation core only
+  Median: 120.46 ms/call | MAD: 10.19 ms | Min/Max: 102.26/131.40 ms
+  Throughput: 8,301 valid simulations/sec
+
+PLO4 | 2 players | river | 100 hands/range | disjoint pools
+  Median: 96.47 ms/call | MAD: 1.07 ms | Min/Max: 95.14/97.67 ms
+  Throughput: 10,366 valid simulations/sec
+
+PLO4 | 2 players | river | 100 hands/range | disjoint pools | simulation core only
+  Median: 102.89 ms/call | MAD: 4.01 ms | Min/Max: 94.46/107.15 ms
+  Throughput: 9,719 valid simulations/sec
+
+PLO5 | 2 players | river | 1 hands/range | disjoint pools
+  Median: 134.09 ms/call | MAD: 0.51 ms | Min/Max: 133.58/150.87 ms
+  Throughput: 7,458 valid simulations/sec
+
+PLO5 | 2 players | river | 1 hands/range | disjoint pools | simulation core only
+  Median: 134.25 ms/call | MAD: 0.64 ms | Min/Max: 133.21/134.95 ms
+  Throughput: 7,449 valid simulations/sec
+
+PLO5 | 2 players | river | 100 hands/range | disjoint pools
+  Median: 131.10 ms/call | MAD: 0.13 ms | Min/Max: 130.59/132.18 ms
+  Throughput: 7,628 valid simulations/sec
+
+PLO5 | 2 players | river | 100 hands/range | disjoint pools | simulation core only
+  Median: 131.44 ms/call | MAD: 0.06 ms | Min/Max: 130.57/133.49 ms
+  Throughput: 7,608 valid simulations/sec
+
+  Weighted hand-tuple acceptance probability: 26.9%
+PLO4 | 2 players | river | 100 hands/range | shared card pool
+  Median: 182.17 ms/call | MAD: 0.21 ms | Min/Max: 181.05/183.96 ms
+  Throughput: 5,489 valid simulations/sec
+
+PLO4 | 2 players | river | 100 hands/range | shared card pool | simulation core only
+  Median: 183.45 ms/call | MAD: 1.05 ms | Min/Max: 181.49/201.54 ms
+  Throughput: 5,451 valid simulations/sec
+
+  Weighted hand-tuple acceptance probability: 10.0%
+PLO5 | 2 players | river | 100 hands/range | shared card pool
+  Median: 396.01 ms/call | MAD: 5.25 ms | Min/Max: 389.16/415.67 ms
+  Throughput: 2,525 valid simulations/sec
+
+PLO5 | 2 players | river | 100 hands/range | shared card pool | simulation core only
+  Median: 396.33 ms/call | MAD: 1.82 ms | Min/Max: 394.45/417.08 ms
+  Throughput: 2,523 valid simulations/sec
+
+=== EXACT: public API (disjoint ranges, no collision rejection) ===
+PLO4 | 2 players | river | 1 hands/range | disjoint pools | 1 exhaustive showdowns
+  Median: 0.24 ms/call | MAD: 0.00 ms | Min/Max: 0.24/0.29 ms
+  Throughput: 4,097 showdowns/sec
+
+PLO4 | 2 players | river | 10 hands/range | disjoint pools | 100 exhaustive showdowns
+  Median: 7.23 ms/call | MAD: 0.05 ms | Min/Max: 7.18/7.33 ms
+  Throughput: 13,834 showdowns/sec
+
+PLO5 | 2 players | river | 1 hands/range | disjoint pools | 1 exhaustive showdowns
+  Median: 0.28 ms/call | MAD: 0.00 ms | Min/Max: 0.28/0.31 ms
+  Throughput: 3,512 showdowns/sec
+
+PLO5 | 2 players | river | 10 hands/range | disjoint pools | 100 exhaustive showdowns
+  Median: 10.74 ms/call | MAD: 0.04 ms | Min/Max: 10.69/11.35 ms
+  Throughput: 9,315 showdowns/sec
+
+PLO4 | 2 players | turn | 1 hands/range | disjoint pools | 40 exhaustive showdowns
+  Median: 2.67 ms/call | MAD: 0.01 ms | Min/Max: 2.66/2.69 ms
+  Throughput: 14,978 showdowns/sec
+
+PLO5 | 2 players | flop | 1 hands/range | disjoint pools | 741 exhaustive showdowns
+  Median: 73.11 ms/call | MAD: 0.14 ms | Min/Max: 72.66/73.99 ms
+  Throughput: 10,135 showdowns/sec
+
+PLO4 | 2 players | river | 100 hands/range | disjoint pools | 10,000 exhaustive showdowns
+  Median: 720.51 ms/call | MAD: 3.56 ms | Min/Max: 713.08/740.84 ms
+  Throughput: 13,879 showdowns/sec
+
+PLO5 | 2 players | river | 100 hands/range | disjoint pools | 10,000 exhaustive showdowns
+  Median: 1072.22 ms/call | MAD: 8.84 ms | Min/Max: 1063.38/1089.57 ms
+  Throughput: 9,326 showdowns/sec
+
+PLO4 | 2 players | flop | 5 hands/range | disjoint pools | 20,500 exhaustive showdowns
+  Median: 1305.04 ms/call | MAD: 6.28 ms | Min/Max: 1296.75/1316.58 ms
+  Throughput: 15,708 showdowns/sec
+
+PLO5 | 2 players | turn | 5 hands/range | disjoint pools | 950 exhaustive showdowns
+  Median: 94.47 ms/call | MAD: 0.68 ms | Min/Max: 93.22/108.85 ms
+  Throughput: 10,056 showdowns/sec
+
+PLO5 | 6 players | river | 1 hands/range | disjoint pools | 1 exhaustive showdowns
+  Median: 0.70 ms/call | MAD: 0.00 ms | Min/Max: 0.69/0.73 ms
+  Throughput: 1,435 showdowns/sec
+
