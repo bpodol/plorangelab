@@ -183,7 +183,7 @@ def exact_scenarios(suite: str) -> list[Scenario]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=("quick", "full"), default="quick")
-    parser.add_argument("--samples", type=int, default=1_000)
+    parser.add_argument("--samples", type=int, default=100_000)
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument(
         "--core", action="store_true",

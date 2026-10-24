@@ -61,29 +61,44 @@ def numba_rank_combination(cards: NDArray[np.uint8]) -> int:
         | (int(r3 == r4) << 3)
         )
 
-    suit = cards[0] & 3
-    is_flush = (
-        (cards[1] & 3) == suit
-        and (cards[2] & 3) == suit
-        and (cards[3] & 3) == suit
-        and (cards[4] & 3) == suit
-    )
+    if pattern == 0b0000:
+        suit = cards[0] & 3
+        is_flush = (
+            (cards[1] & 3) == suit
+            and (cards[2] & 3) == suit
+            and (cards[3] & 3) == suit
+            and (cards[4] & 3) == suit
+        )
 
-    is_straight = (
-        r0 == r1 + 1
-        and r1 == r2 + 1
-        and r2 == r3 + 1
-        and r3 == r4 + 1
-    )
-    is_wheel = (
-        r0 == 12 and r1 == 3 and r2 == 2 and r3 == 1 and r4 == 0
-    )
-    if is_wheel:
-        is_straight = True
+        is_straight = (
+            r0 == r1 + 1
+            and r1 == r2 + 1
+            and r2 == r3 + 1
+            and r3 == r4 + 1
+        )
+        is_wheel = (
+            r0 == 12 and r1 == 3 and r2 == 2 and r3 == 1 and r4 == 0
+        )
+        if is_wheel:
+            is_straight = True
 
-    if is_flush and is_straight:
-        straight_high = 3 if r0 == 12 and r1 == 3 else r0
-        return numba_calculate_rank(c=8, r1=straight_high)
+        if is_flush and is_straight:
+            straight_high = 3 if r0 == 12 and r1 == 3 else r0
+            return numba_calculate_rank(c=8, r1=straight_high)
+
+        if is_flush:
+                return numba_calculate_rank(
+                    c=5, 
+                    r1=r0, 
+                    r2=r1, 
+                    r3=r2,
+                    r4=r3,
+                    r5=r4
+                )
+
+        if is_straight:
+            straight_high = 3 if r0 == 12 and r1 == 3 else r0
+            return numba_calculate_rank(c=4, r1=straight_high)
 
     # FOUR OF A KIND
     if pattern == 0b0111:  # AAAAK
@@ -98,20 +113,6 @@ def numba_rank_combination(cards: NDArray[np.uint8]) -> int:
 
     if pattern == 0b1101:  # AAKKK
         return numba_calculate_rank(6, r2, r0)
-
-    if is_flush:
-        return numba_calculate_rank(
-            c=5, 
-            r1=r0, 
-            r2=r1, 
-            r3=r2,
-            r4=r3,
-            r5=r4
-        )
-
-    if is_straight:
-        straight_high = 3 if r0 == 12 and r1 == 3 else r0
-        return numba_calculate_rank(c=4, r1=straight_high)
 
     # THREE OF A KIND
     if pattern == 0b0011:  # AAAKQ
