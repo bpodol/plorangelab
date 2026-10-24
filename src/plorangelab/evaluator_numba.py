@@ -184,14 +184,45 @@ def _evaluate_hand_core(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> in
                         cards[3] = board[b]
                         cards[4] = board[c]
 
-                        cards.sort()
-                        score = numba_rank_combination(cards[::-1])
+                        sort5_desc(cards)
+                        score = numba_rank_combination(cards)
 
                         if score > best_score:
                             best_score = score
 
     return best_score 
 
+@njit(inline="always")
+def sort5_desc(cards: NDArray[np.uint8]) -> None:
+    """Sort exactly 5 elements in descending order, in-place."""
+
+    if cards[0] < cards[1]:
+        cards[0], cards[1] = cards[1], cards[0]
+
+    if cards[3] < cards[4]:
+        cards[3], cards[4] = cards[4], cards[3]
+
+    if cards[2] < cards[4]:
+        cards[2], cards[4] = cards[4], cards[2]
+
+    if cards[2] < cards[3]:
+        cards[2], cards[3] = cards[3], cards[2]
+
+    if cards[1] < cards[4]:
+        cards[1], cards[4] = cards[4], cards[1]
+
+    if cards[0] < cards[3]:
+        cards[0], cards[3] = cards[3], cards[0]
+
+    if cards[0] < cards[2]:
+        cards[0], cards[2] = cards[2], cards[0]
+
+    if cards[1] < cards[3]:
+        cards[1], cards[3] = cards[3], cards[1]
+
+    if cards[1] < cards[2]:
+        cards[1], cards[2] = cards[2], cards[1]
+        
 @njit(cache=True)
 def numba_evaluate_hands(hands: NDArray[np.uint8], board: NDArray[np.uint8]) -> NDArray[np.uint32]:
     evaluations = np.empty(hands.shape[0], dtype=np.uint32)

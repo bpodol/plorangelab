@@ -1,7 +1,7 @@
 """Reproducible benchmarks for PLO RangeLab.
 
 Run from the repository root:
-    uv run python benchmarks/benchmarks.py
+    uv run python benchmarks/benchmarks_evaluator.py
 """
 
 import random
@@ -14,8 +14,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from plorangelab.encoder import encode_board, encode_range
-from plorangelab.equity import evaluate_hands
-from plorangelab.equity_numba import numba_evaluate_hands, numba_evaluate_hands_parallel    
+from plorangelab.evaluator import evaluate_hands
+from plorangelab.evaluator_numba import (
+    numba_evaluate_hands,
+    numba_evaluate_hands_parallel,
+    numba_rank_combination,
+)
+from numba import njit
 
 
 def benchmark(
@@ -139,8 +144,178 @@ def benchmark_numba_evaluate_hands_parallel() -> None:
             )
 
 
+
+# -------- Evaluator microbenchmarks (sequential JIT, no threading) --------
+# The checksum makes all five card writes observable to the compiler.
+# We use the exact same combinatorial iteration and checksum in every stage.
+# Consequently, the incremental differences are more useful than the
+# absolute costs. These are *diagnostic* kernels, not production evaluators.
+
+
+@njit(cache=True)
+def _checksum_cards(cards: NDArray[np.uint8]) -> int:
+    # Order-sensitive: sorting changes the result, so the sort cannot be elided.
+    return (
+        int(cards[0])
+        + 3 * int(cards[1])
+        + 5 * int(cards[2])
+        + 7 * int(cards[3])
+        + 11 * int(cards[4])
+    )
+
+
+@njit(cache=True)
+def _generate_only(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> int:
+    cards = np.empty(5, dtype=np.uint8)
+    checksum = 0
+
+    for i in range(len(hand) - 1):
+        for j in range(i + 1, len(hand)):
+            for a in range(3):
+                for b in range(a + 1, 4):
+                    for c in range(b + 1, 5):
+                        cards[0] = hand[i]
+                        cards[1] = hand[j]
+                        cards[2] = board[a]
+                        cards[3] = board[b]
+                        cards[4] = board[c]
+
+                        checksum += _checksum_cards(cards)
+
+    return checksum
+
+@njit(inline="always")
+def sort5_desc(cards: NDArray[np.uint8]) -> None:
+    """Sort exactly 5 elements in descending order, in-place."""
+
+    if cards[0] < cards[1]:
+        cards[0], cards[1] = cards[1], cards[0]
+
+    if cards[3] < cards[4]:
+        cards[3], cards[4] = cards[4], cards[3]
+
+    if cards[2] < cards[4]:
+        cards[2], cards[4] = cards[4], cards[2]
+
+    if cards[2] < cards[3]:
+        cards[2], cards[3] = cards[3], cards[2]
+
+    if cards[1] < cards[4]:
+        cards[1], cards[4] = cards[4], cards[1]
+
+    if cards[0] < cards[3]:
+        cards[0], cards[3] = cards[3], cards[0]
+
+    if cards[0] < cards[2]:
+        cards[0], cards[2] = cards[2], cards[0]
+
+    if cards[1] < cards[3]:
+        cards[1], cards[3] = cards[3], cards[1]
+
+    if cards[1] < cards[2]:
+        cards[1], cards[2] = cards[2], cards[1]
+
+@njit(cache=True)
+def _generate_and_sort(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> int:
+    cards = np.empty(5, dtype=np.uint8)
+    checksum = 0
+
+    for i in range(len(hand) - 1):
+        for j in range(i + 1, len(hand)):
+            for a in range(3):
+                for b in range(a + 1, 4):
+                    for c in range(b + 1, 5):
+                        cards[0] = hand[i]
+                        cards[1] = hand[j]
+                        cards[2] = board[a]
+                        cards[3] = board[b]
+                        cards[4] = board[c]
+
+                        sort5_desc(cards)
+                        checksum += _checksum_cards(cards)
+
+    return checksum
+
+
+@njit(cache=True)
+def _generate_sort_and_rank(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> int:
+    cards = np.empty(5, dtype=np.uint8)
+    checksum = 0
+    best_score = -1
+
+    for i in range(len(hand) - 1):
+        for j in range(i + 1, len(hand)):
+            for a in range(3):
+                for b in range(a + 1, 4):
+                    for c in range(b + 1, 5):
+                        cards[0] = hand[i]
+                        cards[1] = hand[j]
+                        cards[2] = board[a]
+                        cards[3] = board[b]
+                        cards[4] = board[c]
+
+                        sort5_desc(cards)
+                        checksum += _checksum_cards(cards)
+                        score = numba_rank_combination(cards)
+                        if score > best_score:
+                            best_score = score
+
+    return checksum + best_score
+
+
+@njit(cache=True)
+def _run_stage(
+    hands: NDArray[np.uint8],
+    board: NDArray[np.uint8],
+    stage: int,
+) -> NDArray[np.int64]:
+    results = np.empty(hands.shape[0], dtype=np.int64)
+    for i in range(hands.shape[0]):
+        if stage == 1:
+            results[i] = _generate_only(hands[i], board)
+        elif stage == 2:
+            results[i] = _generate_and_sort(hands[i], board)
+        else:
+            results[i] = _generate_sort_and_rank(hands[i], board)
+    return results
+
+
+def benchmark_evaluator_stages() -> None:
+    board = encode_board("2c3d4h5s6c")
+    print("\n=== EVALUATOR STAGES (sequential Numba) ===")
+
+    for mode in (4, 5):
+        n = 10_000
+        hands = generate_hands(n, mode, board)
+        print(f"\nPLO{mode}: {10 * (mode * (mode - 1) // 2)} combinations/hand")
+
+        for stage, title in (
+            (1, "1. Generate combinations only"),
+            (2, "2. Generate + sort"),
+            (3, "3. Generate + sort + rank"),
+        ):
+            benchmark(
+                f"PLO{mode} | {title}",
+                lambda stage=stage: _run_stage(hands, board, stage),
+                items_per_call=n,
+                iterations=1,
+                repeats=11,
+            )
+
+        # Separately measure the real function to quantify checksum/profiling
+        # overhead. Do not conflate its result with stage 3's result.
+        benchmark(
+            f"PLO{mode} | Production numba_evaluate_hands (reference)",
+            lambda: numba_evaluate_hands(hands, board),
+            items_per_call=n,
+            iterations=1,
+            repeats=11,
+        )
+
+
 if __name__ == "__main__":
-    benchmark_numba_evaluate_hands_parallel()
+    benchmark_evaluator_stages()
+    # benchmark_numba_evaluate_hands_parallel()
     # benchmark_numba_evaluate_hands()
     # Uncomment when needed:
     #benchmark_evaluate_hands()

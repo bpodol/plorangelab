@@ -6,6 +6,8 @@ from itertools import combinations, product
 from math import comb, prod
 from typing import Literal
 
+
+
 def check_collisions(masks: NDArray[np.uint64]) -> bool:
     """Return whether any two selected hand masks contain a shared card.
 
@@ -22,6 +24,7 @@ def check_collisions(masks: NDArray[np.uint64]) -> bool:
         used_mask |= mask
 
     return False
+
 
 def deal_card(deck: np.uint64, rng: np.random.Generator) -> tuple[int, np.uint64]:
     """Draw one uniformly random available card and return the updated deck mask.
@@ -232,6 +235,7 @@ def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float6
         probabilities.append(weights / total)
 
     return probabilities
+
 
 def run_monte_carlo(
     players: list[EncodedRange],
