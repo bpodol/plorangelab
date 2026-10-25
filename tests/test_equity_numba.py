@@ -105,34 +105,26 @@ def test_board_blocked_hands_are_removed_before_calculation() -> None:
     assert equity == {"player 1:": 0.0, "player 2:": 1.0}
 
 
-def test_exact_equity_never_passes_colliding_hands_to_evaluator(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The first P1 hand overlaps P2 and would beat P2 if it were evaluated.
-    # The only legal P1 hand is weaker than P2's ace-high hand on this board.
+def test_exact_equity_excludes_colliding_hands() -> None:
+    # P1's first hand collides with P2 and would win.
+    # P1's only compatible hand loses.
+
     players = [
         encode_range("AsAhKdQc,KcQdJhTh", 4),
         encode_range("AsQsJcTc", 4),
     ]
-    original_evaluator = equity_module.numba_evaluate_hands
-    calls = 0
 
-    def collision_checking_evaluator(hands: np.ndarray, board: np.ndarray) -> np.ndarray:
-        nonlocal calls
-        calls += 1
-        masks = np.asarray([build_mask(hand) for hand in hands], dtype=np.uint64)
-        assert not equity_module.check_collisions(masks)
-        return original_evaluator(hands, board)
-
-    # Safe: run_exact_equity is ordinary Python and calls the evaluator dynamically.
-    # Never monkeypatch this global while compiling or running Numba Monte Carlo.
-    monkeypatch.setattr(equity_module, "numba_evaluate_hands", collision_checking_evaluator)
     equity = compute_equity(
-        players, mode=4, board=encode_board(RIVER), method="exact"
+        players,
+        mode=4,
+        board=encode_board(RIVER),
+        method="exact",
     )
 
-    assert calls == 1  # Only the compatible matchup reaches the evaluator.
-    assert equity == {"player 1:": 0.0, "player 2:": 1.0}
+    assert equity == {
+        "player 1:": 0.0,
+        "player 2:": 1.0,
+    }
 
 
 def test_monte_carlo_rejects_colliding_hands() -> None:

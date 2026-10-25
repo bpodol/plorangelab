@@ -16,7 +16,7 @@ import timeit
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import combinations, islice
-from math import comb, prod
+from math import comb, isqrt, prod
 
 import numba
 import numpy as np
@@ -28,6 +28,7 @@ from plorangelab.equity_numba import (
     compute_equity,
     prepare_probabilities,
     prepare_ranges,
+    run_exact_equity,
 )
 
 
@@ -186,6 +187,74 @@ def exact_scenarios(suite: str) -> list[Scenario]:
     ]
 
 
+def make_exact_target_inputs(
+    mode: int,
+    target_showdowns: int,
+    overlap: bool,
+) -> tuple[Scenario, list[EncodedRange], np.ndarray, int, int]:
+    """Create deterministic river inputs near a target of actual evaluations.
+
+    For overlapping ranges, the estimated workload is the Cartesian product
+    of candidate hands while the actual count includes only collision-free
+    matchups. Shared hands are selected from a 16-card pool to make collisions
+    frequent.
+    """
+    rng = random.Random(2026 + mode * 100 + target_showdowns + overlap)
+    deck = list(range(52))
+    rng.shuffle(deck)
+    board = np.asarray(deck[:5], dtype=np.uint8)
+    available = deck[5:]
+
+    if overlap:
+        candidates = list(combinations(available[:16], mode))
+        rng.shuffle(candidates)
+        masks = [sum(1 << card for card in hand) for hand in candidates]
+
+        compatible_pairs = 0
+        best_range_size = 1
+        best_delta = target_showdowns
+        for range_size, mask in enumerate(masks, start=1):
+            compatible_previous = sum(
+                not (mask & previous_mask)
+                for previous_mask in masks[: range_size - 1]
+            )
+            compatible_pairs += 2 * compatible_previous
+            delta = abs(compatible_pairs - target_showdowns)
+            if delta < best_delta:
+                best_range_size = range_size
+                best_delta = delta
+            if compatible_pairs >= target_showdowns:
+                break
+
+        hands = candidates[:best_range_size]
+        players = [make_range(hands, rng), make_range(hands, rng)]
+        range_size = best_range_size
+    else:
+        range_size = isqrt(target_showdowns)
+        if (range_size + 1) ** 2 - target_showdowns < (
+            target_showdowns - range_size**2
+        ):
+            range_size += 1
+        pool_size = len(available) // 2
+        players = []
+        for player_index in range(2):
+            pool = available[player_index * pool_size : (player_index + 1) * pool_size]
+            hands = list(islice(combinations(pool, mode), range_size))
+            players.append(make_range(hands, rng))
+
+    scenario = Scenario(mode, 2, 5, range_size, overlap=overlap)
+    positive_hand_counts = [int(np.count_nonzero(p.weights > 0)) for p in players]
+    runouts_per_matchup = comb(52 - len(board) - 2 * mode, 0)
+    estimated_showdowns = prod(positive_hand_counts) * runouts_per_matchup
+    compatible_matchups = int(
+        np.count_nonzero(
+            (players[0].masks[:, None] & players[1].masks[None, :]) == 0
+        )
+    )
+    actual_showdowns = compatible_matchups * runouts_per_matchup
+    return scenario, players, board, estimated_showdowns, actual_showdowns
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=("quick", "full"), default="quick")
@@ -300,6 +369,31 @@ def main() -> None:
             ),
             work_per_call=showdowns, unit="showdowns", repeats=args.repeats,
         )
+
+    print("=== EXACT: targeted actual showdown counts ===")
+    for mode in (4, 5):
+        for target_showdowns in (10_000, 100_000):
+            for overlap in (False, True):
+                s, players, board, estimated, actual = make_exact_target_inputs(
+                    mode, target_showdowns, overlap
+                )
+                print(
+                    f"{s.label}\n"
+                    f"  Showdowns: {estimated:,} estimated candidate evaluations; "
+                    f"{actual:,} actual collision-free evaluations"
+                )
+                benchmark(
+                    s.label + f" | {actual:,} actual evaluations",
+                    lambda players=players, board=board, s=s: run_exact_equity(
+                        players,
+                        mode=s.mode,
+                        board=board,
+                        max_showdowns=None,
+                    ),
+                    work_per_call=actual,
+                    unit="actual showdowns",
+                    repeats=args.repeats,
+                )
 
 if __name__ == "__main__":
     main()

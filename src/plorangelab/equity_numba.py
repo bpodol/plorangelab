@@ -383,15 +383,170 @@ def _run_monte_carlo_batch(
 
     return share_sums, squared_share_sums, simulations, attempts
 
+
+@njit(cache=True)
+def _run_exact_equity_kernel(
+    hands,
+    masks,
+    weights,
+    board,
+    board_mask,
+    mode,
+):
+    """
+    Enumerate all compatible matchups and board runouts.
+
+    Args:
+        hands: Numba typed list of uint8 hand arrays.
+        masks: Numba typed list of uint64 mask arrays.
+        weights: Numba typed list of normalized float64 weights.
+        board: Known board cards, or None.
+        board_mask: Bitmask of known board cards.
+        mode: 4 or 5.
+
+    Returns:
+        (weighted_pot_shares, total_weight)
+    """
+    player_count = len(hands)
+    board_len = 0 if board is None else len(board)
+    missing_board = 5 - board_len
+
+    selected_hands = np.empty(
+        (player_count, mode), dtype=np.uint8
+    )
+    current_board = np.empty(5, dtype=np.uint8)
+
+    if board is not None:
+        for j in range(board_len):
+            current_board[j] = board[j]
+
+    # Reusable buffers.
+    available = np.empty(52, dtype=np.uint8)
+    runout_indices = np.empty(5, dtype=np.int64)
+    hand_indices = np.zeros(player_count, dtype=np.int64)
+
+    pot_shares = np.zeros(player_count, dtype=np.float64)
+    total_weight = 0.0
+
+    # Enumerate the Cartesian product of player ranges.
+    while True:
+        used_mask = board_mask
+        matchup_weight = 1.0
+        valid = True
+
+        for p in range(player_count):
+            index = hand_indices[p]
+            hand_mask = masks[p][index]
+
+            if used_mask & hand_mask:
+                valid = False
+                break
+
+            used_mask |= hand_mask
+            matchup_weight *= weights[p][index]
+
+            if matchup_weight == 0.0:
+                valid = False
+                break
+
+            for c in range(mode):
+                selected_hands[p, c] = hands[p][index, c]
+
+        if valid:
+            # Build the deck remaining after blockers.
+            available_count = 0
+
+            for card in range(52):
+                bit = np.uint64(1) << np.uint64(card)
+
+                if (used_mask & bit) == 0:
+                    available[available_count] = card
+                    available_count += 1
+
+            # Initialize lexicographic combination indices.
+            for j in range(missing_board):
+                runout_indices[j] = j
+
+            # Enumerate every possible board completion.
+            while True:
+                for j in range(missing_board):
+                    current_board[board_len + j] = (
+                        available[runout_indices[j]]
+                    )
+
+                scores = numba_evaluate_hands(
+                    selected_hands,
+                    current_board,
+                )
+
+                highest_score = scores[0]
+
+                for p in range(1, player_count):
+                    if scores[p] > highest_score:
+                        highest_score = scores[p]
+
+                winners_count = 0
+
+                for p in range(player_count):
+                    if scores[p] == highest_score:
+                        winners_count += 1
+
+                share = matchup_weight / winners_count
+
+                for p in range(player_count):
+                    if scores[p] == highest_score:
+                        pot_shares[p] += share
+
+                total_weight += matchup_weight
+
+                # A complete river board has one runout.
+                if missing_board == 0:
+                    break
+
+                # Advance to the next board combination.
+                j = missing_board - 1
+
+                while (
+                    j >= 0
+                    and runout_indices[j]
+                    == available_count - missing_board + j
+                ):
+                    j -= 1
+
+                if j < 0:
+                    break
+
+                runout_indices[j] += 1
+
+                for k in range(j + 1, missing_board):
+                    runout_indices[k] = (
+                        runout_indices[k - 1] + 1
+                    )
+
+        # Advance to the next combination of player hands.
+        p = player_count - 1
+
+        while p >= 0:
+            hand_indices[p] += 1
+
+            if hand_indices[p] < len(hands[p]):
+                break
+
+            hand_indices[p] = 0
+            p -= 1
+
+        if p < 0:
+            break
+
+    return pot_shares, total_weight
+
 def run_exact_equity(
     players: list[EncodedRange],
     mode: Mode,
     board: NDArray[np.uint8] | None = None,
     max_showdowns: int | None = 100_000,
 ) -> dict[str, float]:
-    """
-    Calculate exact equity by enumerating all compatible hand combinations
-    and all possible remaining board runouts.
+    """Calculate exact weighted equity using a sequential Numba kernel.
 
     Args:
         players: Validated, board-filtered player ranges.
@@ -401,7 +556,7 @@ def run_exact_equity(
             None disables the limit.
 
     Returns:
-        Exact weighted equity for each player, as a fraction from 0 to 1.
+        Exact equity for each player as a fraction from 0 to 1.
 
     Raises:
         ValueError: If no compatible positive-weight matchups exist.
@@ -411,15 +566,24 @@ def run_exact_equity(
     board_len = 0 if board is None else len(board)
     missing_board = 5 - board_len
 
-    board_mask = 0 if board is None else int(build_mask(board))
+    board_mask = (
+        np.uint64(0)
+        if board is None
+        else build_mask(board)
+    )
 
-    # Only enumerate hands with positive weights.
+    # Exclude zero-weight hands from enumeration.
     valid_indices = [
         np.flatnonzero(player.weights > 0)
         for player in players
     ]
 
-    # Estimate an upper bound on the number of evaluations.
+    if any(len(indices) == 0 for indices in valid_indices):
+        raise ValueError(
+            "No compatible positive-weight hand combinations exist"
+        )
+    
+    # Conservative upper bound that ignores collisions.
     remaining_cards = 52 - board_len - player_count * mode
 
     estimated_showdowns = (
@@ -432,82 +596,38 @@ def run_exact_equity(
         and estimated_showdowns > max_showdowns
     ):
         raise RuntimeError(
-            f"Exact calculation exceeds the workload limit: "
+            "Exact calculation exceeds the workload limit: "
             f"{estimated_showdowns:,} estimated showdowns"
         )
 
-    selected_hands = np.empty(
-        (player_count, mode),
-        dtype=np.uint8,
+    # Prepare contiguous NumPy arrays for the compiled kernel.
+    hands = List()
+    masks = List()
+    weights = List()
+
+    for player, indices in zip(players, valid_indices):
+        player_weights = player.weights.astype(np.float64)
+        player_weights /= player_weights.sum()
+
+        hands.append(
+            np.ascontiguousarray(player.hands[indices])
+        )
+        masks.append(
+            np.ascontiguousarray(player.masks[indices])
+        )
+        weights.append(
+            np.ascontiguousarray(player_weights[indices])
+        )
+
+    # Enumerate and evaluate entirely inside Numba.
+    pot_shares, total_weight = _run_exact_equity_kernel(
+        hands=hands,
+        masks=masks,
+        weights=weights,
+        board=board,
+        board_mask=board_mask,
+        mode=mode,
     )
-
-    current_board = np.empty(5, dtype=np.uint8)
-
-    if board is not None:
-        current_board[:board_len] = board
-
-    pot_shares = np.zeros(player_count, dtype=np.float64)
-    total_weight = 0.0
-    normalized_weights = [
-        player.weights.astype(np.float64)
-        / player.weights.sum(dtype=np.float64)
-        for player in players
-    ]
-
-    # Enumerate every combination of player hands.
-    for indices in product(*valid_indices):
-        used_mask = board_mask
-        matchup_weight = 1.0
-
-        # Check card collisions and calculate matchup weight.
-        for i, hand_index in enumerate(indices):
-            player = players[i]
-            hand_mask = int(player.masks[hand_index])
-
-            if used_mask & hand_mask:
-                break
-
-            used_mask |= hand_mask
-            matchup_weight *= normalized_weights[i][hand_index]
-            selected_hands[i] = player.hands[hand_index]
-
-        else:
-            # Executed only if no collision caused a break.
-
-            available_cards = [
-                card
-                for card in range(52)
-                if not (used_mask & (1 << card))
-            ]
-
-            # Enumerate every possible board completion.
-            # When missing_board == 0, this yields one empty tuple.
-            for runout in combinations(
-                available_cards,
-                missing_board,
-            ):
-                if missing_board:
-                    current_board[board_len:] = runout
-
-                scores = numba_evaluate_hands(
-                    selected_hands,
-                    current_board,
-                )
-
-                highest_score = max(scores)
-
-                winners_count = sum(
-                    score == highest_score
-                    for score in scores
-                )
-
-                share = matchup_weight / winners_count
-
-                for i, score in enumerate(scores):
-                    if score == highest_score:
-                        pot_shares[i] += share
-
-                total_weight += matchup_weight
 
     if total_weight == 0:
         raise ValueError(
@@ -515,9 +635,12 @@ def run_exact_equity(
         )
 
     return {
-        f"player {i + 1}:": float(pot_shares[i] / total_weight)
+        f"player {i + 1}:": float(
+            pot_shares[i] / total_weight
+        )
         for i in range(player_count)
     }
+
 
 def _positive_integer(value: object, name: str) -> int:
     if (
