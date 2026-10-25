@@ -2,7 +2,9 @@
 
 Run with ``uv run python benchmarks/benchmark_equity_numba.py``; use
 ``--suite full`` for the larger scenario set, or ``--core`` to include
-coordinator-only timings.
+coordinator-only timings. Use ``--exact-streets`` to benchmark exact equity
+across flop, turn, and river only, or ``--exact-parallel`` to compare the
+sequential and worker-local parallel exact kernels.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ from numba.typed import List
 from plorangelab.encoder import EncodedRange, build_mask
 from plorangelab.equity_numba import (
     _run_batched_monte_carlo,
+    _run_exact_equity_kernel,
+    _run_exact_equity_kernel_parallel,
     compute_equity,
     prepare_probabilities,
     prepare_ranges,
@@ -119,7 +123,8 @@ def benchmark(
     work_per_call: int,
     unit: str,
     repeats: int,
-) -> None:
+    print_result: bool = True,
+) -> tuple[float, float]:
     """Report robust wall time and throughput, excluding initial compilation."""
     result = func()  # Warm up Numba; do not time first-call JIT compilation.
     if not np.isclose(sum(result.values()), 1.0, atol=1e-10):
@@ -128,13 +133,15 @@ def benchmark(
     seconds = timeit.repeat(func, number=1, repeat=repeats)
     median_s = statistics.median(seconds)
     mad_s = statistics.median(abs(t - median_s) for t in seconds)
-    print(
-        f"{name}\n"
-        f"  Median: {median_s * 1000:.2f} ms/call | "
-        f"MAD: {mad_s * 1000:.2f} ms | "
-        f"Min/Max: {min(seconds) * 1000:.2f}/{max(seconds) * 1000:.2f} ms\n"
-        f"  Throughput: {work_per_call / median_s:,.0f} {unit}/sec\n"
-    )
+    if print_result:
+        print(
+            f"{name}\n"
+            f"  Median: {median_s * 1000:.2f} ms/call | "
+            f"MAD: {mad_s * 1000:.2f} ms | "
+            f"Min/Max: {min(seconds) * 1000:.2f}/{max(seconds) * 1000:.2f} ms\n"
+            f"  Throughput: {work_per_call / median_s:,.0f} {unit}/sec\n"
+        )
+    return median_s, mad_s
 
 
 def mc_scenarios(suite: str) -> list[Scenario]:
@@ -255,6 +262,427 @@ def make_exact_target_inputs(
     return scenario, players, board, estimated_showdowns, actual_showdowns
 
 
+def choose_exact_street_range_sizes(
+    mode: int,
+    board_cards: int,
+    target_showdowns: int,
+) -> tuple[int, int, int]:
+    """Choose disjoint range sizes near a target without exceeding the API cap."""
+    available_cards = 52 - board_cards
+    pool_size = available_cards // 2
+    max_hands = comb(pool_size, mode)
+    runouts = comb(52 - board_cards - 2 * mode, 5 - board_cards)
+    max_product = min(max_hands**2, 100_000 // runouts)
+
+    best_counts = (1, 1)
+    best_actual = runouts
+    best_key = (abs(best_actual - target_showdowns), 0)
+    for first_count in range(1, min(max_hands, max_product) + 1):
+        max_second = min(max_hands, max_product // first_count)
+        floor_second = target_showdowns // (runouts * first_count)
+        candidates = {
+            max(1, min(max_second, floor_second)),
+            max(1, min(max_second, floor_second + 1)),
+        }
+        for second_count in candidates:
+            actual = first_count * second_count * runouts
+            key = (abs(actual - target_showdowns), abs(first_count - second_count))
+            if key < best_key:
+                best_counts = first_count, second_count
+                best_actual = actual
+                best_key = key
+
+    return best_counts[0], best_counts[1], best_actual
+
+
+def make_exact_street_inputs(
+    mode: int,
+    board_cards: int,
+    target_showdowns: int,
+) -> tuple[list[EncodedRange], np.ndarray, tuple[int, int], int]:
+    """Build deterministic, collision-free ranges for an exact street case."""
+    first_count, second_count, actual_showdowns = choose_exact_street_range_sizes(
+        mode, board_cards, target_showdowns
+    )
+    rng = random.Random(2026 + 100 * mode + 10 * board_cards + target_showdowns)
+    deck = list(range(52))
+    rng.shuffle(deck)
+    board = np.asarray(deck[:board_cards], dtype=np.uint8)
+    available = deck[board_cards:]
+    pool_size = len(available) // 2
+    players = []
+    for player_index, hand_count in enumerate((first_count, second_count)):
+        pool = available[player_index * pool_size : (player_index + 1) * pool_size]
+        hands = list(islice(combinations(pool, mode), hand_count))
+        players.append(make_range(hands, rng))
+
+    return players, board, (first_count, second_count), actual_showdowns
+
+
+def make_unbalanced_exact_inputs(
+    mode: int,
+) -> tuple[list[EncodedRange], np.ndarray, int]:
+    """Build a deterministic collision-free 1-by-1,000 river workload."""
+    rng = random.Random(2026 + mode * 1000)
+    deck = list(range(52))
+    rng.shuffle(deck)
+    board = np.asarray(deck[:5], dtype=np.uint8)
+    available = deck[5:]
+    pool_size = len(available) // 2
+    players = []
+    for player_index, hand_count in enumerate((1, 1_000)):
+        pool = available[player_index * pool_size : (player_index + 1) * pool_size]
+        hands = list(islice(combinations(pool, mode), hand_count))
+        players.append(make_range(hands, rng))
+    return players, board, 1_000
+
+
+def make_exact_parallel_size_inputs(
+    mode: int,
+    target_showdowns: int,
+    collision_profile: str,
+) -> tuple[list[EncodedRange], np.ndarray, int, int]:
+    """Build two deterministic river ranges near a candidate-matchup target."""
+    first_count = isqrt(target_showdowns)
+    second_count = max(1, round(target_showdowns / first_count))
+    profile_seed = {
+        "disjoint": 11,
+        "moderate overlap": 23,
+        "heavy overlap": 37,
+    }[collision_profile]
+    rng = random.Random(20261025 + mode * 100_000 + target_showdowns + profile_seed)
+    deck = list(range(52))
+    rng.shuffle(deck)
+    board = np.asarray(deck[:5], dtype=np.uint8)
+    available = deck[5:]
+
+    if collision_profile == "disjoint":
+        pool_size = len(available) // 2
+        players = []
+        for index, count in enumerate((first_count, second_count)):
+            pool = available[index * pool_size : (index + 1) * pool_size]
+            hands = list(islice(combinations(pool, mode), count))
+            players.append(make_range(hands, rng))
+    else:
+        shared_pool_size = 24 if collision_profile == "moderate overlap" else 16
+        shared_pool = available[:shared_pool_size]
+        candidate_hands = list(combinations(shared_pool, mode))
+        reserved_hands = [
+            tuple(shared_pool[:mode]),
+            tuple(shared_pool[mode : 2 * mode]),
+        ]
+        remaining_hands = [
+            hand for hand in candidate_hands if hand not in reserved_hands
+        ]
+        players = [
+            make_range(
+                [reserved_hands[index]]
+                + rng.sample(remaining_hands, count - 1),
+                rng,
+            )
+            for index, count in enumerate((first_count, second_count))
+        ]
+
+    estimated = len(players[0].hands) * len(players[1].hands)
+    compatible = int(
+        np.count_nonzero(
+            (players[0].masks[:, None] & players[1].masks[None, :]) == 0
+        )
+    )
+    return players, board, estimated, compatible
+
+
+def run_exact_street_benchmarks(repeats: int) -> None:
+    """Compare public exact equity with the prebuilt Numba kernel by street."""
+    street_names = {3: "flop", 4: "turn", 5: "river"}
+    print("=== EXACT STREETS: public API and Numba kernel ===")
+    for mode in (4, 5):
+        for board_cards in (3, 4, 5):
+            for target in (10_000, 100_000):
+                players, board, range_sizes, actual = make_exact_street_inputs(
+                    mode, board_cards, target
+                )
+                runouts = comb(52 - board_cards - 2 * mode, 5 - board_cards)
+                estimated = prod(range_sizes) * runouts
+                if estimated != actual or estimated > 100_000:
+                    raise AssertionError(
+                        "Exact street scenario must have a predictable workload "
+                        "within the public API limit"
+                    )
+
+                label = (
+                    f"PLO{mode} | 2 players | {street_names[board_cards]} | "
+                    f"ranges {range_sizes[0]}x{range_sizes[1]} | disjoint pools"
+                )
+                print(
+                    f"{label}\n"
+                    f"  Showdowns: {actual:,} actual; "
+                    f"{estimated:,} estimated upper bound"
+                )
+                benchmark(
+                    label + " | public API",
+                    lambda players=players, board=board, mode=mode: compute_equity(
+                        players, mode=mode, board=board, method="exact"
+                    ),
+                    work_per_call=actual,
+                    unit="showdowns",
+                    repeats=repeats,
+                )
+
+                valid_players = prepare_ranges(players, board)
+                hands = List([player.hands for player in valid_players])
+                masks = List([player.masks for player in valid_players])
+                weights = List()
+                for player in valid_players:
+                    normalized = player.weights.astype(np.float64)
+                    normalized /= normalized.sum(dtype=np.float64)
+                    weights.append(normalized)
+                board_mask = build_mask(board)
+
+                def kernel_call(
+                    hands=hands,
+                    masks=masks,
+                    weights=weights,
+                    board=board,
+                    board_mask=board_mask,
+                    mode=mode,
+                ) -> dict[str, float]:
+                    pot_shares, total_weight = _run_exact_equity_kernel(
+                        hands, masks, weights, board, board_mask, mode
+                    )
+                    return {
+                        f"player {index + 1}:": float(share / total_weight)
+                        for index, share in enumerate(pot_shares)
+                    }
+
+                benchmark(
+                    label + " | Numba kernel",
+                    kernel_call,
+                    work_per_call=actual,
+                    unit="showdowns",
+                    repeats=repeats,
+                )
+
+
+def run_exact_parallel_benchmarks(repeats: int) -> None:
+    """Compare sequential and worker-local exact kernels on prepared inputs."""
+    thread_counts = [
+        count for count in (1, 2, 4, 8)
+        if count <= numba.config.NUMBA_NUM_THREADS
+    ]
+    original_threads = numba.get_num_threads()
+    print(
+        "=== EXACT PARALLEL: sequential vs worker-local ===\n"
+        "Estimated counts are Cartesian candidate tuples; actual counts exclude "
+        "card collisions."
+    )
+    try:
+        scenarios = [
+            (mode, target, profile)
+            for mode in (4, 5)
+            for target in (1_000, 5_000, 10_000, 20_000, 50_000, 100_000)
+            for profile in ("disjoint", "moderate overlap", "heavy overlap")
+        ]
+        for mode, target, profile in scenarios:
+            players, board, estimate, actual = make_exact_parallel_size_inputs(
+                mode, target, profile
+            )
+            label = f"PLO{mode} | river | {profile} | target {target:,}"
+            valid_players = prepare_ranges(players, board)
+            hands = List([player.hands for player in valid_players])
+            masks = List([player.masks for player in valid_players])
+            weights = List()
+            for player in valid_players:
+                normalized = player.weights.astype(np.float64)
+                normalized /= normalized.sum(dtype=np.float64)
+                weights.append(normalized)
+            board_mask = build_mask(board)
+
+            def sequential_call(
+                hands=hands,
+                masks=masks,
+                weights=weights,
+                board=board,
+                board_mask=board_mask,
+                mode=mode,
+            ) -> dict[str, float]:
+                shares, total = _run_exact_equity_kernel(
+                    hands, masks, weights, board, board_mask, mode
+                )
+                return {
+                    f"player {index + 1}:": float(share / total)
+                    for index, share in enumerate(shares)
+                }
+
+            def worker_local_call(
+                hands=hands,
+                masks=masks,
+                weights=weights,
+                board=board,
+                board_mask=board_mask,
+                mode=mode,
+            ) -> dict[str, float]:
+                shares, total = _run_exact_equity_kernel_parallel(
+                    hands,
+                    masks,
+                    weights,
+                    board,
+                    board_mask,
+                    mode,
+                    numba.get_num_threads(),
+                )
+                return {
+                    f"player {index + 1}:": float(share / total)
+                    for index, share in enumerate(shares)
+                }
+
+            sequential_result = sequential_call()
+            parallel_result = worker_local_call()
+            if not np.allclose(
+                list(parallel_result.values()),
+                list(sequential_result.values()),
+                rtol=0,
+                atol=1e-12,
+            ):
+                raise AssertionError(f"Kernel mismatch in {label}")
+
+            print(
+                f"\n{label} | {estimate:,} estimated candidates, "
+                f"{actual:,} actual evaluations "
+                f"({actual / estimate:.1%} collision-free)"
+            )
+            for thread_count in thread_counts:
+                numba.set_num_threads(thread_count)
+                sequential = benchmark(
+                    f"  sequential | threads={thread_count}",
+                    sequential_call,
+                    work_per_call=actual,
+                    unit="actual showdowns",
+                    repeats=repeats,
+                    print_result=False,
+                )
+                parallel = benchmark(
+                    f"  worker-local parallel | threads={thread_count}",
+                    worker_local_call,
+                    work_per_call=actual,
+                    unit="actual showdowns",
+                    repeats=repeats,
+                    print_result=False,
+                )
+                speedup = sequential[0] / parallel[0]
+                comparison = (
+                    f"{speedup:.2f}x speedup"
+                    if speedup >= 1
+                    else f"{1 / speedup:.2f}x regression"
+                )
+                print(
+                    f"  threads={thread_count}: "
+                    f"sequential {sequential[0] * 1000:.2f} ms "
+                    f"(MAD {sequential[1] * 1000:.2f}); "
+                    f"worker-local parallel {parallel[0] * 1000:.2f} ms "
+                    f"(MAD {parallel[1] * 1000:.2f}, "
+                    f"{actual / parallel[0]:,.0f}/sec) | {comparison}"
+                )
+
+        # Retain the previous highly unbalanced workloads as a dispatch check.
+        for mode in (4, 5):
+            players, board, actual = make_unbalanced_exact_inputs(mode)
+            valid_players = prepare_ranges(players, board)
+            hands = List([player.hands for player in valid_players])
+            masks = List([player.masks for player in valid_players])
+            weights = List()
+            for player in valid_players:
+                normalized = player.weights.astype(np.float64)
+                normalized /= normalized.sum(dtype=np.float64)
+                weights.append(normalized)
+            board_mask = build_mask(board)
+
+            def unbalanced_sequential(
+                hands=hands,
+                masks=masks,
+                weights=weights,
+                board=board,
+                board_mask=board_mask,
+                mode=mode,
+            ) -> dict[str, float]:
+                shares, total = _run_exact_equity_kernel(
+                    hands, masks, weights, board, board_mask, mode
+                )
+                return {
+                    f"player {index + 1}:": float(share / total)
+                    for index, share in enumerate(shares)
+                }
+
+            def unbalanced_worker_local(
+                hands=hands,
+                masks=masks,
+                weights=weights,
+                board=board,
+                board_mask=board_mask,
+                mode=mode,
+            ) -> dict[str, float]:
+                shares, total = _run_exact_equity_kernel_parallel(
+                    hands,
+                    masks,
+                    weights,
+                    board,
+                    board_mask,
+                    mode,
+                    numba.get_num_threads(),
+                )
+                return {
+                    f"player {index + 1}:": float(share / total)
+                    for index, share in enumerate(shares)
+                }
+
+            label = f"PLO{mode} | river | unbalanced 1x1,000"
+            sequential_result = unbalanced_sequential()
+            parallel_result = unbalanced_worker_local()
+            if not np.allclose(
+                list(parallel_result.values()),
+                list(sequential_result.values()),
+                rtol=0,
+                atol=1e-12,
+            ):
+                raise AssertionError(f"Kernel mismatch in {label}")
+
+            print(f"\n{label} | {actual:,} estimated and actual evaluations")
+            for thread_count in thread_counts:
+                numba.set_num_threads(thread_count)
+                sequential = benchmark(
+                    f"  sequential | threads={thread_count}",
+                    unbalanced_sequential,
+                    work_per_call=actual,
+                    unit="actual showdowns",
+                    repeats=repeats,
+                    print_result=False,
+                )
+                parallel = benchmark(
+                    f"  worker-local parallel | threads={thread_count}",
+                    unbalanced_worker_local,
+                    work_per_call=actual,
+                    unit="actual showdowns",
+                    repeats=repeats,
+                    print_result=False,
+                )
+                speedup = sequential[0] / parallel[0]
+                comparison = (
+                    f"{speedup:.2f}x speedup"
+                    if speedup >= 1
+                    else f"{1 / speedup:.2f}x regression"
+                )
+                print(
+                    f"  threads={thread_count}: "
+                    f"sequential {sequential[0] * 1000:.2f} ms "
+                    f"(MAD {sequential[1] * 1000:.2f}); "
+                    f"worker-local parallel {parallel[0] * 1000:.2f} ms "
+                    f"(MAD {parallel[1] * 1000:.2f}, "
+                    f"{actual / parallel[0]:,.0f}/sec) | {comparison}"
+                )
+    finally:
+        numba.set_num_threads(original_threads)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=("quick", "full"), default="quick")
@@ -264,10 +692,25 @@ def main() -> None:
         "--core", action="store_true",
         help="Also benchmark the batched simulation coordinator without preparation",
     )
+    parser.add_argument(
+        "--exact-streets",
+        action="store_true",
+        help="Run only targeted exact-equity benchmarks across flop, turn, and river",
+    )
+    parser.add_argument(
+        "--exact-parallel",
+        action="store_true",
+        help=(
+            "Compare sequential and worker-local parallel exact kernels "
+            "on targeted workloads"
+        ),
+    )
     parser.add_argument("--threads", type=int, default=8)
     args = parser.parse_args()
     if args.samples <= 0 or args.repeats <= 0:
         parser.error("--samples and --repeats must be positive")
+    if args.exact_streets and args.exact_parallel:
+        parser.error("--exact-streets and --exact-parallel cannot be combined")
     if not 1 <= args.threads <= numba.config.NUMBA_NUM_THREADS:
         parser.error("Invalid Numba thread count")
 
@@ -278,6 +721,14 @@ def main() -> None:
         f"Platform: {platform.platform()} | "
         f"suite={args.suite}, samples={args.samples}, repeats={args.repeats}\n"
     )
+
+    if args.exact_streets:
+        run_exact_street_benchmarks(args.repeats)
+        return
+
+    if args.exact_parallel:
+        run_exact_parallel_benchmarks(args.repeats)
+        return
 
     print("=== MONTE CARLO: public API (validation + preparation + simulation) ===")
     for s in mc_scenarios(args.suite):

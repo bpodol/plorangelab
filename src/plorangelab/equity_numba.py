@@ -5,7 +5,7 @@ from threading import Event
 from typing import Literal
 
 import numpy as np
-from numba import njit, prange
+from numba import get_num_threads, njit, prange
 from numba.typed import List
 from numpy.typing import NDArray
 
@@ -15,6 +15,7 @@ from plorangelab.evaluator_numba import numba_evaluate_hands
 _MAX_SIMULATIONS = 1_000_000
 _MAX_BATCH_SIZE = 100_000  # About 8 MiB for six-player PLO5 batch buffers.
 _MAX_BATCH_ATTEMPTS = 100_000  # Maximum work between coordinator checks.
+_EXACT_PARALLEL_MIN_SHOWDOWNS = 1_000
 
 
 StopReason = Literal[
@@ -386,6 +387,36 @@ def _run_monte_carlo_batch(
     return share_sums, squared_share_sums, simulations, attempts
 
 
+@njit(inline="always")
+def _accumulate_exact_showdown(
+    selected_hands,
+    current_board,
+    player_count,
+    matchup_weight,
+    pot_shares,
+    total_weight,
+):
+    """Evaluate one showdown and add its weighted pot shares."""
+    scores = numba_evaluate_hands(selected_hands, current_board)
+
+    highest_score = scores[0]
+    for p in range(1, player_count):
+        if scores[p] > highest_score:
+            highest_score = scores[p]
+
+    winners_count = 0
+    for p in range(player_count):
+        if scores[p] == highest_score:
+            winners_count += 1
+
+    share = matchup_weight / winners_count
+    for p in range(player_count):
+        if scores[p] == highest_score:
+            pot_shares[p] += share
+
+    return total_weight + matchup_weight
+
+
 @njit(cache=True)
 def _run_exact_equity_kernel(
     hands,
@@ -396,7 +427,8 @@ def _run_exact_equity_kernel(
     mode,
 ):
     """
-    Enumerate all compatible matchups and board runouts.
+    Enumerate all compatible matchups and board runouts. Complete river boards
+    are evaluated directly without constructing a remaining-deck runout.
 
     Args:
         hands: Numba typed list of uint8 hand arrays.
@@ -422,9 +454,9 @@ def _run_exact_equity_kernel(
         for j in range(board_len):
             current_board[j] = board[j]
 
-    # Reusable buffers.
-    available = np.empty(52, dtype=np.uint8)
-    runout_indices = np.empty(5, dtype=np.int64)
+    # Reusable runout buffers stay empty for a complete river board.
+    available = np.empty(52 if missing_board else 0, dtype=np.uint8)
+    runout_indices = np.empty(missing_board, dtype=np.int64)
     hand_indices = np.zeros(player_count, dtype=np.int64)
 
     pot_shares = np.zeros(player_count, dtype=np.float64)
@@ -455,75 +487,65 @@ def _run_exact_equity_kernel(
                 selected_hands[p, c] = hands[p][index, c]
 
         if valid:
-            # Build the deck remaining after blockers.
-            available_count = 0
-
-            for card in range(52):
-                bit = np.uint64(1) << np.uint64(card)
-
-                if (used_mask & bit) == 0:
-                    available[available_count] = card
-                    available_count += 1
-
-            # Initialize lexicographic combination indices.
-            for j in range(missing_board):
-                runout_indices[j] = j
-
-            # Enumerate every possible board completion.
-            while True:
-                for j in range(missing_board):
-                    current_board[board_len + j] = (
-                        available[runout_indices[j]]
-                    )
-
-                scores = numba_evaluate_hands(
+            if missing_board == 0:
+                total_weight = _accumulate_exact_showdown(
                     selected_hands,
                     current_board,
+                    player_count,
+                    matchup_weight,
+                    pot_shares,
+                    total_weight,
                 )
+            else:
+                # Build the deck remaining after blockers.
+                available_count = 0
 
-                highest_score = scores[0]
+                for card in range(52):
+                    bit = np.uint64(1) << np.uint64(card)
 
-                for p in range(1, player_count):
-                    if scores[p] > highest_score:
-                        highest_score = scores[p]
+                    if (used_mask & bit) == 0:
+                        available[available_count] = card
+                        available_count += 1
 
-                winners_count = 0
+                # Initialize lexicographic combination indices.
+                for j in range(missing_board):
+                    runout_indices[j] = j
 
-                for p in range(player_count):
-                    if scores[p] == highest_score:
-                        winners_count += 1
+                # Enumerate every possible board completion.
+                while True:
+                    for j in range(missing_board):
+                        current_board[board_len + j] = (
+                            available[runout_indices[j]]
+                        )
 
-                share = matchup_weight / winners_count
-
-                for p in range(player_count):
-                    if scores[p] == highest_score:
-                        pot_shares[p] += share
-
-                total_weight += matchup_weight
-
-                # A complete river board has one runout.
-                if missing_board == 0:
-                    break
-
-                # Advance to the next board combination.
-                j = missing_board - 1
-
-                while (
-                    j >= 0
-                    and runout_indices[j]
-                    == available_count - missing_board + j
-                ):
-                    j -= 1
-
-                if j < 0:
-                    break
-
-                runout_indices[j] += 1
-
-                for k in range(j + 1, missing_board):
-                    runout_indices[k] = (
-                        runout_indices[k - 1] + 1
+                    total_weight = _accumulate_exact_showdown(
+                        selected_hands,
+                        current_board,
+                        player_count,
+                        matchup_weight,
+                        pot_shares,
+                        total_weight,
                     )
+
+                    # Advance to the next board combination.
+                    j = missing_board - 1
+
+                    while (
+                        j >= 0
+                        and runout_indices[j]
+                        == available_count - missing_board + j
+                    ):
+                        j -= 1
+
+                    if j < 0:
+                        break
+
+                    runout_indices[j] += 1
+
+                    for k in range(j + 1, missing_board):
+                        runout_indices[k] = (
+                            runout_indices[k - 1] + 1
+                        )
 
         # Advance to the next combination of player hands.
         p = player_count - 1
@@ -542,13 +564,149 @@ def _run_exact_equity_kernel(
 
     return pot_shares, total_weight
 
+
+@njit(parallel=True, cache=True)
+def _run_exact_equity_kernel_parallel(
+    hands,
+    masks,
+    weights,
+    board,
+    board_mask,
+    mode,
+    requested_workers,
+):
+    """Enumerate exact equity in balanced, thread-local Cartesian partitions."""
+    player_count = len(hands)
+    board_len = 0 if board is None else len(board)
+    missing_board = 5 - board_len
+
+    total_matchups = 1
+    for player in range(player_count):
+        total_matchups *= len(hands[player])
+
+    worker_count = min(requested_workers, total_matchups)
+    # Pad final results so independent workers never update adjacent cache lines.
+    worker_results = np.zeros((worker_count, 32), dtype=np.float64)
+
+    for worker in prange(worker_count):
+        start = total_matchups * worker // worker_count
+        end = total_matchups * (worker + 1) // worker_count
+        worker_shares = np.zeros(player_count, dtype=np.float64)
+        worker_total = 0.0
+        selected_hands = np.empty((player_count, mode), dtype=np.uint8)
+        current_board = np.empty(5, dtype=np.uint8)
+        available = np.empty(52, dtype=np.uint8)
+        runout_indices = np.empty(5, dtype=np.int64)
+        hand_indices = np.empty(player_count, dtype=np.int64)
+
+        if board is not None:
+            for card in range(board_len):
+                current_board[card] = board[card]
+
+        for matchup in range(start, end):
+            remainder = matchup
+            for player in range(player_count - 1, -1, -1):
+                hand_count = len(hands[player])
+                hand_indices[player] = remainder % hand_count
+                remainder //= hand_count
+
+            used_mask = board_mask
+            matchup_weight = 1.0
+            valid = True
+
+            for player in range(player_count):
+                hand_index = hand_indices[player]
+                hand_mask = masks[player][hand_index]
+
+                if used_mask & hand_mask:
+                    valid = False
+                    break
+
+                used_mask |= hand_mask
+                matchup_weight *= weights[player][hand_index]
+
+                if matchup_weight == 0.0:
+                    valid = False
+                    break
+
+                for card in range(mode):
+                    selected_hands[player, card] = hands[player][hand_index, card]
+
+            if valid:
+                if missing_board == 0:
+                    worker_total = _accumulate_exact_showdown(
+                        selected_hands,
+                        current_board,
+                        player_count,
+                        matchup_weight,
+                        worker_shares,
+                        worker_total,
+                    )
+                else:
+                    available_count = 0
+                    for card in range(52):
+                        bit = np.uint64(1) << np.uint64(card)
+                        if (used_mask & bit) == 0:
+                            available[available_count] = card
+                            available_count += 1
+
+                    for card in range(missing_board):
+                        runout_indices[card] = card
+
+                    while True:
+                        for card in range(missing_board):
+                            current_board[board_len + card] = available[
+                                runout_indices[card]
+                            ]
+
+                        worker_total = _accumulate_exact_showdown(
+                            selected_hands,
+                            current_board,
+                            player_count,
+                            matchup_weight,
+                            worker_shares,
+                            worker_total,
+                        )
+
+                        index = missing_board - 1
+                        while (
+                            index >= 0
+                            and runout_indices[index]
+                            == available_count - missing_board + index
+                        ):
+                            index -= 1
+
+                        if index < 0:
+                            break
+
+                        runout_indices[index] += 1
+                        for card in range(index + 1, missing_board):
+                            runout_indices[card] = runout_indices[card - 1] + 1
+
+        for player in range(player_count):
+            worker_results[worker, player] = worker_shares[player]
+        worker_results[worker, 8] = worker_total
+
+    # Sum worker-local accumulators in a stable order to avoid write races.
+    pot_shares = np.zeros(player_count, dtype=np.float64)
+    total_weight = 0.0
+    for worker in range(worker_count):
+        total_weight += worker_results[worker, 8]
+        for player in range(player_count):
+            pot_shares[player] += worker_results[worker, player]
+
+    return pot_shares, total_weight
+
 def run_exact_equity(
     players: list[EncodedRange],
     mode: Mode,
     board: NDArray[np.uint8] | None = None,
     max_showdowns: int | None = 100_000,
 ) -> dict[str, float]:
-    """Calculate exact weighted equity using a sequential Numba kernel.
+    """Calculate exact weighted equity with the suitable Numba kernel.
+
+    Small estimated workloads stay sequential; larger workloads partition the
+    Cartesian product across the configured Numba threads.
 
     Args:
         players: Validated, board-filtered player ranges with strictly
@@ -578,9 +736,9 @@ def run_exact_equity(
     # Conservative upper bound that ignores collisions.
     remaining_cards = 52 - board_len - player_count * mode
 
-    estimated_showdowns = (
-        prod(len(player.hands) for player in players)
-        * comb(remaining_cards, missing_board)
+    candidate_matchups = prod(len(player.hands) for player in players)
+    estimated_showdowns = candidate_matchups * comb(
+        remaining_cards, missing_board
     )
 
     if (
@@ -606,15 +764,31 @@ def run_exact_equity(
         masks.append(player.masks)
         weights.append(player_weights)
 
-    # Enumerate and evaluate entirely inside Numba.
-    pot_shares, total_weight = _run_exact_equity_kernel(
-        hands=hands,
-        masks=masks,
-        weights=weights,
-        board=board,
-        board_mask=board_mask,
-        mode=mode,
-    )
+    # Benchmarks show a parallel benefit from about 1,000 estimated showdowns.
+    # Keep one-matchup workloads sequential because prange cannot split them.
+    if (
+        estimated_showdowns > _EXACT_PARALLEL_MIN_SHOWDOWNS
+        and candidate_matchups > 1
+        and get_num_threads() > 1
+    ):
+        pot_shares, total_weight = _run_exact_equity_kernel_parallel(
+            hands,
+            masks,
+            weights,
+            board,
+            board_mask,
+            mode,
+            get_num_threads(),
+        )
+    else:
+        pot_shares, total_weight = _run_exact_equity_kernel(
+            hands=hands,
+            masks=masks,
+            weights=weights,
+            board=board,
+            board_mask=board_mask,
+            mode=mode,
+        )
 
     if total_weight == 0:
         raise ValueError(
