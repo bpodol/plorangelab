@@ -291,15 +291,9 @@ def run_monte_carlo(
     attempts = 0
     max_attempts = max(10_000, samples * 20)
 
-    sampled_hands = np.empty(
-        (samples, player_count, mode),
-        dtype=np.uint8
-    )    
+    sampled_hands = np.empty((samples, player_count, mode), dtype=np.uint8)    
 
-    sampled_boards = np.empty(
-        (samples, 5),
-        dtype=np.uint8
-    )   
+    sampled_boards = np.empty((samples, 5), dtype=np.uint8)   
 
     while simulations < samples:
         if attempts >= max_attempts:
@@ -551,7 +545,12 @@ def compute_equity(
     masks = List([p.masks for p in valid_players])   
     rng = np.random.default_rng(seed)
     board_mask = np.uint64(0) if board is None else build_mask(board)
-    cumulative = List([np.cumsum(p) for p in probabilities])
+    cumulative = List()
+
+    for p in probabilities:
+        cdf = np.cumsum(p)
+        cdf[-1] = 1.0
+        cumulative.append(cdf)
 
     return run_monte_carlo(
         hands=hands,

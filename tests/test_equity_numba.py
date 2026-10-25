@@ -2,7 +2,7 @@ from itertools import combinations, islice
 
 import numpy as np
 import pytest
-
+import numba
 import plorangelab.equity_numba as equity_module
 from plorangelab.encoder import (
     EncodedRange,
@@ -522,3 +522,36 @@ def test_compute_equity_rejects_invalid_computation_method() -> None:
             samples=1,
             method="approximate",  # type: ignore[arg-type]
         )
+
+
+def test_monte_carlo_deterministic_across_thread_counts() -> None:
+    """Same seed must produce identical equities with 1, 2, 4, or 8 threads."""
+
+    players = [
+        encode_range("AsKsQhJhTh@75,AdKdQcJcTc@25", 5),
+        encode_range("As9h8s8h7d@40,6c6d5c5d4h@60", 5),
+    ]
+    board = encode_board("2c3d4s")
+
+    original_threads = numba.get_num_threads()
+    results = []
+
+    try:
+        for threads in (1, 2, 4, 8):
+            numba.set_num_threads(threads)
+
+            equity = compute_equity(
+                players=players,
+                mode=5,
+                board=board,
+                samples=10_000,
+                seed=42,
+                method="monte-carlo",
+            )
+            results.append(equity)
+
+        for result in results[1:]:
+            assert result == results[0]
+
+    finally:
+        numba.set_num_threads(original_threads)
