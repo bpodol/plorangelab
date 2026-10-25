@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from itertools import combinations, product
+from itertools import combinations
 from math import comb, prod, sqrt
 from threading import Event
 from typing import Literal
@@ -88,7 +88,8 @@ def validate_equity_inputs(
     """Validate the public equity API's parameters and encoded range invariants.
 
     Checks player count, PLO mode, board cards, sample count, seed, array
-    shapes and dtypes, card uniqueness, hand-mask consistency, and weights.
+    shapes and dtypes, card uniqueness, hand-mask consistency, and strictly
+    positive finite weights.
     Does not check whether a compatible multi-player matchup exists.
 
     Raises:
@@ -181,7 +182,7 @@ def validate_equity_inputs(
 
         if (
             not np.all(np.isfinite(weights))
-            or np.any(weights < 0)
+            or np.any(weights <= 0)
             or not np.isfinite(total)
             or total <= 0
         ):
@@ -235,15 +236,16 @@ def prepare_ranges(players: list[EncodedRange], board: NDArray[np.uint8] | None)
 def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float64]]:
     """Convert each player's hand weights to a probability distribution.
 
-    Weight calculations use float64 for reliable normalization. Zero-weight
-    hands receive zero sampling probability.
+    Weight calculations use float64 for reliable normalization. Every input
+    hand has positive weight, so each hand receives positive sampling
+    probability.
 
     Returns:
         One float64 probability array per player, aligned with that player's
         encoded hands and masks.
 
     Raises:
-        ValueError: If a player has no positive total weight.
+        ValueError: If a player has no finite positive total weight.
     """
     probabilities = []
 
@@ -549,7 +551,8 @@ def run_exact_equity(
     """Calculate exact weighted equity using a sequential Numba kernel.
 
     Args:
-        players: Validated, board-filtered player ranges.
+        players: Validated, board-filtered player ranges with strictly
+            positive weights.
         mode: Number of hole cards per player (4 or 5).
         board: Known community cards, or None for preflop.
         max_showdowns: Maximum estimated showdown evaluations.
@@ -572,22 +575,11 @@ def run_exact_equity(
         else build_mask(board)
     )
 
-    # Exclude zero-weight hands from enumeration.
-    valid_indices = [
-        np.flatnonzero(player.weights > 0)
-        for player in players
-    ]
-
-    if any(len(indices) == 0 for indices in valid_indices):
-        raise ValueError(
-            "No compatible positive-weight hand combinations exist"
-        )
-    
     # Conservative upper bound that ignores collisions.
     remaining_cards = 52 - board_len - player_count * mode
 
     estimated_showdowns = (
-        prod(len(indices) for indices in valid_indices)
+        prod(len(player.hands) for player in players)
         * comb(remaining_cards, missing_board)
     )
 
@@ -600,24 +592,19 @@ def run_exact_equity(
             f"{estimated_showdowns:,} estimated showdowns"
         )
 
-    # Prepare contiguous NumPy arrays for the compiled kernel.
+    # Preserve the validated hands and masks directly; only weights need
+    # conversion and normalization for numerically stable aggregation.
     hands = List()
     masks = List()
     weights = List()
 
-    for player, indices in zip(players, valid_indices):
+    for player in players:
         player_weights = player.weights.astype(np.float64)
-        player_weights /= player_weights.sum()
+        player_weights /= player_weights.sum(dtype=np.float64)
 
-        hands.append(
-            np.ascontiguousarray(player.hands[indices])
-        )
-        masks.append(
-            np.ascontiguousarray(player.masks[indices])
-        )
-        weights.append(
-            np.ascontiguousarray(player_weights[indices])
-        )
+        hands.append(player.hands)
+        masks.append(player.masks)
+        weights.append(player_weights)
 
     # Enumerate and evaluate entirely inside Numba.
     pot_shares, total_weight = _run_exact_equity_kernel(

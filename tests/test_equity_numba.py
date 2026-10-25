@@ -398,6 +398,18 @@ def test_compute_equity_rejects_invalid_weights(weights: np.ndarray) -> None:
         compute_equity(players, mode=4, board=encode_board(RIVER))
 
 
+def test_compute_equity_rejects_zero_weight_hand_in_nonzero_range() -> None:
+    encoded = encode_range("AsAhKdQc,KsKhJdTc", 4)
+    invalid = EncodedRange(
+        encoded.hands,
+        encoded.masks,
+        np.asarray([0.0, 1.0], dtype=np.float32),
+    )
+
+    with pytest.raises(ValueError, match="invalid weights"):
+        compute_equity([invalid, encode_range("2s3s4s5s", 4)], mode=4)
+
+
 def test_compute_equity_rejects_empty_ranges() -> None:
     empty = EncodedRange(
         hands=np.empty((0, 4), dtype=np.uint8),

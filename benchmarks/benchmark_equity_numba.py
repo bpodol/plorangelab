@@ -243,9 +243,9 @@ def make_exact_target_inputs(
             players.append(make_range(hands, rng))
 
     scenario = Scenario(mode, 2, 5, range_size, overlap=overlap)
-    positive_hand_counts = [int(np.count_nonzero(p.weights > 0)) for p in players]
+    hand_counts = [len(player.hands) for player in players]
     runouts_per_matchup = comb(52 - len(board) - 2 * mode, 0)
-    estimated_showdowns = prod(positive_hand_counts) * runouts_per_matchup
+    estimated_showdowns = prod(hand_counts) * runouts_per_matchup
     compatible_matchups = int(
         np.count_nonzero(
             (players[0].masks[:, None] & players[1].masks[None, :]) == 0

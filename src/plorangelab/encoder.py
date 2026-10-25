@@ -32,6 +32,8 @@ SUITS_DECODE = ("c", "d", "h", "s")
 
 @dataclass
 class EncodedRange:
+    """Encoded hands, masks, and strictly positive per-hand weights."""
+
     hands: NDArray[np.uint8]
     masks: NDArray[np.uint64]
     weights: NDArray[np.float32]

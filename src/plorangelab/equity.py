@@ -63,7 +63,8 @@ def validate_equity_inputs(
     """Validate the public equity API's parameters and encoded range invariants.
 
     Checks player count, PLO mode, board cards, sample count, seed, array
-    shapes and dtypes, card uniqueness, hand-mask consistency, and weights.
+    shapes and dtypes, card uniqueness, hand-mask consistency, and strictly
+    positive finite weights.
     Does not check whether a compatible multi-player matchup exists.
 
     Raises:
@@ -156,7 +157,7 @@ def validate_equity_inputs(
 
         if (
             not np.all(np.isfinite(weights))
-            or np.any(weights < 0)
+            or np.any(weights <= 0)
             or not np.isfinite(total)
             or total <= 0
         ):
@@ -210,15 +211,16 @@ def prepare_ranges(players: list[EncodedRange], board: NDArray[np.uint8] | None)
 def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float64]]:
     """Convert each player's hand weights to a probability distribution.
 
-    Weight calculations use float64 for reliable normalization. Zero-weight
-    hands receive zero sampling probability.
+    Weight calculations use float64 for reliable normalization. Every input
+    hand has positive weight, so each hand receives positive sampling
+    probability.
 
     Returns:
         One float64 probability array per player, aligned with that player's
         encoded hands and masks.
 
     Raises:
-        ValueError: If a player has no positive total weight.
+        ValueError: If a player has no finite positive total weight.
     """
     probabilities = []
 
@@ -359,7 +361,8 @@ def run_exact_equity(
     and all possible remaining board runouts.
 
     Args:
-        players: Validated, board-filtered player ranges.
+        players: Validated, board-filtered player ranges with strictly
+            positive weights.
         mode: Number of hole cards per player (4 or 5).
         board: Known community cards, or None for preflop.
         max_showdowns: Maximum estimated showdown evaluations.
@@ -378,17 +381,11 @@ def run_exact_equity(
 
     board_mask = 0 if board is None else int(build_mask(board))
 
-    # Only enumerate hands with positive weights.
-    valid_indices = [
-        np.flatnonzero(player.weights > 0)
-        for player in players
-    ]
-
     # Estimate an upper bound on the number of evaluations.
     remaining_cards = 52 - board_len - player_count * mode
 
     estimated_showdowns = (
-        prod(len(indices) for indices in valid_indices)
+        prod(len(player.hands) for player in players)
         * comb(remaining_cards, missing_board)
     )
 
@@ -415,7 +412,7 @@ def run_exact_equity(
     total_weight = 0.0
 
     # Enumerate every combination of player hands.
-    for indices in product(*valid_indices):
+    for indices in product(*(range(len(player.hands)) for player in players)):
         used_mask = board_mask
         matchup_weight = 1.0
 
