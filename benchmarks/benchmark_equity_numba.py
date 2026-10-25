@@ -1,3 +1,9 @@
+"""Benchmark the Numba PLO equity APIs and batched Monte Carlo core.
+
+Run with ``uv run python benchmarks/benchmark_equity_numba.py``; use
+``--suite full`` for the larger scenario set, or ``--core`` to include
+coordinator-only timings.
+"""
 
 from __future__ import annotations
 

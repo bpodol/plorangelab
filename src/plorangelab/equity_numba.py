@@ -448,6 +448,11 @@ def run_exact_equity(
 
     pot_shares = np.zeros(player_count, dtype=np.float64)
     total_weight = 0.0
+    normalized_weights = [
+        player.weights.astype(np.float64)
+        / player.weights.sum(dtype=np.float64)
+        for player in players
+    ]
 
     # Enumerate every combination of player hands.
     for indices in product(*valid_indices):
@@ -463,7 +468,7 @@ def run_exact_equity(
                 break
 
             used_mask |= hand_mask
-            matchup_weight *= float(player.weights[hand_index])
+            matchup_weight *= normalized_weights[i][hand_index]
             selected_hands[i] = player.hands[hand_index]
 
         else:
@@ -558,7 +563,7 @@ def _equity_statistics(
     confidence_multiplier: float,
 ) -> tuple[dict[str, float], dict[str, float]]:
     equities: dict[str, float] = {}
-    margins: dict[str, float] = {}
+    margins: dict[str, float | None] = {}
 
     for player, (share_sum, squared_sum) in enumerate(
         zip(share_sums, squared_share_sums), start=1
@@ -566,7 +571,7 @@ def _equity_statistics(
         label = f"player {player}:"
         equity = float(share_sum / simulations)
         if simulations < 2:
-            margin = float("inf")
+            margin = None
         else:
             variance = max(
                 float(
@@ -667,7 +672,7 @@ def _run_batched_monte_carlo(
                 simulations,
                 confidence_multiplier,
             )
-            if all(margin <= target_moe for margin in margins.values()):
+            if all(margin is not None and margin <= target_moe for margin in margins.values()):
                 stop_reason = "target_reached"
                 break
 

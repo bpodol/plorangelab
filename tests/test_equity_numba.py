@@ -486,6 +486,36 @@ def test_exact_equity_raises_when_workload_limit_is_exceeded() -> None:
             method="exact",
         )
 
+@pytest.mark.parametrize("scale", [1e200, 1e-200])
+def test_exact_equity_is_invariant_to_weight_scaling(scale):
+    players = [
+        encode_range("AsAhKdQc@70,QsQhJdTd@30", 4),
+        encode_range("KsKhJcTc@40,JsJh8d8c@60", 4),
+    ]
+
+    board = encode_board("2c3d5h7s9c")
+
+    baseline = compute_equity(
+        players, mode=4, board=board, method="exact"
+    )
+
+    scaled_players = [
+        EncodedRange(
+            hands=p.hands,
+            masks=p.masks,
+            weights=p.weights.astype(np.float64) * scale,
+        )
+        for p in players
+    ]
+
+    actual = compute_equity(
+        scaled_players, mode=4, board=board, method="exact"
+    )
+
+    for player in baseline:
+        assert actual[player] == pytest.approx(
+            baseline[player], abs=1e-12
+        )
 
 @pytest.mark.parametrize("method", ["exact", "monte-carlo"])
 def test_calculation_does_not_modify_original_ranges(method: str) -> None:
@@ -536,9 +566,16 @@ def test_monte_carlo_deterministic_across_thread_counts() -> None:
 
     original_threads = numba.get_num_threads()
     results = []
+    thread_counts = [
+        n for n in (1, 2, 4, 8)
+        if n <= numba.config.NUMBA_NUM_THREADS
+    ]
+
+    if len(thread_counts) < 2:
+        pytest.skip("At least 2 Numba threads required")
 
     try:
-        for threads in (1, 2, 4, 8):
+        for threads in thread_counts:
             numba.set_num_threads(threads)
 
             equity = compute_equity(
