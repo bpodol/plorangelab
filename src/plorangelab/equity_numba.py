@@ -1,12 +1,36 @@
-from numpy.typing import NDArray
-import numpy as np
-from plorangelab.encoder import EncodedRange, build_mask, Mode
-from plorangelab.evaluator_numba import numba_evaluate_hands
+from dataclasses import dataclass
 from itertools import combinations, product
-from math import comb, prod
+from math import comb, prod, sqrt
+from threading import Event
 from typing import Literal
+
+import numpy as np
 from numba import njit, prange
 from numba.typed import List
+from numpy.typing import NDArray
+
+from plorangelab.encoder import EncodedRange, Mode, build_mask
+from plorangelab.evaluator_numba import numba_evaluate_hands
+
+_MAX_SIMULATIONS = 1_000_000
+_MAX_BATCH_SIZE = 100_000  # About 8 MiB for six-player PLO5 batch buffers.
+_MAX_BATCH_ATTEMPTS = 100_000  # Maximum work between coordinator checks.
+
+
+StopReason = Literal[
+    "target_reached", "max_simulations", "cancelled", "attempt_limit"
+]
+
+
+@dataclass(frozen=True)
+class MonteCarloResult:
+    """Equity estimates and stopping diagnostics for an adaptive run."""
+
+    equities: dict[str, float]
+    margins_of_error: dict[str, float]
+    simulations: int
+    attempts: int
+    stop_reason: StopReason
 
 @njit(cache=True)
 def check_collisions(masks: NDArray[np.uint64]) -> bool:
@@ -238,40 +262,40 @@ def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float6
     return probabilities
 
 @njit(parallel=True, cache=True)
-def run_monte_carlo(
+def _run_monte_carlo_batch(
     hands: list[NDArray[np.uint8]],
     masks: list[NDArray[np.uint64]],
     cumulative_probabilities: list[NDArray[np.float64]],
     mode: Mode,
     board: NDArray[np.uint8] | None,
     board_mask: np.uint64,
-    samples: int,
+    batch_size: int,
+    attempt_budget: int,
     rng: np.random.Generator,
-) -> dict[str, float]:
-    """Estimate weighted multiway Omaha equity by rejection sampling.
+) -> tuple[NDArray[np.float64], NDArray[np.float64], int, int]:
+    """Sample and evaluate up to ``batch_size`` valid Omaha showdowns.
 
     Each attempt independently draws one weighted hand per player. Colliding
     hand selections are discarded, and missing board cards are drawn uniformly
     from the remaining deck. Each valid showdown awards an equal pot fraction
-    to all players tied for the highest hand rank.
+    to all players tied for the highest hand rank. The arrays allocated here
+    are bounded by the requested batch size, not by the total simulation goal.
 
     Args:
-        players: Validated ranges with board-blocked hands removed.
-        probabilities: Per-player sampling probabilities aligned with the ranges.
+        hands: Board-filtered encoded hands for each player.
+        masks: Corresponding hand masks.
+        cumulative_probabilities: Weighted sampling CDFs, one per player.
         mode: Number of hole cards per hand (4 or 5).
         board: Known community cards, or None before the flop.
-        samples: Number of successful (collision-free) showdowns to evaluate.
-        seed: Seed for reproducible sampling and board completion.
+        board_mask: Bitmask of known community cards.
+        batch_size: Maximum valid showdowns to sample in this call.
+        attempt_budget: Maximum hand-selection attempts allowed in this call.
+        rng: Shared generator, retained by the Python coordinator across calls.
 
     Returns:
-        A player-to-equity mapping with values in [0, 1].
-
-    Raises:
-        RuntimeError: If the sampling attempt budget is exhausted before
-            collecting the requested number of valid showdowns.
+        Per-player sums of pot shares, sums of squared pot shares, the number
+        of valid showdowns, and the number of sampling attempts.
     """
-    
-
     player_count = len(hands)
     board_len = 0 if board is None else len(board)
     missing_board = 5 - board_len
@@ -289,19 +313,11 @@ def run_monte_carlo(
 
     simulations = 0
     attempts = 0
-    max_attempts = max(10_000, samples * 20)
+    attempt_budget = min(attempt_budget, _MAX_BATCH_ATTEMPTS)
+    sampled_hands = np.empty((batch_size, player_count, mode), dtype=np.uint8)
+    sampled_boards = np.empty((batch_size, 5), dtype=np.uint8)
 
-    sampled_hands = np.empty((samples, player_count, mode), dtype=np.uint8)    
-
-    sampled_boards = np.empty((samples, 5), dtype=np.uint8)   
-
-    while simulations < samples:
-        if attempts >= max_attempts:
-            raise RuntimeError(
-                f"Sampling limit exceeded: {simulations}/{samples} "
-                f"valid simulations after {attempts} attempts"
-            )
-
+    while simulations < batch_size and attempts < attempt_budget:
         attempts += 1
         deck_state = deck
 
@@ -330,9 +346,9 @@ def run_monte_carlo(
 
         simulations += 1
 
-    pot_shares = np.zeros((samples, player_count), dtype=np.float64)    
+    pot_shares = np.zeros((simulations, player_count), dtype=np.float64)
 
-    for sim in prange(samples):
+    for sim in prange(simulations):
 
         scores = numba_evaluate_hands(
             sampled_hands[sim],
@@ -355,16 +371,17 @@ def run_monte_carlo(
             if scores[player] == highest_score:
                 pot_shares[sim, player] = share
 
-    players_won_pots = np.zeros(player_count, dtype=np.float64)
+    share_sums = np.zeros(player_count, dtype=np.float64)
+    squared_share_sums = np.zeros(player_count, dtype=np.float64)
 
-    for sim in range(samples):
+    # Aggregate sequentially for deterministic results and race-free writes.
+    for sim in range(simulations):
         for player in range(player_count):
-            players_won_pots[player] += pot_shares[sim, player]
+            share = pot_shares[sim, player]
+            share_sums[player] += share
+            squared_share_sums[player] += share * share
 
-    return {
-        f"player {player + 1}:": float(players_won_pots[player] / simulations)
-        for player in range(player_count)
-    }
+    return share_sums, squared_share_sums, simulations, attempts
 
 def run_exact_equity(
     players: list[EncodedRange],
@@ -497,6 +514,285 @@ def run_exact_equity(
         for i in range(player_count)
     }
 
+def _positive_integer(value: object, name: str) -> int:
+    if (
+        isinstance(value, (bool, np.bool_))
+        or not isinstance(value, (int, np.integer))
+        or value <= 0
+    ):
+        raise ValueError(f"{name} must be a positive integer")
+    return int(value)
+
+
+def _prepare_monte_carlo(
+    players: list[EncodedRange],
+    board: NDArray[np.uint8] | None,
+    seed: int,
+) -> tuple[
+    List,
+    List,
+    List,
+    np.uint64,
+    np.random.Generator,
+]:
+    """Prepare validated Numba inputs and one RNG shared by all batches."""
+    valid_players = prepare_ranges(players, board)
+    probabilities = prepare_probabilities(valid_players)
+    hands = List([player.hands for player in valid_players])
+    masks = List([player.masks for player in valid_players])
+    cumulative = List()
+
+    for probability in probabilities:
+        cdf = np.cumsum(probability)
+        cdf[-1] = 1.0  # Preserve the endpoint safeguard against roundoff.
+        cumulative.append(cdf)
+
+    board_mask = np.uint64(0) if board is None else build_mask(board)
+    return hands, masks, cumulative, board_mask, np.random.default_rng(seed)
+
+
+def _equity_statistics(
+    share_sums: NDArray[np.float64],
+    squared_share_sums: NDArray[np.float64],
+    simulations: int,
+    confidence_multiplier: float,
+) -> tuple[dict[str, float], dict[str, float]]:
+    equities: dict[str, float] = {}
+    margins: dict[str, float] = {}
+
+    for player, (share_sum, squared_sum) in enumerate(
+        zip(share_sums, squared_share_sums), start=1
+    ):
+        label = f"player {player}:"
+        equity = float(share_sum / simulations)
+        if simulations < 2:
+            margin = float("inf")
+        else:
+            variance = max(
+                float(
+                    (squared_sum - share_sum * share_sum / simulations)
+                    / (simulations - 1)
+                ),
+                0.0,
+            )
+            margin = confidence_multiplier * sqrt(variance / simulations)
+        equities[label] = equity
+        margins[label] = margin
+
+    return equities, margins
+
+
+def _run_batched_monte_carlo(
+    hands: List,
+    masks: List,
+    cumulative_probabilities: List,
+    mode: Mode,
+    board: NDArray[np.uint8] | None,
+    board_mask: np.uint64,
+    rng: np.random.Generator,
+    *,
+    requested_samples: int,
+    batch_size: int,
+    attempt_limit: int,
+    adaptive: bool,
+    target_moe: float,
+    min_samples: int,
+    confidence_multiplier: float,
+    cancel_event: Event | None = None,
+) -> MonteCarloResult:
+    """Coordinate batches and aggregate every completed showdown.
+
+    The global attempt limit is shared across calls to the Numba batch kernel;
+    each invocation receives at most ``_MAX_BATCH_ATTEMPTS`` attempts so the
+    adaptive caller can observe cancellation between invocations. Any valid
+    simulations completed before an invocation exhausts its budget are added
+    before the coordinator decides whether to continue or stop.
+    """
+    if requested_samples > _MAX_SIMULATIONS:
+        raise ValueError(f"requested_samples must not exceed {_MAX_SIMULATIONS:,}")
+    if batch_size > _MAX_BATCH_SIZE:
+        raise ValueError(f"batch_size must not exceed {_MAX_BATCH_SIZE:,}")
+
+    player_count = len(hands)
+    share_sums = np.zeros(player_count, dtype=np.float64)
+    squared_share_sums = np.zeros(player_count, dtype=np.float64)
+    simulations = 0
+    attempts = 0
+
+    while simulations < requested_samples:
+        # Cancellation is observed only at batch boundaries. If nothing has
+        # completed yet, there is no estimate to return.
+        if cancel_event is not None and cancel_event.is_set():
+            if simulations == 0:
+                raise InterruptedError(
+                    "Monte Carlo calculation cancelled before any simulations completed"
+                )
+            stop_reason: StopReason = "cancelled"
+            break
+
+        attempts_remaining = attempt_limit - attempts
+        if attempts_remaining <= 0:
+            stop_reason = "attempt_limit"
+            break
+
+        batch_count = min(batch_size, requested_samples - simulations)
+        if adaptive and simulations < min_samples:
+            batch_count = min(batch_count, min_samples - simulations)
+
+        batch_sums, batch_squared_sums, batch_simulations, batch_attempts = (
+            _run_monte_carlo_batch(
+                hands=hands,
+                masks=masks,
+                cumulative_probabilities=cumulative_probabilities,
+                mode=mode,
+                board=board,
+                board_mask=board_mask,
+                batch_size=batch_count,
+                attempt_budget=min(attempts_remaining, _MAX_BATCH_ATTEMPTS),
+                rng=rng,
+            )
+        )
+
+        # The batch kernel evaluates all valid hands before returning, even if
+        # it exhausted its attempt allowance partway through the batch.
+        share_sums += batch_sums
+        squared_share_sums += batch_squared_sums
+        simulations += batch_simulations
+        attempts += batch_attempts
+
+        if adaptive and simulations >= min_samples:
+            _, margins = _equity_statistics(
+                share_sums,
+                squared_share_sums,
+                simulations,
+                confidence_multiplier,
+            )
+            if all(margin <= target_moe for margin in margins.values()):
+                stop_reason = "target_reached"
+                break
+
+        if simulations >= requested_samples:
+            stop_reason = "max_simulations"
+            break
+
+        if attempts >= attempt_limit:
+            stop_reason = "attempt_limit"
+            break
+
+        if batch_attempts == 0:
+            # Defensive guard against a faulty or substituted batch kernel.
+            stop_reason = "attempt_limit"
+            break
+    else:
+        stop_reason = "max_simulations"
+
+    if simulations == 0:
+        raise RuntimeError(
+            f"Sampling limit exceeded: 0/{requested_samples} valid simulations "
+            f"after {attempts} attempts"
+        )
+
+    equities, margins = _equity_statistics(
+        share_sums,
+        squared_share_sums,
+        simulations,
+        confidence_multiplier,
+    )
+    return MonteCarloResult(
+        equities=equities,
+        margins_of_error=margins,
+        simulations=simulations,
+        attempts=attempts,
+        stop_reason=stop_reason,
+    )
+
+
+def compute_equity_adaptive(
+    players: list[EncodedRange],
+    mode: Mode,
+    board: NDArray[np.uint8] | None = None,
+    *,
+    target_moe: float = 0.001,
+    confidence_multiplier: float = 1.96,
+    min_samples: int = 10_000,
+    max_samples: int = 1_000_000,
+    batch_size: int = 10_000,
+    seed: int = 3,
+    cancel_event: Event | None = None,
+) -> MonteCarloResult:
+    """Estimate equity in bounded batches until the estimated precision target.
+
+    The margins of error are approximate plug-in estimates. Repeatedly checking
+    them and stopping conditionally (optional stopping) means they are not
+    formal confidence bounds and do not guarantee 95% coverage. Rare outcomes
+    that have not yet appeared in the sample can also make the estimate
+    misleading.
+
+    If cancellation is set before the first batch, this raises
+    :class:`InterruptedError` because no estimate exists. Cancellation between
+    batches returns completed work with ``stop_reason="cancelled"``.
+    """
+    if cancel_event is not None:
+        if not isinstance(cancel_event, Event):
+            raise ValueError("cancel_event must be a threading.Event or None")
+        if cancel_event.is_set():
+            raise InterruptedError(
+                "Monte Carlo calculation cancelled before any simulations "
+                "(before validation or preparation)"
+            )
+
+    max_samples = _positive_integer(max_samples, "max_samples")
+    min_samples = _positive_integer(min_samples, "min_samples")
+    batch_size = _positive_integer(batch_size, "batch_size")
+    if max_samples > _MAX_SIMULATIONS:
+        raise ValueError(f"max_samples must not exceed {_MAX_SIMULATIONS:,}")
+    if batch_size > _MAX_BATCH_SIZE:
+        raise ValueError(f"batch_size must not exceed {_MAX_BATCH_SIZE:,}")
+    if min_samples > max_samples:
+        raise ValueError("min_samples must not exceed max_samples")
+    if (
+        isinstance(target_moe, (bool, np.bool_))
+        or not isinstance(target_moe, (int, float, np.number))
+        or not np.isfinite(target_moe)
+        or target_moe < 0
+    ):
+        raise ValueError("target_moe must be a finite non-negative number")
+    if (
+        isinstance(confidence_multiplier, (bool, np.bool_))
+        or not isinstance(confidence_multiplier, (int, float, np.number))
+        or not np.isfinite(confidence_multiplier)
+        or confidence_multiplier <= 0
+    ):
+        raise ValueError("confidence_multiplier must be a finite positive number")
+    validate_equity_inputs(
+        players, mode, board, max_samples, seed, "monte-carlo"
+    )
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError(
+            "Monte Carlo calculation cancelled before preparation"
+        )
+    hands, masks, cumulative, board_mask, rng = _prepare_monte_carlo(
+        players, board, seed
+    )
+    return _run_batched_monte_carlo(
+        hands,
+        masks,
+        cumulative,
+        mode,
+        board,
+        board_mask,
+        rng,
+        requested_samples=max_samples,
+        batch_size=batch_size,
+        attempt_limit=max(10_000, max_samples * 20),
+        adaptive=True,
+        target_moe=float(target_moe),
+        min_samples=min_samples,
+        confidence_multiplier=float(confidence_multiplier),
+        cancel_event=cancel_event,
+    )
+
+
 def compute_equity(
     players: list[EncodedRange],
     mode: Mode,
@@ -504,62 +800,56 @@ def compute_equity(
     samples: int = 100_000,
     seed: int = 3,
     method: Literal["exact", "monte-carlo"] = "monte-carlo",
+    batch_size: int = 10_000,
 ) -> dict[str, float]:
     """Calculate equity for two to six weighted PLO4/PLO5 ranges.
 
-    Validate inputs and remove board-blocked hands before delegating to exact
-    enumeration or Monte Carlo sampling. Input ranges are not modified.
-
-    Args:
-        players: Encoded player ranges, including hands, masks, and weights.
-        mode: Number of hole cards per hand (4 or 5).
-        board: Known community cards (0, 3, 4, or 5), or None preflop.
-        samples: Number of valid Monte Carlo showdowns; ignored for exact equity.
-        seed: Reproducible Monte Carlo seed; ignored for exact equity.
-        method: ``"exact"`` for exhaustive enumeration, or ``"monte-carlo"``
-            for an estimated result. Exact enumeration uses its default
-            workload safeguard.
-
-    Returns:
-        A mapping from player labels to equity shares in [0, 1].
-
-    Raises:
-        ValueError: If inputs are invalid or all eligible matchups are absent
-            (the latter is explicitly detected by the exact method).
-        RuntimeError: If the selected method exceeds its workload or attempt
-            budget.
+    Monte Carlo calls retain fixed-sample behavior: ``samples`` means exactly
+    that many valid showdowns, processed in batches no larger than
+    ``batch_size``. Use :func:`compute_equity_adaptive` for precision-based
+    stopping and its diagnostic result. Input ranges are not modified.
     """
+    batch_size = _positive_integer(batch_size, "batch_size")
+    if method == "monte-carlo":
+        samples = _positive_integer(samples, "samples")
+        if samples > _MAX_SIMULATIONS:
+            raise ValueError(f"samples must not exceed {_MAX_SIMULATIONS:,}")
+        if batch_size > _MAX_BATCH_SIZE:
+            raise ValueError(f"batch_size must not exceed {_MAX_BATCH_SIZE:,}")
+
     validate_equity_inputs(players, mode, board, samples, seed, method)
 
-    valid_players = prepare_ranges(players, board)
-
     if method == "exact":
+        valid_players = prepare_ranges(players, board)
         return run_exact_equity(
             players=valid_players,
             mode=mode,
-            board=board
+            board=board,
         )
-    
-    probabilities = prepare_probabilities(valid_players)
-    hands = List([p.hands for p in valid_players])
-    masks = List([p.masks for p in valid_players])   
-    rng = np.random.default_rng(seed)
-    board_mask = np.uint64(0) if board is None else build_mask(board)
-    cumulative = List()
 
-    for p in probabilities:
-        cdf = np.cumsum(p)
-        cdf[-1] = 1.0
-        cumulative.append(cdf)
-
-    return run_monte_carlo(
-        hands=hands,
-        masks=masks,
-        cumulative_probabilities=cumulative,
-        mode=mode,
-        board=board,
-        board_mask=board_mask,
-        samples=samples,
-        rng=rng,
+    hands, masks, cumulative, board_mask, rng = _prepare_monte_carlo(
+        players, board, seed
     )
+    result = _run_batched_monte_carlo(
+        hands,
+        masks,
+        cumulative,
+        mode,
+        board,
+        board_mask,
+        rng,
+        requested_samples=int(samples),
+        batch_size=batch_size,
+        attempt_limit=max(10_000, int(samples) * 20),
+        adaptive=False,
+        target_moe=0.0,
+        min_samples=int(samples),
+        confidence_multiplier=1.96,
+    )
+    if result.stop_reason == "attempt_limit":
+        raise RuntimeError(
+            f"Sampling limit exceeded: {result.simulations}/{samples} valid "
+            f"simulations after {result.attempts} attempts"
+        )
+    return result.equities
 

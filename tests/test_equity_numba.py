@@ -1,8 +1,10 @@
 from itertools import combinations, islice
+from threading import Event
 
+import numba
 import numpy as np
 import pytest
-import numba
+
 import plorangelab.equity_numba as equity_module
 from plorangelab.encoder import (
     EncodedRange,
@@ -11,7 +13,6 @@ from plorangelab.encoder import (
     encode_range,
 )
 from plorangelab.equity_numba import compute_equity
-
 
 RIVER = "2c3d5h7s9c"
 TURN = "2c3d5h7s"
@@ -28,7 +29,7 @@ def _configured_ranges(
     player_count: int, mode: int, multi_hand: bool
 ) -> tuple[list[EncodedRange], np.ndarray]:
     board = encode_board(RIVER)
-    blocked = set(int(card) for card in board)
+    blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
     cards_per_player = mode + 1 if multi_hand else mode
     players = []
@@ -472,7 +473,7 @@ def test_monte_carlo_raises_when_attempt_limit_is_exceeded() -> None:
 
 def test_exact_equity_raises_when_workload_limit_is_exceeded() -> None:
     board = encode_board(RIVER)
-    board_cards = set(int(card) for card in board)
+    board_cards = {int(card) for card in board}
     available = [card for card in range(52) if card not in board_cards]
     rows = list(islice(combinations(available, 4), 400))
     large_range = _make_range_from_ids(rows, mode=4)
@@ -555,3 +556,368 @@ def test_monte_carlo_deterministic_across_thread_counts() -> None:
 
     finally:
         numba.set_num_threads(original_threads)
+
+
+def _guaranteed_split_players() -> tuple[list[EncodedRange], np.ndarray]:
+    board = encode_board("3d4h5s9cTc")
+    players = [
+        encode_range("6c7cAsAh", 4),
+        encode_range("6d7dKsKh", 4),
+    ]
+    return players, board
+
+
+def test_adaptive_monte_carlo_stops_when_target_is_reached() -> None:
+    players, board = _guaranteed_split_players()
+
+    result = equity_module.compute_equity_adaptive(
+        players,
+        mode=4,
+        board=board,
+        target_moe=0.001,
+        min_samples=4,
+        max_samples=12,
+        batch_size=4,
+        seed=13,
+    )
+
+    assert result.stop_reason == "target_reached"
+    assert result.simulations == 4
+    assert result.attempts == 4
+    assert result.equities == {"player 1:": 0.5, "player 2:": 0.5}
+    assert result.margins_of_error == {"player 1:": 0.0, "player 2:": 0.0}
+
+
+def test_adaptive_stops_at_max_samples_when_precision_is_not_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _guaranteed_split_players()
+    sample_index = 0
+
+    def varying_batch(**kwargs: object):
+        nonlocal sample_index
+        count = int(kwargs["batch_size"])
+        first_player_shares = np.asarray(
+            [1.0 if (sample_index + offset) % 2 == 0 else 0.0 for offset in range(count)]
+        )
+        sample_index += count
+        first_sum = float(first_player_shares.sum())
+        second_sum = float(count - first_sum)
+        return (
+            np.asarray([first_sum, second_sum]),
+            np.asarray(
+                [float(np.square(first_player_shares).sum()), second_sum]
+            ),
+            count,
+            count,
+        )
+
+    monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", varying_batch)
+    result = equity_module.compute_equity_adaptive(
+        players,
+        mode=4,
+        board=board,
+        target_moe=0.0,
+        min_samples=2,
+        max_samples=5,
+        batch_size=2,
+        seed=13,
+    )
+
+    assert result.stop_reason == "max_simulations"
+    assert result.simulations == 5
+    assert result.attempts == 5
+    assert result.margins_of_error["player 1:"] > 0
+    assert result.margins_of_error["player 2:"] > 0
+
+
+def test_equity_statistics_include_split_pots_and_sample_variance() -> None:
+    # Observations are (1, 0), (0.5, 0.5), and (0, 1): one split pot.
+    equities, margins = equity_module._equity_statistics(
+        np.asarray([1.5, 1.5]),
+        np.asarray([1.25, 1.25]),
+        simulations=3,
+        confidence_multiplier=1.96,
+    )
+
+    expected_moe = 1.96 * np.sqrt(0.25 / 3)
+    assert equities == {"player 1:": 0.5, "player 2:": 0.5}
+    assert margins["player 1:"] == pytest.approx(expected_moe)
+    assert margins["player 2:"] == pytest.approx(expected_moe)
+
+
+def test_adaptive_cancellation_before_execution_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _guaranteed_split_players()
+    cancelled = Event()
+    cancelled.set()
+
+    def unexpected_batch(**kwargs: object):
+        raise AssertionError("the batch kernel must not run after pre-cancellation")
+
+    monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", unexpected_batch)
+    with pytest.raises(InterruptedError, match="before any simulations"):
+        equity_module.compute_equity_adaptive(
+            players,
+            mode=4,
+            board=board,
+            min_samples=2,
+            max_samples=4,
+            batch_size=2,
+            cancel_event=cancelled,
+        )
+
+
+def test_adaptive_cancellation_between_batches_returns_partial_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _guaranteed_split_players()
+    cancelled = Event()
+    calls = 0
+
+    def tied_batch(**kwargs: object):
+        nonlocal calls
+        calls += 1
+        count = int(kwargs["batch_size"])
+        cancelled.set()
+        return (
+            np.asarray([count * 0.5, count * 0.5]),
+            np.asarray([count * 0.25, count * 0.25]),
+            count,
+            count,
+        )
+
+    monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", tied_batch)
+    result = equity_module.compute_equity_adaptive(
+        players,
+        mode=4,
+        board=board,
+        min_samples=4,
+        max_samples=8,
+        batch_size=2,
+        cancel_event=cancelled,
+    )
+
+    assert calls == 1
+    assert result.stop_reason == "cancelled"
+    assert result.simulations == 2
+    assert result.equities == {"player 1:": 0.5, "player 2:": 0.5}
+
+
+def test_attempt_limit_returns_partial_adaptive_batch_without_losing_successes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _guaranteed_split_players()
+    calls = 0
+
+    def exhausting_batch(**kwargs: object):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return (
+                np.asarray([1.0, 0.0]),
+                np.asarray([1.0, 0.0]),
+                1,
+                9_999,
+            )
+        assert kwargs["attempt_budget"] == 1
+        return (
+            np.asarray([0.0, 0.0]),
+            np.asarray([0.0, 0.0]),
+            0,
+            1,
+        )
+
+    monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", exhausting_batch)
+    result = equity_module.compute_equity_adaptive(
+        players,
+        mode=4,
+        board=board,
+        min_samples=1,
+        max_samples=4,
+        batch_size=2,
+    )
+
+    assert result.stop_reason == "attempt_limit"
+    assert result.simulations == 1
+    assert result.attempts == 10_000
+    assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
+
+
+def test_fixed_sample_seeded_result_matches_legacy_and_is_batch_independent() -> None:
+    players = [
+        encode_range("AsAhKdQc", 4),
+        encode_range("KsKhJdTd", 4),
+    ]
+    board = encode_board(TURN)
+
+    small_batches = compute_equity(
+        players, mode=4, board=board, samples=5_000, seed=31, batch_size=127
+    )
+    single_batch = compute_equity(
+        players, mode=4, board=board, samples=5_000, seed=31, batch_size=10_000
+    )
+
+    assert small_batches == single_batch
+    assert small_batches == {"player 1:": 0.9762, "player 2:": 0.0238}
+
+
+def test_fixed_sample_memory_is_bounded_by_batch_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _configured_ranges(2, mode=4, multi_hand=False)
+    original_batch = equity_module._run_monte_carlo_batch
+    allocated_batch_sizes: list[int] = []
+
+    def recording_batch(**kwargs: object):
+        allocated_batch_sizes.append(int(kwargs["batch_size"]))
+        return original_batch(**kwargs)
+
+    monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", recording_batch)
+    result = compute_equity(
+        players, mode=4, board=board, samples=11, seed=17, batch_size=4
+    )
+
+    assert sum(allocated_batch_sizes) == 11
+    assert allocated_batch_sizes == [4, 4, 3]
+    assert max(allocated_batch_sizes) <= 4
+    assert sum(result.values()) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    ("call", "kwargs", "message"),
+    [
+        ("fixed", {"samples": 1_000_001}, "samples must not exceed"),
+        ("fixed", {"batch_size": 100_001}, "batch_size must not exceed"),
+        ("adaptive", {"max_samples": 1_000_001}, "max_samples must not exceed"),
+        ("adaptive", {"batch_size": 100_001}, "batch_size must not exceed"),
+    ],
+)
+def test_monte_carlo_rejects_resource_limits(
+    call: str, kwargs: dict[str, int], message: str
+) -> None:
+    players, board = _guaranteed_split_players()
+
+    with pytest.raises(ValueError, match=message):
+        if call == "fixed":
+            compute_equity(players, mode=4, board=board, **kwargs)
+        else:
+            equity_module.compute_equity_adaptive(
+                players, mode=4, board=board, **kwargs
+            )
+
+
+def test_adaptive_cancellation_precedes_input_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _guaranteed_split_players()
+    cancelled = Event()
+    cancelled.set()
+
+    def unexpected_validation(*args: object, **kwargs: object) -> None:
+        raise AssertionError("cancelled work must skip input validation")
+
+    monkeypatch.setattr(
+        equity_module, "validate_equity_inputs", unexpected_validation
+    )
+    with pytest.raises(InterruptedError, match="before validation or preparation"):
+        equity_module.compute_equity_adaptive(
+            players, mode=4, board=board, cancel_event=cancelled
+        )
+
+
+def test_adaptive_cancellation_after_validation_skips_preparation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _guaranteed_split_players()
+    cancelled = Event()
+
+    def cancel_during_validation(*args: object, **kwargs: object) -> None:
+        cancelled.set()
+
+    def unexpected_preparation(*args: object, **kwargs: object):
+        raise AssertionError("cancelled work must skip range preparation")
+
+    monkeypatch.setattr(
+        equity_module, "validate_equity_inputs", cancel_during_validation
+    )
+    monkeypatch.setattr(
+        equity_module, "_prepare_monte_carlo", unexpected_preparation
+    )
+    with pytest.raises(InterruptedError, match="before preparation"):
+        equity_module.compute_equity_adaptive(
+            players, mode=4, board=board, cancel_event=cancelled
+        )
+
+
+def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players, board = _guaranteed_split_players()
+    cancelled = Event()
+    calls = 0
+
+    def capped_batch(**kwargs: object):
+        nonlocal calls
+        calls += 1
+        assert kwargs["attempt_budget"] == equity_module._MAX_BATCH_ATTEMPTS
+        if calls == 1:
+            return (
+                np.asarray([0.0, 0.0]),
+                np.asarray([0.0, 0.0]),
+                0,
+                equity_module._MAX_BATCH_ATTEMPTS,
+            )
+        cancelled.set()
+        return (
+            np.asarray([1.0, 0.0]),
+            np.asarray([1.0, 0.0]),
+            1,
+            1,
+        )
+
+    monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", capped_batch)
+    result = equity_module.compute_equity_adaptive(
+        players,
+        mode=4,
+        board=board,
+        target_moe=0.0,
+        min_samples=1,
+        max_samples=20_000,
+        batch_size=10_000,
+        cancel_event=cancelled,
+    )
+
+    assert calls == 2
+    assert result.stop_reason == "cancelled"
+    assert result.simulations == 1
+    assert result.attempts == equity_module._MAX_BATCH_ATTEMPTS + 1
+    assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
+
+
+def test_fixed_sample_results_are_reproducible_across_batch_sizes_with_three_way_ties(
+) -> None:
+    board = encode_board("3d4h5s9cTc")
+    players = [
+        encode_range("6c7cAsAh", 4),
+        encode_range("6d7dKsKh", 4),
+        encode_range("6h7hQsQd", 4),
+    ]
+    results = [
+        compute_equity(
+            players,
+            mode=4,
+            board=board,
+            samples=101,
+            seed=23,
+            batch_size=batch_size,
+        )
+        for batch_size in (7, 31, 101)
+    ]
+
+    for result in results[1:]:
+        np.testing.assert_allclose(
+            list(result.values()), list(results[0].values()), rtol=0, atol=1e-15
+        )
+    assert list(results[0].values()) == pytest.approx([1 / 3, 1 / 3, 1 / 3])

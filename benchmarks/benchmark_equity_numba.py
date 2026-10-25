@@ -7,10 +7,10 @@ import random
 import statistics
 import sys
 import timeit
+from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import combinations, islice
 from math import comb, prod
-from collections.abc import Callable
 
 import numba
 import numpy as np
@@ -18,10 +18,10 @@ from numba.typed import List
 
 from plorangelab.encoder import EncodedRange, build_mask
 from plorangelab.equity_numba import (
+    _run_batched_monte_carlo,
     compute_equity,
     prepare_probabilities,
     prepare_ranges,
-    run_monte_carlo,
 )
 
 
@@ -187,7 +187,7 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument(
         "--core", action="store_true",
-        help="Also benchmark run_monte_carlo() with preparation excluded",
+        help="Also benchmark the batched simulation coordinator without preparation",
     )
     parser.add_argument("--threads", type=int, default=8)
     args = parser.parse_args()
@@ -248,16 +248,23 @@ def main() -> None:
             ) -> dict[str, float]:
                 # Reuse rng to exclude generator creation from core timing.
                 # Its state advances, so repeated calls remain independent.
-                return run_monte_carlo(
-                    hands=hands,
-                    masks=masks,
-                    cumulative_probabilities=cumulative,
-                    mode=mode,
-                    board=board,
-                    board_mask=board_mask,
-                    samples=samples,
-                    rng=rng,
+                result = _run_batched_monte_carlo(
+                    hands,
+                    masks,
+                    cumulative,
+                    mode,
+                    board,
+                    board_mask,
+                    rng,
+                    requested_samples=samples,
+                    batch_size=10_000,
+                    attempt_limit=max(10_000, samples * 20),
+                    adaptive=False,
+                    target_moe=0.0,
+                    min_samples=samples,
+                    confidence_multiplier=1.96,
                 )
+                return result.equities
 
             benchmark(
                 s.label + " | simulation core only",
