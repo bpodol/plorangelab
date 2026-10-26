@@ -53,6 +53,12 @@ def validate_equity_inputs(
     board: NDArray[np.uint8] | None,
     seed: int,
     method: Literal["auto", "exact", "monte-carlo"],
+    target_moe: float = 0.001,
+    confidence_multiplier: float = 1.96,
+    min_samples: int = 10_000,
+    max_samples: int = _MAX_SIMULATIONS,
+    batch_size: int = 10_000,
+
 ) -> None:
     """Validate the public equity API's parameters and encoded range invariants.
 
@@ -157,6 +163,29 @@ def validate_equity_inputs(
     if not isinstance(method, str) or method not in ("auto", "exact", "monte-carlo"):
         raise ValueError("Method must be 'auto', 'exact', or 'monte-carlo'")
 
+    max_samples = _positive_integer(max_samples, "max_samples")
+    min_samples = _positive_integer(min_samples, "min_samples")
+    batch_size = _positive_integer(batch_size, "batch_size")
+    if max_samples > _MAX_SIMULATIONS:
+        raise ValueError(f"max_samples must not exceed {_MAX_SIMULATIONS:,}")
+    if batch_size > _MAX_BATCH_SIZE:
+        raise ValueError(f"batch_size must not exceed {_MAX_BATCH_SIZE:,}")
+    if min_samples > max_samples:
+        raise ValueError("min_samples must not exceed max_samples")
+    if (
+        isinstance(target_moe, (bool, np.bool_))
+        or not isinstance(target_moe, (int, float, np.number))
+        or not np.isfinite(target_moe)
+        or target_moe < 0
+    ):
+        raise ValueError("target_moe must be a finite non-negative number")
+    if (
+        isinstance(confidence_multiplier, (bool, np.bool_))
+        or not isinstance(confidence_multiplier, (int, float, np.number))
+        or not np.isfinite(confidence_multiplier)
+        or confidence_multiplier <= 0
+    ):
+        raise ValueError("confidence_multiplier must be a finite positive number")
 
 
 def sanitize_range(player: EncodedRange, board_mask: np.uint64) -> EncodedRange:
@@ -247,35 +276,25 @@ def compute_equity(
                 "(before validation or preparation)"
             )
 
-    max_samples = _positive_integer(max_samples, "max_samples")
-    min_samples = _positive_integer(min_samples, "min_samples")
-    batch_size = _positive_integer(batch_size, "batch_size")
-    if max_samples > _MAX_SIMULATIONS:
-        raise ValueError(f"max_samples must not exceed {_MAX_SIMULATIONS:,}")
-    if batch_size > _MAX_BATCH_SIZE:
-        raise ValueError(f"batch_size must not exceed {_MAX_BATCH_SIZE:,}")
-    if min_samples > max_samples:
-        raise ValueError("min_samples must not exceed max_samples")
-    if (
-        isinstance(target_moe, (bool, np.bool_))
-        or not isinstance(target_moe, (int, float, np.number))
-        or not np.isfinite(target_moe)
-        or target_moe < 0
-    ):
-        raise ValueError("target_moe must be a finite non-negative number")
-    if (
-        isinstance(confidence_multiplier, (bool, np.bool_))
-        or not isinstance(confidence_multiplier, (int, float, np.number))
-        or not np.isfinite(confidence_multiplier)
-        or confidence_multiplier <= 0
-    ):
-        raise ValueError("confidence_multiplier must be a finite positive number")
-
-    validate_equity_inputs(players, mode, board, seed, method)
+    
+    validate_equity_inputs(
+        players, 
+        mode, 
+        board, 
+        seed, 
+        method, 
+        target_moe, 
+        confidence_multiplier, 
+        min_samples, 
+        max_samples, 
+        batch_size
+    )
+    
     if cancel_event is not None and cancel_event.is_set():
         raise InterruptedError("Monte Carlo calculation cancelled before preparation")
 
     valid_players = prepare_ranges(players, board)
+    
     if method == "auto":
         _, estimated_showdowns = _estimate_exact_showdowns(valid_players, mode, board)
         selected_method = choose_method(
@@ -283,7 +302,7 @@ def compute_equity(
         )
     else:
         selected_method = method
-
+    
     if selected_method == "exact":
         equities = run_exact_equity(
             players=valid_players,
@@ -304,6 +323,7 @@ def compute_equity(
     hands, masks, cumulative, board_mask, rng = _prepare_monte_carlo(
         valid_players, board, seed
     )
+    
     # Measure independent hand-selection acceptance only for larger
     # multiway calculations.
     use_importance = False
@@ -320,7 +340,7 @@ def compute_equity(
         )
 
         use_importance = accepted < 10
-
+  
     if use_importance:
         probabilities = List([
             player.weights.astype(np.float64)
@@ -363,6 +383,7 @@ def compute_equity(
             confidence_multiplier=float(confidence_multiplier),
             cancel_event=cancel_event,
         )
+  
     return EquityResult(
         equities=result.equities,
         method="monte-carlo",

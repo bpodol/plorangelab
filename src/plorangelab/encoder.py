@@ -32,6 +32,7 @@ SUITS_ENCODE = {
 RANKS_DECODE = ("2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A")
 SUITS_DECODE = ("c", "d", "h", "s")
 
+
 @dataclass
 class EncodedRange:
     """Encoded hands, masks, and strictly positive per-hand weights."""
@@ -39,6 +40,7 @@ class EncodedRange:
     hands: NDArray[np.uint8]
     masks: NDArray[np.uint64]
     weights: NDArray[np.float32]
+
 
 def build_mask(cards: np.uint8) -> np.uint64:
     """
@@ -62,7 +64,6 @@ def build_mask(cards: np.uint8) -> np.uint64:
     return np.uint64(mask)
 
 
-
 def _encode_card(card: str) -> int:
     """Encode a two-character card as an integer from 0 to 51.
 
@@ -73,7 +74,6 @@ def _encode_card(card: str) -> int:
         return 4 * RANKS_ENCODE[rank] + SUITS_ENCODE[suit]
     except KeyError as exc:
         raise ValueError(f"invalid card: {card!r}") from exc
-
 
 
 def _encode_hand(hand: str, mode: Mode) -> list[int]:
@@ -89,9 +89,10 @@ def _encode_hand(hand: str, mode: Mode) -> list[int]:
     encoded_cards.sort(reverse=True)
     return encoded_cards
 
+
 def encode_board(board: str) -> NDArray[np.uint8]:
     if len(board) not in (6, 8, 10):  # for flop: 3*2, turn: 4*2, and river: 5*2
-            raise ValueError("board must contain 3, 4, or 5 two-character cards")
+        raise ValueError("board must contain 3, 4, or 5 two-character cards")
     cards = [board[index : index + 2] for index in range(0, len(board), 2)]
     encoded_cards = [_encode_card(card) for card in cards]
 
@@ -106,11 +107,16 @@ def decode_card(card_id: int) -> str:
 
     Example: ``decode_card(51)`` returns ``"As"``.
     """
-    if not isinstance(card_id, int) or isinstance(card_id, bool) or not 0 <= card_id < 52:
+    if (
+        not isinstance(card_id, int)
+        or isinstance(card_id, bool)
+        or not 0 <= card_id < 52
+    ):
         raise ValueError("card_id must be an integer from 0 to 51")
 
     rank, suit = divmod(card_id, 4)
     return RANKS_DECODE[rank] + SUITS_DECODE[suit]
+
 
 def decode_hand(hand: NDArray[np.uint8], mode: Mode) -> str:
     """Decode a 4- or 5-card array of card IDs into a concatenated card string.
@@ -121,10 +127,11 @@ def decode_hand(hand: NDArray[np.uint8], mode: Mode) -> str:
     if mode not in (4, 5):
         raise ValueError("mode must be 4 or 5")
     if hand.ndim != 1 or len(hand) != mode:
-        raise ValueError(f"hand must be a one-dimensional array of exactly {mode} card IDs")
+        raise ValueError(
+            f"hand must be a one-dimensional array of exactly {mode} card IDs"
+        )
 
     return "".join(decode_card(int(card_id)) for card_id in hand)
-
 
 
 @njit(cache=True)
@@ -214,7 +221,6 @@ def _encode_hands_kernel(
     return encoded_hands, masks, 0, -1
 
 
-
 def _encode_hands(
     hand_strings: list[str],
     weight_values: list[float],
@@ -229,29 +235,20 @@ def _encode_hands(
         ).reshape(len(hand_strings), mode * 2)
 
     except UnicodeEncodeError as exc:
-        raise ValueError(
-            "Hand contains a non-ASCII card character"
-        ) from exc
+        raise ValueError("Hand contains a non-ASCII card character") from exc
 
-    encoded_hands, masks, status, error_index = (
-        _encode_hands_kernel(packed_chars, mode)
-    )
+    encoded_hands, masks, status, error_index = _encode_hands_kernel(packed_chars, mode)
 
     if status == 1:
-        raise ValueError(
-            f"invalid card in hand: {hand_strings[error_index]!r}"
-        )
+        raise ValueError(f"invalid card in hand: {hand_strings[error_index]!r}")
 
     if status == 2:
         raise ValueError(
-            f"hand cannot contain duplicate cards: "
-            f"{hand_strings[error_index]!r}"
+            f"hand cannot contain duplicate cards: {hand_strings[error_index]!r}"
         )
 
     if status == 3:
-        raise ValueError(
-            f"duplicate hand in range: {hand_strings[error_index]!r}"
-        )
+        raise ValueError(f"duplicate hand in range: {hand_strings[error_index]!r}")
 
     weights = np.asarray(weight_values, dtype=np.float32)
 
@@ -262,10 +259,7 @@ def _encode_hands(
     )
 
 
-
-def encode_range(
-    hands: str, mode: Mode
-) -> EncodedRange:
+def encode_range(hands: str, mode: Mode) -> EncodedRange:
     """Encode comma-separated hands and optional weights.
 
     Each entry is a hand optionally followed by ``@weight`` in range @1-@100. Missing weights
@@ -274,7 +268,7 @@ def encode_range(
     Example: ``encode_range("AsKsQhJhTh@100,AdKdQcJcTc@43", 5)`` returns
     ``(hands, weights)`` with shapes ``(2, 5)`` and ``(2,)``.
     """
-    
+
     if mode not in (4, 5):
         raise ValueError("mode must be 4 or 5")
 
@@ -292,7 +286,7 @@ def encode_range(
             weight = 1.0
         else:
             try:
-                weight = float(parts[1])/100
+                weight = float(parts[1]) / 100
             except ValueError as exc:
                 raise ValueError(f"invalid weight in range entry: {entry!r}") from exc
             if not np.isfinite(weight) or not 0 < weight <= 1:
@@ -302,5 +296,5 @@ def encode_range(
         weight_values.append(weight)
 
     encoded_range = _encode_hands(hand_strings, weight_values, mode)
-    
+
     return encoded_range
