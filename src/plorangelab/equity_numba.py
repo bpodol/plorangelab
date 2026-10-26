@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from itertools import combinations
 from math import comb, prod, sqrt
 from threading import Event
 from typing import Literal
@@ -12,10 +11,11 @@ from numpy.typing import NDArray
 from plorangelab.encoder import EncodedRange, Mode, build_mask
 from plorangelab.evaluator_numba import numba_evaluate_hands
 
-_MAX_SIMULATIONS = 1_000_000
+_MAX_SIMULATIONS = 1_200_000
 _MAX_BATCH_SIZE = 100_000  # About 8 MiB for six-player PLO5 batch buffers.
 _MAX_BATCH_ATTEMPTS = 100_000  # Maximum work between coordinator checks.
 _EXACT_PARALLEL_MIN_SHOWDOWNS = 1_000
+_EXACT_MAX_SHOWDOWNS = 500_000
 
 
 StopReason = Literal[
@@ -24,14 +24,37 @@ StopReason = Literal[
 
 
 @dataclass(frozen=True)
+class EquityResult:
+    """Equity values and, for Monte Carlo, stopping diagnostics."""
+
+    equities: dict[str, float]
+    method: Literal["exact", "monte-carlo"]
+    margins_of_error: dict[str, float | None] | None
+    simulations: int | None
+    attempts: int | None
+    stop_reason: StopReason | None
+
+
+@dataclass(frozen=True)
 class MonteCarloResult:
     """Equity estimates and stopping diagnostics for an adaptive run."""
 
     equities: dict[str, float]
-    margins_of_error: dict[str, float]
+    margins_of_error: dict[str, float | None]
     simulations: int
     attempts: int
     stop_reason: StopReason
+
+def choose_method(
+    board_cards: int, estimated_showdowns: int
+) -> Literal["exact", "monte-carlo"]:
+    if board_cards == 0:
+        return "monte-carlo"
+
+    if estimated_showdowns <= _EXACT_MAX_SHOWDOWNS:
+        return "exact"
+
+    return "monte-carlo"
 
 @njit(cache=True)
 def check_collisions(masks: NDArray[np.uint64]) -> bool:
@@ -82,15 +105,14 @@ def validate_equity_inputs(
     players: list[EncodedRange],
     mode: Mode,
     board: NDArray[np.uint8] | None,
-    samples: int,
     seed: int,
-    method: Literal["exact", "monte-carlo"]
+    method: Literal["auto", "exact", "monte-carlo"],
 ) -> None:
     """Validate the public equity API's parameters and encoded range invariants.
 
-    Checks player count, PLO mode, board cards, sample count, seed, array
-    shapes and dtypes, card uniqueness, hand-mask consistency, and strictly
-    positive finite weights.
+    Checks player count, PLO mode, board cards, seed, array shapes and dtypes,
+    card uniqueness, hand-mask consistency, and strictly positive finite
+    weights.
     Does not check whether a compatible multi-player matchup exists.
 
     Raises:
@@ -101,9 +123,6 @@ def validate_equity_inputs(
 
     if not 2 <= len(players) <= 6:
         raise ValueError("Expected 2 to 6 players")
-
-    if isinstance(samples, (bool, np.bool_)) or not isinstance(samples, (int, np.integer)) or samples <= 0:
-        raise ValueError("Samples must be a positive integer")
 
     if isinstance(seed, (bool, np.bool_)) or not isinstance(seed, (int, np.integer)) or seed < 0:
         raise ValueError("Seed must be a non-negative integer")
@@ -189,8 +208,8 @@ def validate_equity_inputs(
         ):
             raise ValueError(f"Player {i + 1} has invalid weights")
 
-    if not isinstance(method, str) or method not in ("exact", "monte-carlo"):
-        raise ValueError("Method must be 'exact' or 'monte-carlo'")
+    if not isinstance(method, str) or method not in ("auto", "exact", "monte-carlo"):
+        raise ValueError("Method must be 'auto', 'exact', or 'monte-carlo'")
 
 def sanitize_range(player: EncodedRange, board_mask: np.uint64) -> EncodedRange:
     """Return a new range with all board-blocked hands removed.
@@ -697,11 +716,27 @@ def _run_exact_equity_kernel_parallel(
 
     return pot_shares, total_weight
 
+
+def _estimate_exact_showdowns(
+    players: list[EncodedRange],
+    mode: Mode,
+    board: NDArray[np.uint8] | None,
+) -> tuple[int, int]:
+    """Return candidate hand matchups and the conservative showdown estimate."""
+    player_count = len(players)
+    board_len = 0 if board is None else len(board)
+    missing_board = 5 - board_len
+    remaining_cards = 52 - board_len - player_count * mode
+    candidate_matchups = prod(len(player.hands) for player in players)
+    estimated_showdowns = candidate_matchups * comb(remaining_cards, missing_board)
+    return candidate_matchups, estimated_showdowns
+
+
 def run_exact_equity(
     players: list[EncodedRange],
     mode: Mode,
     board: NDArray[np.uint8] | None = None,
-    max_showdowns: int | None = 100_000,
+    max_showdowns: int | None = _EXACT_MAX_SHOWDOWNS,
 ) -> dict[str, float]:
     """Calculate exact weighted equity with the suitable Numba kernel.
 
@@ -724,8 +759,6 @@ def run_exact_equity(
         RuntimeError: If the estimated workload exceeds max_showdowns.
     """
     player_count = len(players)
-    board_len = 0 if board is None else len(board)
-    missing_board = 5 - board_len
 
     board_mask = (
         np.uint64(0)
@@ -734,11 +767,8 @@ def run_exact_equity(
     )
 
     # Conservative upper bound that ignores collisions.
-    remaining_cards = 52 - board_len - player_count * mode
-
-    candidate_matchups = prod(len(player.hands) for player in players)
-    estimated_showdowns = candidate_matchups * comb(
-        remaining_cards, missing_board
+    candidate_matchups, estimated_showdowns = _estimate_exact_showdowns(
+        players, mode, board
     )
 
     if (
@@ -824,11 +854,10 @@ def _prepare_monte_carlo(
     np.uint64,
     np.random.Generator,
 ]:
-    """Prepare validated Numba inputs and one RNG shared by all batches."""
-    valid_players = prepare_ranges(players, board)
-    probabilities = prepare_probabilities(valid_players)
-    hands = List([player.hands for player in valid_players])
-    masks = List([player.masks for player in valid_players])
+    """Prepare validated, board-filtered Numba inputs and a shared RNG."""
+    probabilities = prepare_probabilities(players)
+    hands = List([player.hands for player in players])
+    masks = List([player.masks for player in players])
     cumulative = List()
 
     for probability in probabilities:
@@ -845,7 +874,7 @@ def _equity_statistics(
     squared_share_sums: NDArray[np.float64],
     simulations: int,
     confidence_multiplier: float,
-) -> tuple[dict[str, float], dict[str, float]]:
+) -> tuple[dict[str, float], dict[str, float | None]]:
     equities: dict[str, float] = {}
     margins: dict[str, float | None] = {}
 
@@ -883,7 +912,6 @@ def _run_batched_monte_carlo(
     requested_samples: int,
     batch_size: int,
     attempt_limit: int,
-    adaptive: bool,
     target_moe: float,
     min_samples: int,
     confidence_multiplier: float,
@@ -925,7 +953,7 @@ def _run_batched_monte_carlo(
             break
 
         batch_count = min(batch_size, requested_samples - simulations)
-        if adaptive and simulations < min_samples:
+        if simulations < min_samples:
             batch_count = min(batch_count, min_samples - simulations)
 
         batch_sums, batch_squared_sums, batch_simulations, batch_attempts = (
@@ -949,7 +977,7 @@ def _run_batched_monte_carlo(
         simulations += batch_simulations
         attempts += batch_attempts
 
-        if adaptive and simulations >= min_samples:
+        if simulations >= min_samples:
             _, margins = _equity_statistics(
                 share_sums,
                 squared_share_sums,
@@ -996,30 +1024,28 @@ def _run_batched_monte_carlo(
     )
 
 
-def compute_equity_adaptive(
+def compute_equity(
     players: list[EncodedRange],
     mode: Mode,
     board: NDArray[np.uint8] | None = None,
     *,
+    method: Literal["auto", "exact", "monte-carlo"] = "auto",
     target_moe: float = 0.001,
     confidence_multiplier: float = 1.96,
     min_samples: int = 10_000,
-    max_samples: int = 1_000_000,
+    max_samples: int = _MAX_SIMULATIONS,
     batch_size: int = 10_000,
     seed: int = 3,
     cancel_event: Event | None = None,
-) -> MonteCarloResult:
-    """Estimate equity in bounded batches until the estimated precision target.
+) -> EquityResult:
+    """Calculate equity exactly or with adaptive Monte Carlo.
 
-    The margins of error are approximate plug-in estimates. Repeatedly checking
-    them and stopping conditionally (optional stopping) means they are not
-    formal confidence bounds and do not guarantee 95% coverage. Rare outcomes
-    that have not yet appeared in the sample can also make the estimate
-    misleading.
-
-    If cancellation is set before the first batch, this raises
-    :class:`InterruptedError` because no estimate exists. Cancellation between
-    batches returns completed work with ``stop_reason="cancelled"``.
+    Automatic selection uses exact enumeration for postflop estimates no
+    greater than ``_EXACT_MAX_SHOWDOWNS`` and adaptive Monte Carlo otherwise.
+    Monte Carlo margins are approximate plug-in estimates; repeated checks and
+    conditional stopping do not provide formal confidence bounds. Cancellation
+    is checked between Monte Carlo batches. Exact kernels cannot be interrupted
+    during execution.
     """
     if cancel_event is not None:
         if not isinstance(cancel_event, Event):
@@ -1053,17 +1079,41 @@ def compute_equity_adaptive(
         or confidence_multiplier <= 0
     ):
         raise ValueError("confidence_multiplier must be a finite positive number")
-    validate_equity_inputs(
-        players, mode, board, max_samples, seed, "monte-carlo"
-    )
+
+    validate_equity_inputs(players, mode, board, seed, method)
     if cancel_event is not None and cancel_event.is_set():
-        raise InterruptedError(
-            "Monte Carlo calculation cancelled before preparation"
+        raise InterruptedError("Monte Carlo calculation cancelled before preparation")
+
+    valid_players = prepare_ranges(players, board)
+    if method == "auto":
+        _, estimated_showdowns = _estimate_exact_showdowns(valid_players, mode, board)
+        selected_method = choose_method(
+            0 if board is None else len(board), estimated_showdowns
         )
+    else:
+        selected_method = method
+
+    if selected_method == "exact":
+        equities = run_exact_equity(
+            players=valid_players,
+            mode=mode,
+            board=board,
+        )
+        return EquityResult(
+            equities=equities,
+            method="exact",
+            margins_of_error=None,
+            simulations=None,
+            attempts=None,
+            stop_reason=None,
+        )
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Monte Carlo calculation cancelled before preparation")
     hands, masks, cumulative, board_mask, rng = _prepare_monte_carlo(
-        players, board, seed
+        valid_players, board, seed
     )
-    return _run_batched_monte_carlo(
+    result = _run_batched_monte_carlo(
         hands,
         masks,
         cumulative,
@@ -1074,71 +1124,17 @@ def compute_equity_adaptive(
         requested_samples=max_samples,
         batch_size=batch_size,
         attempt_limit=max(10_000, max_samples * 20),
-        adaptive=True,
         target_moe=float(target_moe),
         min_samples=min_samples,
         confidence_multiplier=float(confidence_multiplier),
         cancel_event=cancel_event,
     )
-
-
-def compute_equity(
-    players: list[EncodedRange],
-    mode: Mode,
-    board: NDArray[np.uint8] | None = None,
-    samples: int = 100_000,
-    seed: int = 3,
-    method: Literal["exact", "monte-carlo"] = "monte-carlo",
-    batch_size: int = 10_000,
-) -> dict[str, float]:
-    """Calculate equity for two to six weighted PLO4/PLO5 ranges.
-
-    Monte Carlo calls retain fixed-sample behavior: ``samples`` means exactly
-    that many valid showdowns, processed in batches no larger than
-    ``batch_size``. Use :func:`compute_equity_adaptive` for precision-based
-    stopping and its diagnostic result. Input ranges are not modified.
-    """
-    batch_size = _positive_integer(batch_size, "batch_size")
-    if method == "monte-carlo":
-        samples = _positive_integer(samples, "samples")
-        if samples > _MAX_SIMULATIONS:
-            raise ValueError(f"samples must not exceed {_MAX_SIMULATIONS:,}")
-        if batch_size > _MAX_BATCH_SIZE:
-            raise ValueError(f"batch_size must not exceed {_MAX_BATCH_SIZE:,}")
-
-    validate_equity_inputs(players, mode, board, samples, seed, method)
-
-    if method == "exact":
-        valid_players = prepare_ranges(players, board)
-        return run_exact_equity(
-            players=valid_players,
-            mode=mode,
-            board=board,
-        )
-
-    hands, masks, cumulative, board_mask, rng = _prepare_monte_carlo(
-        players, board, seed
+    return EquityResult(
+        equities=result.equities,
+        method="monte-carlo",
+        margins_of_error=result.margins_of_error,
+        simulations=result.simulations,
+        attempts=result.attempts,
+        stop_reason=result.stop_reason,
     )
-    result = _run_batched_monte_carlo(
-        hands,
-        masks,
-        cumulative,
-        mode,
-        board,
-        board_mask,
-        rng,
-        requested_samples=int(samples),
-        batch_size=batch_size,
-        attempt_limit=max(10_000, int(samples) * 20),
-        adaptive=False,
-        target_moe=0.0,
-        min_samples=int(samples),
-        confidence_multiplier=1.96,
-    )
-    if result.stop_reason == "attempt_limit":
-        raise RuntimeError(
-            f"Sampling limit exceeded: {result.simulations}/{samples} valid "
-            f"simulations after {result.attempts} attempts"
-        )
-    return result.equities
 

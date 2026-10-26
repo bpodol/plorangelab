@@ -1,4 +1,4 @@
-from itertools import combinations, islice
+﻿from itertools import combinations, islice
 from threading import Event
 
 import numba
@@ -76,7 +76,9 @@ def test_exact_equity_returns_guaranteed_winner_and_loser() -> None:
         encode_range("KsKhJdTd", 4),
     ]
 
-    equity = compute_equity(players, mode=4, board=encode_board(RIVER), method="exact")
+    equity = compute_equity(
+        players, mode=4, board=encode_board(RIVER), method="exact"
+    ).equities
 
     assert equity == {"player 1:": 1.0, "player 2:": 0.0}
 
@@ -87,7 +89,9 @@ def test_exact_equity_splits_a_guaranteed_tie_equally() -> None:
         encode_range("AdAcKsQh", 4),
     ]
 
-    equity = compute_equity(players, mode=4, board=encode_board(RIVER), method="exact")
+    equity = compute_equity(
+        players, mode=4, board=encode_board(RIVER), method="exact"
+    ).equities
 
     assert equity["player 1:"] == pytest.approx(0.5)
     assert equity["player 2:"] == pytest.approx(0.5)
@@ -101,7 +105,7 @@ def test_exact_equity_splits_a_three_way_tie_into_thirds() -> None:
         encode_range("Ah5hKcJc", 4),
     ]
 
-    equity = compute_equity(players, mode=4, board=board, method="exact")
+    equity = compute_equity(players, mode=4, board=board, method="exact").equities
 
     for value in equity.values():
         assert value == pytest.approx(1 / 3)
@@ -113,7 +117,9 @@ def test_exact_equity_respects_range_weights() -> None:
         encode_range("KsKhJcTc", 4),
     ]
 
-    equity = compute_equity(players, mode=4, board=encode_board(RIVER), method="exact")
+    equity = compute_equity(
+        players, mode=4, board=encode_board(RIVER), method="exact"
+    ).equities
 
     assert equity["player 1:"] == pytest.approx(2 / 3)
     assert equity["player 2:"] == pytest.approx(1 / 3)
@@ -125,7 +131,9 @@ def test_board_blocked_hands_are_removed_before_calculation() -> None:
         encode_range("KsKhJcTc", 4),
     ]
 
-    equity = compute_equity(players, mode=4, board=encode_board(RIVER), method="exact")
+    equity = compute_equity(
+        players, mode=4, board=encode_board(RIVER), method="exact"
+    ).equities
 
     assert equity == {"player 1:": 0.0, "player 2:": 1.0}
 
@@ -144,7 +152,7 @@ def test_exact_equity_excludes_colliding_hands() -> None:
         mode=4,
         board=encode_board(RIVER),
         method="exact",
-    )
+    ).equities
 
     assert equity == {
         "player 1:": 0.0,
@@ -164,10 +172,12 @@ def test_monte_carlo_rejects_colliding_hands() -> None:
         players,
         mode=4,
         board=encode_board(RIVER),
-        samples=200,
+        target_moe=0.0,
+        min_samples=200,
+        max_samples=200,
         seed=7,
         method="monte-carlo",
-    )
+    ).equities
 
     assert equity == {"player 1:": 0.0, "player 2:": 1.0}
 
@@ -186,7 +196,7 @@ def test_exact_equity_supports_player_modes_and_range_sizes(
 ) -> None:
     players, board = _configured_ranges(player_count, mode, multi_hand)
 
-    equity = compute_equity(players, mode=mode, board=board, method="exact")
+    equity = compute_equity(players, mode=mode, board=board, method="exact").equities
 
     assert list(equity) == [f"player {index}:" for index in range(1, player_count + 1)]
     assert sum(equity.values()) == pytest.approx(1.0)
@@ -204,7 +214,15 @@ def test_monte_carlo_supports_each_board_state(board_text: str | None) -> None:
         encode_range("KsKhJdTd", 4),
     ]
 
-    equity = compute_equity(players, mode=4, board=board, samples=8, seed=19)
+    equity = compute_equity(
+        players,
+        mode=4,
+        board=board,
+        method="monte-carlo",
+        min_samples=8,
+        max_samples=8,
+        seed=19,
+    ).equities
 
     assert sum(equity.values()) == pytest.approx(1.0)
 
@@ -217,10 +235,12 @@ def test_equities_conserve_the_pot(method: str) -> None:
         players,
         mode=5,
         board=board,
-        samples=50,
+        target_moe=0.0,
+        min_samples=50,
+        max_samples=50,
         seed=23,
         method=method,  # type: ignore[arg-type]
-    )
+    ).equities
 
     assert sum(equity.values()) == pytest.approx(1.0)
 
@@ -232,10 +252,17 @@ def test_exact_and_monte_carlo_equity_agree_within_sampling_tolerance() -> None:
     ]
     board = encode_board(TURN)
 
-    exact = compute_equity(players, mode=4, board=board, method="exact")
+    exact = compute_equity(players, mode=4, board=board, method="exact").equities
     sampled = compute_equity(
-        players, mode=4, board=board, samples=5_000, seed=31, method="monte-carlo"
-    )
+        players,
+        mode=4,
+        board=board,
+        min_samples=5_000,
+        max_samples=5_000,
+        target_moe=0.0,
+        seed=31,
+        method="monte-carlo",
+    ).equities
 
     for player in exact:
         assert sampled[player] == pytest.approx(exact[player], abs=0.01)
@@ -248,15 +275,17 @@ def test_exact_and_monte_carlo_agree_for_weighted_multi_hand_ranges() -> None:
     ]
     board = encode_board(RIVER)
 
-    exact = compute_equity(players, mode=4, board=board, method="exact")
+    exact = compute_equity(players, mode=4, board=board, method="exact").equities
     sampled = compute_equity(
         players,
         mode=4,
         board=board,
-        samples=20_000,
+        target_moe=0.0,
+        min_samples=20_000,
+        max_samples=20_000,
         seed=47,
         method="monte-carlo",
-    )
+    ).equities
 
     assert 0 < exact["player 1:"] < 1
     assert 0 < exact["player 2:"] < 1
@@ -297,11 +326,17 @@ def test_monte_carlo_flop_agrees_with_exact_equity() -> None:
         encode_range("KsKhJdTd", 4),
     ]
     board = encode_board("2c3d5h")
-    exact = compute_equity(players, mode=4, board=board, method="exact")
+    exact = compute_equity(players, mode=4, board=board, method="exact").equities
     sampled = compute_equity(
-        players, mode=4, board=board, samples=5_000, seed=53,
+        players,
+        mode=4,
+        board=board,
+        min_samples=5_000,
+        max_samples=5_000,
+        target_moe=0.0,
+        seed=53,
         method="monte-carlo",
-    )
+    ).equities
 
     for player in exact:
         assert sampled[player] == pytest.approx(exact[player], abs=0.02)
@@ -315,8 +350,26 @@ def test_monte_carlo_results_are_reproducible_for_the_same_seed() -> None:
     ]
     board = encode_board("2c3d5h")
 
-    first = compute_equity(players, mode=4, board=board, samples=300, seed=101)
-    second = compute_equity(players, mode=4, board=board, samples=300, seed=101)
+    first = compute_equity(
+        players,
+        mode=4,
+        board=board,
+        min_samples=300,
+        max_samples=300,
+        target_moe=0.0,
+        seed=101,
+        method="monte-carlo",
+    ).equities
+    second = compute_equity(
+        players,
+        mode=4,
+        board=board,
+        min_samples=300,
+        max_samples=300,
+        target_moe=0.0,
+        seed=101,
+        method="monte-carlo",
+    ).equities
 
     assert first == second
 
@@ -467,12 +520,17 @@ def test_exact_equity_rejects_matchups_with_no_compatible_hands() -> None:
         compute_equity(players, mode=4, board=encode_board(RIVER), method="exact")
 
 
-@pytest.mark.parametrize("samples", [0, -1, 1.5, True])
-def test_compute_equity_rejects_invalid_sample_counts(samples: object) -> None:
+@pytest.mark.parametrize("max_samples", [0, -1, 1.5, True])
+def test_compute_equity_rejects_invalid_sample_limits(max_samples: object) -> None:
     players = [encode_range("AsAhKdQc", 4), encode_range("KsKhJdTd", 4)]
 
     with pytest.raises(ValueError):
-        compute_equity(players, mode=4, samples=samples)  # type: ignore[arg-type]
+        compute_equity(
+            players,
+            mode=4,
+            max_samples=max_samples,  # type: ignore[arg-type]
+            method="monte-carlo",
+        )
 
 
 @pytest.mark.parametrize("seed", [-1, 1.5, True])
@@ -494,7 +552,8 @@ def test_monte_carlo_raises_when_attempt_limit_is_exceeded() -> None:
             players,
             mode=4,
             board=encode_board(RIVER),
-            samples=1,
+            min_samples=1,
+            max_samples=1,
             seed=5,
             method="monte-carlo",
         )
@@ -504,7 +563,7 @@ def test_exact_equity_raises_when_workload_limit_is_exceeded() -> None:
     board = encode_board(RIVER)
     board_cards = {int(card) for card in board}
     available = [card for card in range(52) if card not in board_cards]
-    rows = list(islice(combinations(available, 4), 400))
+    rows = list(islice(combinations(available, 4), 708))
     large_range = _make_range_from_ids(rows, mode=4)
 
     with pytest.raises(RuntimeError, match="workload limit"):
@@ -524,9 +583,7 @@ def test_exact_equity_is_invariant_to_weight_scaling(scale):
 
     board = encode_board("2c3d5h7s9c")
 
-    baseline = compute_equity(
-        players, mode=4, board=board, method="exact"
-    )
+    baseline = compute_equity(players, mode=4, board=board, method="exact").equities
 
     scaled_players = [
         EncodedRange(
@@ -539,7 +596,7 @@ def test_exact_equity_is_invariant_to_weight_scaling(scale):
 
     actual = compute_equity(
         scaled_players, mode=4, board=board, method="exact"
-    )
+    ).equities
 
     for player in baseline:
         assert actual[player] == pytest.approx(
@@ -561,7 +618,9 @@ def test_calculation_does_not_modify_original_ranges(method: str) -> None:
         players,
         mode=4,
         board=encode_board(RIVER),
-        samples=50,
+        target_moe=0.0,
+        min_samples=50,
+        max_samples=50,
         seed=41,
         method=method,  # type: ignore[arg-type]
     )
@@ -579,7 +638,6 @@ def test_compute_equity_rejects_invalid_computation_method() -> None:
         compute_equity(
             players,
             mode=4,
-            samples=1,
             method="approximate",  # type: ignore[arg-type]
         )
 
@@ -611,7 +669,9 @@ def test_monte_carlo_deterministic_across_thread_counts() -> None:
                 players=players,
                 mode=5,
                 board=board,
-                samples=10_000,
+                min_samples=10_000,
+                max_samples=10_000,
+                target_moe=0.0,
                 seed=42,
                 method="monte-carlo",
             )
@@ -633,13 +693,176 @@ def _guaranteed_split_players() -> tuple[list[EncodedRange], np.ndarray]:
     return players, board
 
 
+def _river_candidate_range(count: int) -> EncodedRange:
+    board = encode_board(RIVER)
+    available = [card for card in range(52) if card not in set(map(int, board))]
+    hands = list(islice(combinations(available, 4), count))
+    return _make_range_from_ids(hands, mode=4)
+
+
+def _stub_monte_carlo_coordinator(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        equity_module,
+        "_run_batched_monte_carlo",
+        lambda *args, **kwargs: equity_module.MonteCarloResult(
+            equities={"player 1:": 0.75, "player 2:": 0.25},
+            margins_of_error={"player 1:": 0.1, "player 2:": 0.1},
+            simulations=4,
+            attempts=5,
+            stop_reason="target_reached",
+        ),
+    )
+
+
+def _stub_exact_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        equity_module,
+        "run_exact_equity",
+        lambda **kwargs: {"player 1:": 1.0, "player 2:": 0.0},
+    )
+
+
+def test_auto_uses_adaptive_monte_carlo_preflop_and_returns_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    players = [
+        encode_range("AsAhKdQc", 4),
+        encode_range("KsKhJdTd", 4),
+    ]
+    _stub_monte_carlo_coordinator(monkeypatch)
+
+    result = compute_equity(players, mode=4, method="auto")
+
+    assert result.method == "monte-carlo"
+    assert result.equities == {"player 1:": 0.75, "player 2:": 0.25}
+    assert result.margins_of_error == {"player 1:": 0.1, "player 2:": 0.1}
+    assert result.simulations == 4
+    assert result.attempts == 5
+    assert result.stop_reason == "target_reached"
+
+
+def test_auto_uses_exact_for_a_small_postflop_workload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    board = encode_board(RIVER)
+    players = [
+        _river_candidate_range(1),
+        _river_candidate_range(1),
+    ]
+    _stub_exact_calculation(monkeypatch)
+
+    result = compute_equity(players, mode=4, board=board)
+
+    assert result.method == "exact"
+    assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
+    assert result.margins_of_error is None
+    assert result.simulations is None
+    assert result.attempts is None
+    assert result.stop_reason is None
+
+
+def test_auto_uses_exact_at_the_showdown_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    board = encode_board(RIVER)
+    players = [_river_candidate_range(500), _river_candidate_range(1_000)]
+    _stub_exact_calculation(monkeypatch)
+
+    result = compute_equity(players, mode=4, board=board)
+
+    assert result.method == "exact"
+
+
+def test_auto_uses_monte_carlo_above_the_showdown_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    board = encode_board(RIVER)
+    players = [_river_candidate_range(501), _river_candidate_range(1_000)]
+    _stub_monte_carlo_coordinator(monkeypatch)
+
+    result = compute_equity(players, mode=4, board=board)
+
+    assert result.method == "monte-carlo"
+
+
+def test_auto_estimates_after_removing_board_blocked_hands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    board = encode_board(RIVER)
+    available = [card for card in range(52) if card not in set(map(int, board))]
+    blocked_hand = (int(board[0]), *available[:3])
+    players = [
+        _make_range_from_ids(
+            [blocked_hand, *list(islice(combinations(available, 4), 500))],
+            mode=4,
+        ),
+        _river_candidate_range(1_000),
+    ]
+    captured: dict[str, int] = {}
+    original_choose_method = equity_module.choose_method
+
+    def observe_estimate(board_cards: int, estimated_showdowns: int):
+        captured["board_cards"] = board_cards
+        captured["estimated_showdowns"] = estimated_showdowns
+        return original_choose_method(board_cards, estimated_showdowns)
+
+    def exact_after_filtering(**kwargs: object):
+        captured["first_range_size"] = len(kwargs["players"][0].hands)
+        captured["second_range_size"] = len(kwargs["players"][1].hands)
+        return {"player 1:": 1.0, "player 2:": 0.0}
+
+    monkeypatch.setattr(equity_module, "choose_method", observe_estimate)
+    monkeypatch.setattr(equity_module, "run_exact_equity", exact_after_filtering)
+    result = compute_equity(players, mode=4, board=board)
+
+    assert result.method == "exact"
+    assert captured == {
+        "board_cards": 5,
+        "estimated_showdowns": 500_000,
+        "first_range_size": 500,
+        "second_range_size": 1_000,
+    }
+
+
+@pytest.mark.parametrize("method", ["exact", "monte-carlo"])
+def test_explicit_method_overrides_bypass_auto_selection(
+    method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    board = encode_board(RIVER)
+    players = [
+        _river_candidate_range(1),
+        _river_candidate_range(1),
+    ]
+
+    def unexpected_selection(*args: object, **kwargs: object):
+        raise AssertionError("explicit methods must bypass automatic selection")
+
+    monkeypatch.setattr(equity_module, "choose_method", unexpected_selection)
+    if method == "exact":
+        _stub_exact_calculation(monkeypatch)
+        result = compute_equity(players, mode=4, board=board, method="exact")
+    else:
+        _stub_monte_carlo_coordinator(monkeypatch)
+        result = compute_equity(
+            players,
+            mode=4,
+            board=board,
+            method="monte-carlo",
+            min_samples=1,
+            max_samples=1,
+        )
+
+    assert result.method == method
+
+
 def test_adaptive_monte_carlo_stops_when_target_is_reached() -> None:
     players, board = _guaranteed_split_players()
 
-    result = equity_module.compute_equity_adaptive(
+    result = equity_module.compute_equity(
         players,
         mode=4,
         board=board,
+        method="monte-carlo",
         target_moe=0.001,
         min_samples=4,
         max_samples=12,
@@ -647,6 +870,7 @@ def test_adaptive_monte_carlo_stops_when_target_is_reached() -> None:
         seed=13,
     )
 
+    assert result.method == "monte-carlo"
     assert result.stop_reason == "target_reached"
     assert result.simulations == 4
     assert result.attempts == 4
@@ -679,10 +903,11 @@ def test_adaptive_stops_at_max_samples_when_precision_is_not_reached(
         )
 
     monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", varying_batch)
-    result = equity_module.compute_equity_adaptive(
+    result = equity_module.compute_equity(
         players,
         mode=4,
         board=board,
+        method="monte-carlo",
         target_moe=0.0,
         min_samples=2,
         max_samples=5,
@@ -724,10 +949,11 @@ def test_adaptive_cancellation_before_execution_raises(
 
     monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", unexpected_batch)
     with pytest.raises(InterruptedError, match="before any simulations"):
-        equity_module.compute_equity_adaptive(
+        equity_module.compute_equity(
             players,
             mode=4,
             board=board,
+            method="monte-carlo",
             min_samples=2,
             max_samples=4,
             batch_size=2,
@@ -755,10 +981,11 @@ def test_adaptive_cancellation_between_batches_returns_partial_estimate(
         )
 
     monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", tied_batch)
-    result = equity_module.compute_equity_adaptive(
+    result = equity_module.compute_equity(
         players,
         mode=4,
         board=board,
+        method="monte-carlo",
         min_samples=4,
         max_samples=8,
         batch_size=2,
@@ -796,10 +1023,11 @@ def test_attempt_limit_returns_partial_adaptive_batch_without_losing_successes(
         )
 
     monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", exhausting_batch)
-    result = equity_module.compute_equity_adaptive(
+    result = equity_module.compute_equity(
         players,
         mode=4,
         board=board,
+        method="monte-carlo",
         min_samples=1,
         max_samples=4,
         batch_size=2,
@@ -811,7 +1039,7 @@ def test_attempt_limit_returns_partial_adaptive_batch_without_losing_successes(
     assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
 
 
-def test_fixed_sample_seeded_result_matches_legacy_and_is_batch_independent() -> None:
+def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent() -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("KsKhJdTd", 4),
@@ -819,17 +1047,33 @@ def test_fixed_sample_seeded_result_matches_legacy_and_is_batch_independent() ->
     board = encode_board(TURN)
 
     small_batches = compute_equity(
-        players, mode=4, board=board, samples=5_000, seed=31, batch_size=127
-    )
+        players,
+        mode=4,
+        board=board,
+        min_samples=5_000,
+        max_samples=5_000,
+        target_moe=0.0,
+        seed=31,
+        method="monte-carlo",
+        batch_size=127,
+    ).equities
     single_batch = compute_equity(
-        players, mode=4, board=board, samples=5_000, seed=31, batch_size=10_000
-    )
+        players,
+        mode=4,
+        board=board,
+        min_samples=5_000,
+        max_samples=5_000,
+        target_moe=0.0,
+        seed=31,
+        method="monte-carlo",
+        batch_size=10_000,
+    ).equities
 
     assert small_batches == single_batch
     assert small_batches == {"player 1:": 0.9762, "player 2:": 0.0238}
 
 
-def test_fixed_sample_memory_is_bounded_by_batch_size(
+def test_fixed_budget_memory_is_bounded_by_batch_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     players, board = _configured_ranges(2, mode=4, multi_hand=False)
@@ -842,36 +1086,37 @@ def test_fixed_sample_memory_is_bounded_by_batch_size(
 
     monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", recording_batch)
     result = compute_equity(
-        players, mode=4, board=board, samples=11, seed=17, batch_size=4
+        players,
+        mode=4,
+        board=board,
+        min_samples=11,
+        max_samples=11,
+        target_moe=0.0,
+        seed=17,
+        method="monte-carlo",
+        batch_size=4,
     )
 
     assert sum(allocated_batch_sizes) == 11
     assert allocated_batch_sizes == [4, 4, 3]
     assert max(allocated_batch_sizes) <= 4
-    assert sum(result.values()) == pytest.approx(1.0)
+    assert sum(result.equities.values()) == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize(
-    ("call", "kwargs", "message"),
+    ("kwargs", "message"),
     [
-        ("fixed", {"samples": 1_000_001}, "samples must not exceed"),
-        ("fixed", {"batch_size": 100_001}, "batch_size must not exceed"),
-        ("adaptive", {"max_samples": 1_000_001}, "max_samples must not exceed"),
-        ("adaptive", {"batch_size": 100_001}, "batch_size must not exceed"),
+        ({"max_samples": 1_200_001}, "max_samples must not exceed"),
+        ({"batch_size": 100_001}, "batch_size must not exceed"),
     ],
 )
 def test_monte_carlo_rejects_resource_limits(
-    call: str, kwargs: dict[str, int], message: str
+    kwargs: dict[str, int], message: str
 ) -> None:
     players, board = _guaranteed_split_players()
 
     with pytest.raises(ValueError, match=message):
-        if call == "fixed":
-            compute_equity(players, mode=4, board=board, **kwargs)
-        else:
-            equity_module.compute_equity_adaptive(
-                players, mode=4, board=board, **kwargs
-            )
+        compute_equity(players, mode=4, board=board, method="monte-carlo", **kwargs)
 
 
 def test_adaptive_cancellation_precedes_input_validation(
@@ -888,8 +1133,12 @@ def test_adaptive_cancellation_precedes_input_validation(
         equity_module, "validate_equity_inputs", unexpected_validation
     )
     with pytest.raises(InterruptedError, match="before validation or preparation"):
-        equity_module.compute_equity_adaptive(
-            players, mode=4, board=board, cancel_event=cancelled
+        equity_module.compute_equity(
+            players,
+            mode=4,
+            board=board,
+            method="monte-carlo",
+            cancel_event=cancelled,
         )
 
 
@@ -912,8 +1161,12 @@ def test_adaptive_cancellation_after_validation_skips_preparation(
         equity_module, "_prepare_monte_carlo", unexpected_preparation
     )
     with pytest.raises(InterruptedError, match="before preparation"):
-        equity_module.compute_equity_adaptive(
-            players, mode=4, board=board, cancel_event=cancelled
+        equity_module.compute_equity(
+            players,
+            mode=4,
+            board=board,
+            method="monte-carlo",
+            cancel_event=cancelled,
         )
 
 
@@ -944,10 +1197,11 @@ def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
         )
 
     monkeypatch.setattr(equity_module, "_run_monte_carlo_batch", capped_batch)
-    result = equity_module.compute_equity_adaptive(
+    result = equity_module.compute_equity(
         players,
         mode=4,
         board=board,
+        method="monte-carlo",
         target_moe=0.0,
         min_samples=1,
         max_samples=20_000,
@@ -962,8 +1216,7 @@ def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
     assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
 
 
-def test_fixed_sample_results_are_reproducible_across_batch_sizes_with_three_way_ties(
-) -> None:
+def test_fixed_budget_three_way_ties_are_batch_independent() -> None:
     board = encode_board("3d4h5s9cTc")
     players = [
         encode_range("6c7cAsAh", 4),
@@ -975,10 +1228,13 @@ def test_fixed_sample_results_are_reproducible_across_batch_sizes_with_three_way
             players,
             mode=4,
             board=board,
-            samples=101,
+            target_moe=0.0,
+            min_samples=101,
+            max_samples=101,
             seed=23,
+            method="monte-carlo",
             batch_size=batch_size,
-        )
+        ).equities
         for batch_size in (7, 31, 101)
     ]
 
@@ -1136,7 +1392,7 @@ def test_exact_public_api_uses_sequential_kernel_with_one_numba_thread(
         parallel_must_not_run,
     )
     result = compute_equity(players, mode=4, board=board, method="exact")
-    assert sum(result.values()) == pytest.approx(1.0)
+    assert sum(result.equities.values()) == pytest.approx(1.0)
 
 
 def test_parallel_exact_preserves_multiway_split_pots() -> None:
@@ -1221,7 +1477,7 @@ def test_parallel_exact_is_reproducible_across_thread_counts(mode: int) -> None:
                 players, mode=mode, board=board, method="exact"
             )
             assert repeated == first
-            results.append(list(first.values()))
+            results.append(list(first.equities.values()))
     finally:
         numba.set_num_threads(original_threads)
 

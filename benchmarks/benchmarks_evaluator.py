@@ -14,7 +14,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from plorangelab.encoder import encode_board, encode_range
-from plorangelab.evaluator import evaluate_hands
 from plorangelab.evaluator_numba import (
     numba_evaluate_hands,
     numba_evaluate_hands_parallel,
@@ -99,22 +98,6 @@ def generate_hands(
     return np.array(hands, dtype=np.uint8)
 
 
-def benchmark_evaluate_hands() -> None:
-    """Slow pure-Python reference benchmark; intentionally limited sizes."""
-    board = encode_board("2c3d4h5s6c")
-
-    for mode in (4, 5):
-        for n in (100, 1_000):
-            hands = generate_hands(n, mode, board)
-            benchmark(
-                f"Python PLO{mode} | {n:,} hands",
-                lambda: evaluate_hands(hands, board),
-                items_per_call=n,
-                iterations=1,
-                repeats=5,
-            )
-
-
 def benchmark_numba_evaluate_hands() -> None:
     board = encode_board("2c3d4h5s6c")
 
@@ -129,6 +112,7 @@ def benchmark_numba_evaluate_hands() -> None:
                 repeats=11,
             )
 
+
 def benchmark_numba_evaluate_hands_parallel() -> None:
     board = encode_board("2c3d4h5s6c")
 
@@ -142,7 +126,6 @@ def benchmark_numba_evaluate_hands_parallel() -> None:
                 iterations=5 if n == 1_000 else 1,
                 repeats=11,
             )
-
 
 
 # -------- Evaluator microbenchmarks (sequential JIT, no threading) --------
@@ -317,6 +300,4 @@ if __name__ == "__main__":
     # benchmark_evaluator_stages()
     benchmark_numba_evaluate_hands_parallel()
     # benchmark_numba_evaluate_hands()
-    # Uncomment when needed:
-    #benchmark_evaluate_hands()
     # benchmark_encode_range()
