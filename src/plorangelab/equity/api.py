@@ -34,6 +34,7 @@ class EquityResult:
     effective_samples: float | None = None
 
 
+
 def choose_method(
     board_cards: int, estimated_showdowns: int
 ) -> Literal["exact", "monte-carlo"]:
@@ -127,15 +128,15 @@ def validate_equity_inputs(
             or not np.issubdtype(player.weights.dtype, np.floating)
         ):
             raise ValueError(f"Player {i + 1} has invalid weights")
-
+       
         if np.any(player.hands >= 52):
             raise ValueError(f"Player {i + 1} contains invalid cards")
-
+        
         sorted_hands = np.sort(player.hands, axis=1)
 
         if np.any(sorted_hands[:, 1:] == sorted_hands[:, :-1]):
             raise ValueError(f"Player {i + 1} contains duplicate cards within a hand")
-
+        
         expected_masks = np.zeros(n, dtype=np.uint64)
 
         for j in range(mode):
@@ -145,10 +146,12 @@ def validate_equity_inputs(
 
         if not np.array_equal(player.masks, expected_masks):
             raise ValueError(f"Player {i + 1} contains incorrect masks")
+        
+        sorted_masks = np.sort(player.masks)
 
-        if len(np.unique(player.masks)) != n:
+        if np.any(sorted_masks[1:] == sorted_masks[:-1]):
             raise ValueError(f"Player {i + 1} contains duplicate hands")
-
+        
         weights = player.weights.astype(np.float64)
         total = weights.sum()
 
