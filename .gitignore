@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+temp.py
+real_ranges.txt

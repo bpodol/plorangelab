@@ -128,7 +128,7 @@ def validate_equity_inputs(
             or not np.issubdtype(player.weights.dtype, np.floating)
         ):
             raise ValueError(f"Player {i + 1} has invalid weights")
-       
+
         if np.any(player.hands >= 52):
             raise ValueError(f"Player {i + 1} contains invalid cards")
         
