@@ -83,3 +83,39 @@ def test_multiple_hands_keep_weights_aligned_with_rows() -> None:
     np.testing.assert_array_equal(encoded.weights, [0.25, 1.0, 0.5])
 
 
+import pytest
+import numpy as np
+
+from plorangelab.encoder import encode_range
+
+
+def test_duplicate_hand_different_order():
+    with pytest.raises(ValueError, match="duplicate hand"):
+        encode_range(
+            "AsKdQcJhTs,TsJhQcKdAs",
+            mode=5,
+        )
+
+
+def test_duplicate_card_in_hand():
+    with pytest.raises(ValueError, match="duplicate cards"):
+        encode_range("AsAsQcJhTs", mode=5)
+
+
+def test_invalid_card():
+    with pytest.raises(ValueError, match="invalid card"):
+        encode_range("ZsKdQcJhTs", mode=5)
+
+
+def test_encoded_hand_and_mask():
+    result = encode_range("AsKdQcJhTs@75", mode=5)
+
+    np.testing.assert_array_equal(
+        result.hands[0],
+        np.array([51, 45, 40, 38, 35], dtype=np.uint8),
+    )
+
+    assert result.masks[0] == sum(
+        1 << int(card) for card in result.hands[0]
+    )
+    assert result.weights[0] == pytest.approx(0.75)

@@ -2,6 +2,8 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Literal
 from dataclasses import dataclass
+from time import perf_counter
+from numba import njit
 
 Mode = Literal[4, 5]
 
@@ -59,6 +61,8 @@ def build_mask(cards: np.uint8) -> np.uint64:
 
     return np.uint64(mask)
 
+
+
 def _encode_card(card: str) -> int:
     """Encode a two-character card as an integer from 0 to 51.
 
@@ -69,6 +73,8 @@ def _encode_card(card: str) -> int:
         return 4 * RANKS_ENCODE[rank] + SUITS_ENCODE[suit]
     except KeyError as exc:
         raise ValueError(f"invalid card: {card!r}") from exc
+
+
 
 def _encode_hand(hand: str, mode: Mode) -> list[int]:
     """Encode a concatenated 4- or 5-card hand as a list of card IDs.
@@ -120,6 +126,143 @@ def decode_hand(hand: NDArray[np.uint8], mode: Mode) -> str:
     return "".join(decode_card(int(card_id)) for card_id in hand)
 
 
+
+@njit(cache=True)
+def _encode_hands_kernel(
+    packed_chars: NDArray[np.uint8],
+    mode: int,
+) -> tuple[NDArray[np.uint8], NDArray[np.uint64], int, int]:
+    """Encode ASCII card bytes into sorted hands and card masks.
+
+    Status codes:
+        0: Success
+        1: Invalid card
+        2: Duplicate card within hand
+        3: Duplicate hand within range
+    """
+    n = packed_chars.shape[0]
+
+    encoded_hands = np.empty((n, mode), dtype=np.uint8)
+    masks = np.empty(n, dtype=np.uint64)
+
+    seen = set()
+
+    for i in range(n):
+        mask = np.uint64(0)
+
+        for j in range(mode):
+            rank_char = packed_chars[i, 2 * j]
+            suit_char = packed_chars[i, 2 * j + 1]
+
+            # ASCII rank -> integer 0-12
+            if 50 <= rank_char <= 57:  # 2-9
+                rank = int(rank_char) - 50
+            elif rank_char == 84:  # T
+                rank = 8
+            elif rank_char == 74:  # J
+                rank = 9
+            elif rank_char == 81:  # Q
+                rank = 10
+            elif rank_char == 75:  # K
+                rank = 11
+            elif rank_char == 65:  # A
+                rank = 12
+            else:
+                return encoded_hands, masks, 1, i
+
+            # ASCII suit -> integer 0-3
+            if suit_char == 99:  # c
+                suit = 0
+            elif suit_char == 100:  # d
+                suit = 1
+            elif suit_char == 104:  # h
+                suit = 2
+            elif suit_char == 115:  # s
+                suit = 3
+            else:
+                return encoded_hands, masks, 1, i
+
+            card_id = 4 * rank + suit
+            bit = np.uint64(1) << np.uint64(card_id)
+
+            # Detect duplicate cards within one hand.
+            if mask & bit:
+                return encoded_hands, masks, 2, i
+
+            mask |= bit
+            encoded_hands[i, j] = card_id
+
+        # The mask uniquely identifies a valid hand,
+        # regardless of the order of its cards.
+        if mask in seen:
+            return encoded_hands, masks, 3, i
+
+        seen.add(mask)
+        masks[i] = mask
+
+        # Insertion sort, descending. Only 4 or 5 cards.
+        for j in range(1, mode):
+            value = encoded_hands[i, j]
+            k = j
+
+            while k > 0 and encoded_hands[i, k - 1] < value:
+                encoded_hands[i, k] = encoded_hands[i, k - 1]
+                k -= 1
+
+            encoded_hands[i, k] = value
+
+    return encoded_hands, masks, 0, -1
+
+
+
+def _encode_hands(
+    hand_strings: list[str],
+    weight_values: list[float],
+    mode: Mode,
+) -> EncodedRange:
+    """Prepare compact card data and run the Numba encoder."""
+
+    try:
+        packed_chars = np.frombuffer(
+            "".join(hand_strings).encode("ascii"),
+            dtype=np.uint8,
+        ).reshape(len(hand_strings), mode * 2)
+
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            "Hand contains a non-ASCII card character"
+        ) from exc
+
+    encoded_hands, masks, status, error_index = (
+        _encode_hands_kernel(packed_chars, mode)
+    )
+
+    if status == 1:
+        raise ValueError(
+            f"invalid card in hand: {hand_strings[error_index]!r}"
+        )
+
+    if status == 2:
+        raise ValueError(
+            f"hand cannot contain duplicate cards: "
+            f"{hand_strings[error_index]!r}"
+        )
+
+    if status == 3:
+        raise ValueError(
+            f"duplicate hand in range: {hand_strings[error_index]!r}"
+        )
+
+    weights = np.asarray(weight_values, dtype=np.float32)
+
+    return EncodedRange(
+        hands=encoded_hands,
+        masks=masks,
+        weights=weights,
+    )
+
+
+
 def encode_range(
     hands: str, mode: Mode
 ) -> EncodedRange:
@@ -131,6 +274,7 @@ def encode_range(
     Example: ``encode_range("AsKsQhJhTh@100,AdKdQcJcTc@43", 5)`` returns
     ``(hands, weights)`` with shapes ``(2, 5)`` and ``(2,)``.
     """
+    
     if mode not in (4, 5):
         raise ValueError("mode must be 4 or 5")
 
@@ -156,16 +300,7 @@ def encode_range(
 
         hand_strings.append(hand)
         weight_values.append(weight)
-    encoded_hands = np.empty((len(hand_strings), mode), dtype=np.uint8)   
-    masks = np.empty((len(hand_strings)), dtype=np.uint64)  
-    seen = set()
-    for i, hand in enumerate(hand_strings):
-        encoded_hand = _encode_hand(hand, mode)
-        key = tuple(encoded_hand)
-        if key in seen:
-            raise ValueError(f"duplicate hand in range: {hand!r}")
-        seen.add(key)
-        encoded_hands[i] = encoded_hand
-        masks[i] = build_mask(encoded_hand)
-    weights = np.asarray(weight_values, dtype=np.float32)
-    return EncodedRange(hands=encoded_hands, masks=masks, weights=weights)
+
+    encoded_range = _encode_hands(hand_strings, weight_values, mode)
+    
+    return encoded_range

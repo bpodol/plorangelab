@@ -7,7 +7,7 @@ Run from the repository root:
     uv run python benchmarks/benchmark_equity.py --suite full --production-precision
     uv run python benchmarks/benchmark_equity.py --suite stress --repeats 2
     uv run python benchmarks/benchmark_equity.py --csv benchmarks/results.csv
-    uv run python benchmarks/benchmark_equity.py --only-ranges --ranges-file benchmarks/real_ranges.txt --range-mode 5 --range-board 2c3d4s
+    uv run python benchmarks/benchmark_equity.py --only-ranges --ranges-file benchmarks/real_ranges.txt --range-mode 5 --range-board JhTd6c
 
 All results include validation, blocker filtering, algorithm setup, and calculation.
 Range generation and first-call Numba JIT compilation are excluded from timings.
