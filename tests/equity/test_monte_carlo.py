@@ -499,3 +499,82 @@ def test_fixed_budget_three_way_ties_are_batch_independent() -> None:
             list(result.values()), list(results[0].values()), rtol=0, atol=1e-15
         )
     assert list(results[0].values()) == pytest.approx([1 / 3, 1 / 3, 1 / 3])
+
+
+
+def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plorangelab.equity import api as api_module
+
+    board = encode_board(RIVER)
+
+    players = [
+        encode_range("AsAhKdQc@70,QsQhJdTd@20,6h6d4s4h@10", 4),
+        encode_range("AsQsJcTc@50,KsKhJcTc@50", 4),
+        encode_range("KsQc8c8d@55,JsJh7d7h@45", 4),
+    ]
+
+    exact = compute_equity(
+        players,
+        mode=4,
+        board=board,
+        method="exact",
+    )
+
+    # Force the importance-sampling path.
+    monkeypatch.setattr(
+        api_module,
+        "_probe_collision_acceptance",
+        lambda *args: 0,
+    )
+
+    sampled = compute_equity(
+        players,
+        mode=4,
+        board=board,
+        method="monte-carlo",
+        min_samples=20_000,
+        max_samples=20_000,
+        batch_size=2_000,
+        seed=103,
+        target_moe=0.0,
+    )
+
+    assert sampled.sampler == "importance"
+    assert sampled.simulations == 20_000
+    assert 1 < sampled.effective_samples <= sampled.simulations
+
+    assert sum(sampled.equities.values()) == pytest.approx(1.0)
+
+    for name in exact.equities:
+        assert sampled.equities[name] == pytest.approx(
+            exact.equities[name],
+            abs=0.02,
+        )
+
+
+
+def test_importance_statistics_account_for_unequal_sample_weights() -> None:
+    from plorangelab.equity.importance_sampling import _importance_statistics
+
+    equities, margins, ess = _importance_statistics(
+        4.0,
+        10.0,
+        np.array([1.0, 3.0]),
+        np.array([1.0, 9.0]),
+        np.array([1.0, 9.0]),
+        1.96,
+    )
+
+    assert equities == {
+        "player 1:": pytest.approx(0.25),
+        "player 2:": pytest.approx(0.75),
+    }
+
+    assert ess == pytest.approx(1.6)
+
+    assert margins == {
+        "player 1:": None,
+        "player 2:": None,
+    }

@@ -6,6 +6,7 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from numba.typed import List
 
 from plorangelab.encoder import EncodedRange, Mode, build_mask
 from .exact import _EXACT_MAX_SHOWDOWNS, _estimate_exact_showdowns, run_exact_equity
@@ -15,8 +16,9 @@ from .monte_carlo import (
     _prepare_monte_carlo,
     _run_batched_monte_carlo,
     StopReason,
+    _probe_collision_acceptance,
 )
-
+from .importance_sampling import _run_importance_monte_carlo
 
 @dataclass(frozen=True)
 class EquityResult:
@@ -28,7 +30,8 @@ class EquityResult:
     simulations: int | None
     attempts: int | None
     stop_reason: StopReason | None
-
+    sampler: Literal["rejection", "importance"] | None = None
+    effective_samples: float | None = None
 
 
 def choose_method(
@@ -301,22 +304,65 @@ def compute_equity(
     hands, masks, cumulative, board_mask, rng = _prepare_monte_carlo(
         valid_players, board, seed
     )
-    result = _run_batched_monte_carlo(
-        hands,
-        masks,
-        cumulative,
-        mode,
-        board,
-        board_mask,
-        rng,
-        requested_samples=max_samples,
-        batch_size=batch_size,
-        attempt_limit=max(10_000, max_samples * 20),
-        target_moe=float(target_moe),
-        min_samples=min_samples,
-        confidence_multiplier=float(confidence_multiplier),
-        cancel_event=cancel_event,
-    )
+    # Measure independent hand-selection acceptance only for larger
+    # multiway calculations.
+    use_importance = False
+
+    if len(valid_players) >= 3 and max_samples >= 1_000:
+        # Separate generator preserves the old rejection sampler's seeded output.
+        probe_rng = np.random.default_rng(int(seed) + 0x9E3779B9)
+
+        accepted = _probe_collision_acceptance(
+            masks,
+            cumulative,
+            1_024,
+            probe_rng,
+        )
+
+        use_importance = accepted < 10
+
+    if use_importance:
+        probabilities = List([
+            player.weights.astype(np.float64)
+            / player.weights.sum(dtype=np.float64)
+            for player in valid_players
+        ])
+
+        result = _run_importance_monte_carlo(
+            hands,
+            masks,
+            probabilities,
+            cumulative,
+            mode,
+            board,
+            board_mask,
+            rng,
+            requested_samples=max_samples,
+            batch_size=batch_size,
+            attempt_limit=max(10_000, max_samples * 20),
+            target_moe=float(target_moe),
+            min_samples=min_samples,
+            confidence_multiplier=float(confidence_multiplier),
+            cancel_event=cancel_event,
+        )
+
+    else:
+        result = _run_batched_monte_carlo(
+            hands,
+            masks,
+            cumulative,
+            mode,
+            board,
+            board_mask,
+            rng,
+            requested_samples=max_samples,
+            batch_size=batch_size,
+            attempt_limit=max(10_000, max_samples * 20),
+            target_moe=float(target_moe),
+            min_samples=min_samples,
+            confidence_multiplier=float(confidence_multiplier),
+            cancel_event=cancel_event,
+        )
     return EquityResult(
         equities=result.equities,
         method="monte-carlo",
@@ -324,4 +370,6 @@ def compute_equity(
         simulations=result.simulations,
         attempts=result.attempts,
         stop_reason=result.stop_reason,
+        sampler=result.sampler,
+        effective_samples=result.effective_samples,
     )

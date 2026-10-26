@@ -2,12 +2,12 @@
 
 Run from the repository root:
 
-    uv run python benchmarks/benchmark_equity_numba.py
-    uv run python benchmarks/benchmark_equity_numba.py --suite full
-    uv run python benchmarks/benchmark_equity_numba.py --suite full --production-precision
-    uv run python benchmarks/benchmark_equity_numba.py --suite stress --repeats 2
-    uv run python benchmarks/benchmark_equity_numba.py --csv benchmarks/results.csv
-    uv run python benchmarks/benchmark_equity_numba.py --only-ranges --ranges-file benchmarks/real_ranges.txt --range-mode 5 --range-board 2c3d4s
+    uv run python benchmarks/benchmark_equity.py
+    uv run python benchmarks/benchmark_equity.py --suite full
+    uv run python benchmarks/benchmark_equity.py --suite full --production-precision
+    uv run python benchmarks/benchmark_equity.py --suite stress --repeats 2
+    uv run python benchmarks/benchmark_equity.py --csv benchmarks/results.csv
+    uv run python benchmarks/benchmark_equity.py --only-ranges --ranges-file benchmarks/real_ranges.txt --range-mode 5 --range-board 2c3d4s
 
 All results include validation, blocker filtering, algorithm setup, and calculation.
 Range generation and first-call Numba JIT compilation are excluded from timings.
@@ -73,6 +73,7 @@ QUICK_SCALE = (
     Scenario("HU large flop", 5, 3, (20_000, 20_000), group="scale"),
     Scenario("HU shared-card pressure", 5, 5, (3_000, 3_000), "tight", "scale"),
     Scenario("Six-way collision pressure", 5, 5, (2_000,) * 6, group="scale"),
+    Scenario("Six-way preflop", 5, 0, (2_000,) * 6, group="scale"),
 )
 
 FULL_PAIRED = (
@@ -276,11 +277,21 @@ def display_run(
         print(f" -> {result.method}", end="")
     if result.method == "monte-carlo":
         max_moe = max((v for v in (moe or {}).values() if v is not None), default=None)
+        sampler = result.sampler or "rejection"
+        rate_name = "completion" if sampler == "importance" else "acceptance"
+
         details = (
+            f" | {sampler} sampler"
             f" | {simulations:>8,} valid / {attempts:>9,} attempts"
-            f" | acceptance {simulations / attempts:>8.4%}"
+            f" | {rate_name} {simulations / attempts:>8.4%}"
             f" | {simulations / timing.seconds:>10,.0f} valid/s"
         )
+
+        if result.effective_samples is not None:
+            details += (
+                f" | ESS {result.effective_samples:,.0f}"
+                f" | {result.effective_samples / timing.seconds:,.0f} ESS/s"
+            )
         details += f" | MOE {max_moe:.5f}" if max_moe is not None else " | MOE n/a"
         print(f"{details} | {result.stop_reason}")
     elif exact_evaluations is None:
@@ -309,7 +320,23 @@ def display_run(
         "mad_ms": round(mad_ms, 4),
         "valid_simulations": simulations,
         "attempts": attempts,
-        "acceptance": (simulations / attempts if attempts else None),
+        "sampler": result.sampler,
+        "effective_samples": result.effective_samples,
+        "effective_samples_per_second": (
+            result.effective_samples / timing.seconds
+            if result.effective_samples is not None
+            else None
+        ),
+        "acceptance": (
+            simulations / attempts
+            if attempts and result.sampler != "importance"
+            else None
+        ),
+        "completion_rate": (
+            simulations / attempts
+            if attempts and result.sampler == "importance"
+            else None
+        ),
         "valid_per_second": (simulations / timing.seconds if simulations else None),
         "max_moe": max((v for v in (moe or {}).values() if v is not None), default=None),
         "stop_reason": result.stop_reason,
@@ -502,7 +529,8 @@ def main() -> None:
             "method_requested", "method_selected", "estimated_showdowns",
             "exact_evaluations", "exact_evaluations_per_second",
             "median_ms", "mad_ms", "valid_simulations", "attempts",
-            "acceptance", "valid_per_second", "max_moe", "stop_reason",
+            "acceptance", "valid_per_second", "max_moe", "stop_reason","completion_rate",
+            "sampler", "effective_samples", "effective_samples_per_second",
         ]
         with args.csv.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=fields)

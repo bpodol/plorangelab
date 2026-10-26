@@ -31,7 +31,8 @@ class MonteCarloResult:
     simulations: int
     attempts: int
     stop_reason: StopReason
-
+    sampler: Literal["rejection", "importance"] = "rejection"
+    effective_samples: float | None = None
 
 
 @njit(cache=True)
@@ -265,6 +266,42 @@ def _prepare_monte_carlo(
 
 
 
+@njit(cache=True)
+def _probe_collision_acceptance(
+    masks: List,
+    cumulative_probabilities: List,
+    trials: int,
+    rng: np.random.Generator,
+) -> int:
+    """Estimate acceptance of independently sampled player hands."""
+    accepted = 0
+
+    for _ in range(trials):
+        occupied = np.uint64(0)
+        legal = True
+
+        for player in range(len(masks)):
+            index = np.searchsorted(
+                cumulative_probabilities[player],
+                rng.random(),
+                side="right",
+            )
+
+            mask = masks[player][index]
+
+            if occupied & mask:
+                legal = False
+                break
+
+            occupied |= mask
+
+        if legal:
+            accepted += 1
+
+    return accepted
+
+
+
 def _equity_statistics(
     share_sums: NDArray[np.float64],
     squared_share_sums: NDArray[np.float64],
@@ -419,3 +456,4 @@ def _run_batched_monte_carlo(
         attempts=attempts,
         stop_reason=stop_reason,
     )
+
