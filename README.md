@@ -72,7 +72,7 @@ Both algorithms use the same evaluator, which enforces Omaha's **exactly two hol
 ```bash
 uv run pytest
 uv run ruff check .
-uv run python benchmarks/benchmark_equity_numba.py
+uv run python benchmarks/benchmark_equity.py
 uv run python benchmarks/benchmarks_evaluator.py
 ```
 
