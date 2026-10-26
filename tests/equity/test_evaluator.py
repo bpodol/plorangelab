@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 
 from plorangelab.encoder import encode_board, encode_range
-from plorangelab.evaluator_numba import numba_evaluate_hand, numba_rank_combination
+from plorangelab.equity.evaluator import numba_evaluate_hand, numba_rank_combination
 
 
 # Each entry is ordered strongest, weaker, then (where applicable) the

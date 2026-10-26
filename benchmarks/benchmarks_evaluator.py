@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from plorangelab.encoder import encode_board, encode_range
-from plorangelab.evaluator_numba import (
+from plorangelab.equity.evaluator import (
     numba_evaluate_hands,
     numba_evaluate_hands_parallel,
     numba_rank_combination,

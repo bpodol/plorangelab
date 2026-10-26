@@ -1,4 +1,4 @@
-﻿"""Small, deterministic end-to-end benchmarks for the Numba equity API.
+"""Small, deterministic end-to-end benchmarks for the Numba equity API.
 
 Run with ``uv run python benchmarks/benchmark_equity_numba.py``. Exact and
 Monte Carlo methods are timed in separate sections; setup and first-call JIT
@@ -21,7 +21,7 @@ import numba
 import numpy as np
 
 from plorangelab.encoder import EncodedRange, build_mask
-from plorangelab.equity_numba import EquityResult, compute_equity
+from plorangelab.equity import EquityResult, compute_equity
 
 
 @dataclass(frozen=True)
