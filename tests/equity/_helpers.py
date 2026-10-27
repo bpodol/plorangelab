@@ -1,7 +1,5 @@
 """Small shared equity test data builders (not production fixtures)."""
 
-from itertools import combinations, islice
-
 import numpy as np
 
 from plorangelab.encoder import EncodedRange, build_mask, encode_board, encode_range
@@ -44,3 +42,21 @@ def _guaranteed_split_players() -> tuple[list[EncodedRange], np.ndarray]:
         encode_range("6d7dKsKh", 4),
     ]
     return players, board
+
+
+def _weighted_players(mode: int) -> list[EncodedRange]:
+    """Three small, overlapping weighted ranges for PLO4 or PLO5."""
+    if mode == 4:
+        texts = (
+            "AsAhKdQc@80,QsQhJdTd@20",
+            "KsKhJcTc@35,AsQsJcTc@65",
+            "AdAcTsTh@60,KdKh8c8d@40",
+        )
+    else:
+        texts = (
+            "AsAhKdQc6c@80,QsQhJdTd6d@20",
+            "KsKhJcTc8s@35,AsQsJcTc8h@65",
+            "AdAcTsTh4s@60,KdKh8c8d4d@40",
+        )
+
+    return [encode_range(text, mode) for text in texts]

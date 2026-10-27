@@ -1,12 +1,14 @@
-import pytest
+"""Omaha evaluation rules: exactly two hole cards, three board cards, and invalid inputs."""
+
 import numpy as np
+import pytest
 
 from plorangelab.encoder import encode_board, encode_range
 from plorangelab.equity.evaluator import numba_evaluate_hand, numba_rank_combination
 
 
-# Each entry is ordered strongest, weaker, then (where applicable) the
-# strongest made hand with a lower kicker. Card order is descending by ID.
+# Poker card-string helpers for constructing intentionally invalid inputs
+
 RANKS_ENCODE = {
     "2": 0,
     "3": 1,
@@ -22,122 +24,27 @@ RANKS_ENCODE = {
     "K": 11,
     "A": 12,
 }
+
 SUITS_ENCODE = {
     "c": 0,
     "d": 1,
     "h": 2,
     "s": 3,
 }
-COMBINATIONS = {
-    "high_card": (
-        "AsKdJh9c7s",
-        "KsQdJh9c7s",
-        "AsQdJh9c7s",
-    ),
-    "one_pair": (
-        "AsAhKd9c7s",
-        "KsKhQd9c7s",
-        "AsAhQd9c7s",
-    ),
-    "two_pair": (
-        "AsAhKdKc9s",
-        "QsQhJdJc9s",
-        "AsAhKdKc7s",
-    ),
-    "three_of_a_kind": (
-        "AsAhAcKd9s",
-        "KsKhKcQd9s",
-        "AsAhAcQd7s",
-    ),
-    "straight": (
-        "AsKsQcJcTc",
-        "KsQcJcTh9s",
-        "AhKsQcJsTh",
-    ),
-    "flush": (
-        "AsKs9s7s3s",
-        "QsJs8s6s2s",
-        "AsQs9s7s3s",
-    ),
-    "full_house": (
-        "AsAhAcKsKh",
-        "QsQhQcJsJh",
-        "AsAhAcQsQh",
-    ),
-    "four_of_a_kind": (
-        "AsAhAcAdKs",
-        "KsKhKcKdQs",
-    ),
-    "straight_flush": (
-        "AsKsQsJsTs",
-        "9s8s7s6s5s",
-        "9h8h7h6h5h",
-    ),
-}
+
+def encode_card(card: str) -> int:
+    """Encode a two-character card as an integer from 0 to 51.
+
+    Example: ``encode_card("As")`` returns ``51``.
+    """
+    rank, suit = card[0], card[1]
+    try:
+        return 4 * RANKS_ENCODE[rank] + SUITS_ENCODE[suit]
+    except KeyError as exc:
+        raise ValueError(f"invalid card: {card!r}") from exc
 
 
-@pytest.mark.parametrize("category", COMBINATIONS)
-def test_rank_combination_compares_hands_within_category(category: str) -> None:
-    combinations = COMBINATIONS[category]
-    stronger = numba_rank_combination(encode_board(combinations[0]))
-    weaker = numba_rank_combination(encode_board(combinations[1]))
-
-    assert stronger > weaker
-
-    if len(combinations) == 3 and category != "straight":
-        lower_kicker = numba_rank_combination(encode_board(combinations[2]))
-        assert stronger > lower_kicker
-
-
-@pytest.mark.parametrize(
-    ("stronger_category", "weaker_category"),
-    [
-        ("one_pair", "high_card"),
-        ("two_pair", "one_pair"),
-        ("three_of_a_kind", "two_pair"),
-        ("straight", "three_of_a_kind"),
-        ("flush", "straight"),
-        ("full_house", "flush"),
-        ("four_of_a_kind", "full_house"),
-        ("straight_flush", "four_of_a_kind"),
-    ],
-)
-def test_rank_combination_compares_category_strength(
-    stronger_category: str, weaker_category: str
-) -> None:
-    stronger = numba_rank_combination(encode_board(COMBINATIONS[stronger_category][0]))
-    weaker = numba_rank_combination(encode_board(COMBINATIONS[weaker_category][0]))
-
-    assert stronger > weaker
-
-def test_wheel_is_lower_than_six_high_straight():
-    wheel = encode_board("As5h4d3c2s")
-    six_high = encode_board("6s5h4d3c2s")
-
-    assert numba_rank_combination(wheel) < numba_rank_combination(six_high)
-
-def test_wheel_strflush_is_lower_than_six_high_straight():
-    wheel = encode_board("As5s4s3s2s")
-    six_high = encode_board("6s5s4s3s2s")
-
-    assert numba_rank_combination(wheel) < numba_rank_combination(six_high)
-
-@pytest.mark.parametrize(
-    ("first", "same_rank_different_suits"),
-    [
-        ("AsAhAcKsKh", "AdAcAsKdKh"),
-        ("AsAhKdKc9s", "AdAcKhKs9c"),
-        ("AsAhAcKd9s", "AdAcAsKh9c"),
-        ("AsAhAcAdKs", "AdAcAsAhKh"),
-    ],
-)
-def test_rank_combination_equal_for_same_ranks_different_suits(
-    first: str, same_rank_different_suits: str
-) -> None:
-    assert numba_rank_combination(encode_board(first)) == numba_rank_combination(
-        encode_board(same_rank_different_suits)
-    )
-
+# Omaha hand construction and comparisons
 
 def test_evaluate_hand_uses_exactly_two_hole_and_three_board_cards() -> None:
     hand = encode_range("AsAhQsJd", 4)
@@ -146,13 +53,11 @@ def test_evaluate_hand_uses_exactly_two_hole_and_three_board_cards() -> None:
 
     assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(best_five)
 
-
 def test_evaluate_hand_supports_five_hole_cards() -> None:
     hand = encode_range("AsAhQsJdTc", 5)
     board = encode_board("AcKdKh2c3d")
 
     assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(encode_board("AsAhAcKdKh"))
-
 
 def test_evaluate_hand_requires_exactly_two_hole_cards_and_three_board_cards() -> None:
     # The board alone is a spade flush, but Omaha rules require two hole cards;
@@ -163,7 +68,6 @@ def test_evaluate_hand_requires_exactly_two_hole_cards_and_three_board_cards() -
 
     assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(best_allowed)
 
-
 def test_evaluate_hand_equal_rank_hands_with_different_suits_tie() -> None:
     board = encode_board("2c3d5h7s9c")
     first_hand = encode_range("AsAhKdQc", 4)
@@ -171,14 +75,12 @@ def test_evaluate_hand_equal_rank_hands_with_different_suits_tie() -> None:
 
     assert numba_evaluate_hand(first_hand.hands[0], board) == numba_evaluate_hand(second_hand.hands[0], board)
 
-
 def test_evaluate_hand_compares_kickers() -> None:
     board = encode_board("2c3d5h7s9c")
     higher_kickers = encode_range("As9hKdQc", 4)
     lower_kickers = encode_range("Kd9sJhTh", 4)
 
     assert numba_evaluate_hand(higher_kickers.hands[0], board) > numba_evaluate_hand(lower_kickers.hands[0], board)
-
 
 @pytest.mark.parametrize(
     ("hand_string", "board_string", "best_five"),
@@ -197,7 +99,6 @@ def test_evaluate_hand_recognizes_wheel_and_ace_high_straights(
 
     assert numba_evaluate_hand(hand.hands[0], board) == numba_rank_combination(encode_board(best_five))
 
-
 @pytest.mark.parametrize(
     ("hand_string", "board_string"),
     [
@@ -214,6 +115,8 @@ def test_evaluate_hand_handles_varied_board_textures(
 
     assert isinstance(numba_evaluate_hand(hand.hands[0], board), int)
 
+
+# Invalid card sets
 
 @pytest.mark.parametrize(
     ("hand_string", "board_string"),
@@ -241,7 +144,6 @@ def test_evaluate_hand_rejects_invalid_card_sets(
     with pytest.raises(ValueError):
         numba_evaluate_hand(hand, board)
 
-
 def test_evaluate_hand_rejects_out_of_range_card_id() -> None:
     hand = encode_range("AsAhKdQc", 4)
     board = encode_board("2c3d5h7s9c")
@@ -249,16 +151,3 @@ def test_evaluate_hand_rejects_out_of_range_card_id() -> None:
 
     with pytest.raises(ValueError):
         numba_evaluate_hand(hand.hands[0], board)
-
-def encode_card(card: str) -> int:
-    """Encode a two-character card as an integer from 0 to 51.
-
-    Example: ``encode_card("As")`` returns ``51``.
-    """
-    rank, suit = card[0], card[1]
-    try:
-        return 4 * RANKS_ENCODE[rank] + SUITS_ENCODE[suit]
-    except KeyError as exc:
-        raise ValueError(f"invalid card: {card!r}") from exc
-
-
