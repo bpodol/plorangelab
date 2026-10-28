@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from threading import Event
-from typing import Literal
+from typing import Literal, Callable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,6 +17,7 @@ from .monte_carlo import (
     _run_batched_monte_carlo,
     StopReason,
     _probe_collision_acceptance,
+    MonteCarloResult,
 )
 from .importance_sampling import _run_importance_monte_carlo
 
@@ -260,6 +261,7 @@ def compute_equity(
     batch_size: int = 10_000,
     seed: int = 3,
     cancel_event: Event | None = None,
+    on_progress: Callable[[MonteCarloResult], None] | None = None
 ) -> EquityResult:
     """Calculate equity exactly or with adaptive Monte Carlo.
 
@@ -367,6 +369,7 @@ def compute_equity(
             min_samples=min_samples,
             confidence_multiplier=float(confidence_multiplier),
             cancel_event=cancel_event,
+            on_progress=on_progress,
         )
 
     else:
@@ -385,6 +388,7 @@ def compute_equity(
             min_samples=min_samples,
             confidence_multiplier=float(confidence_multiplier),
             cancel_event=cancel_event,
+            on_progress=on_progress,
         )
   
     return EquityResult(

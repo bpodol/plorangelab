@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from math import sqrt
 from threading import Event
-from typing import Literal
+from typing import Literal, Callable
 
 import numpy as np
 from numba import njit, prange
@@ -30,7 +30,7 @@ class MonteCarloResult:
     margins_of_error: dict[str, float | None]
     simulations: int
     attempts: int
-    stop_reason: StopReason
+    stop_reason: StopReason | None
     sampler: Literal["rejection", "importance"] = "rejection"
     effective_samples: float | None = None
 
@@ -350,6 +350,7 @@ def _run_batched_monte_carlo(
     min_samples: int,
     confidence_multiplier: float,
     cancel_event: Event | None = None,
+    on_progress: Callable[[MonteCarloResult], None] | None = None
 ) -> MonteCarloResult:
     """Coordinate batches and aggregate every completed showdown.
 
@@ -411,17 +412,19 @@ def _run_batched_monte_carlo(
         simulations += batch_simulations
         attempts += batch_attempts
 
-        if simulations >= min_samples:
-            _, margins = _equity_statistics(
+        if simulations >= 0 and (on_progress is not None or simulations >= min_samples):
+            equities, margins = _equity_statistics(
                 share_sums,
                 squared_share_sums,
                 simulations,
                 confidence_multiplier,
             )
+
+        if simulations >= min_samples:
             if all(margin is not None and margin <= target_moe for margin in margins.values()):
                 stop_reason = "target_reached"
                 break
-
+        
         if simulations >= requested_samples:
             stop_reason = "max_simulations"
             break
@@ -434,6 +437,20 @@ def _run_batched_monte_carlo(
             # Defensive guard against a faulty or substituted batch kernel.
             stop_reason = "attempt_limit"
             break
+
+        if on_progress is not None and batch_simulations > 0:
+            on_progress(
+                MonteCarloResult(
+                    equities=equities,
+                    margins_of_error=margins,
+                    simulations=simulations,
+                    attempts=attempts,
+                    stop_reason=None,
+                    sampler="rejection",
+                )
+            )
+
+
     else:
         stop_reason = "max_simulations"
 

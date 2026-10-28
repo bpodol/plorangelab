@@ -1,5 +1,6 @@
 from math import sqrt
 from threading import Event
+from typing import Callable
 
 import numpy as np
 from numba import njit, prange
@@ -463,6 +464,7 @@ def _run_importance_monte_carlo(
     min_samples: int,
     confidence_multiplier: float,
     cancel_event: Event | None = None,
+    on_progress: Callable[[MonteCarloResult], None] | None = None
 ) -> MonteCarloResult:
     """Run weighted batches until precision, cancellation, or resource limits."""
     player_count = len(hands)
@@ -550,6 +552,19 @@ def _run_importance_monte_carlo(
             ):
                 stop_reason = "target_reached"
                 break
+            
+            if on_progress is not None and batch_simulations > 0:
+                on_progress(
+                    MonteCarloResult(
+                        equities=equities,
+                        margins_of_error=margins,
+                        simulations=simulations,
+                        attempts=attempts,
+                        stop_reason=None,
+                        sampler="importance",
+                        effective_samples=effective_samples
+                    )
+                )
 
         if simulations >= requested_samples:
             stop_reason = "max_simulations"
