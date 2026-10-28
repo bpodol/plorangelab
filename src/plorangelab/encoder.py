@@ -333,11 +333,11 @@ def encode_range(hands: str, mode: Mode) -> EncodedRange:
 def encode_input(
     input_str: str,
     mode: Mode,
-    rating: dict[Mode, HandsRating]
+    rating: HandsRating
 ) -> EncodedRange:
     input_str = input_str.strip()
 
     if "%" in input_str:
-        return _encode_percentage(input_str, rating[mode])
+        return _encode_percentage(input_str, rating)
 
     return encode_range(input_str, mode)
