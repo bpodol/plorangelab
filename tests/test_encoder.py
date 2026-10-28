@@ -1,7 +1,16 @@
 import numpy as np
 import pytest
 
-from plorangelab.encoder import encode_board, encode_range
+from plorangelab.encoder import encode_board, encode_range, encode_input
+from plorangelab.rating import HandRating
+
+@pytest.fixture
+def rating() -> HandRating:
+    return HandRating(
+        hands=np.arange(40, dtype=np.uint8).reshape(10, 4),
+        masks=np.arange(10, dtype=np.uint64),
+    )
+
 
 
 def test_valid_input_range() -> None:
@@ -119,3 +128,100 @@ def test_encoded_hand_and_mask():
         1 << int(card) for card in result.hands[0]
     )
     assert result.weights[0] == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize(
+    ("notation", "start", "end"),
+    [
+        ("10%", 0, 1),
+        ("50%", 0, 5),
+        ("100%", 0, 10),
+        ("50%-20%", 2, 5),
+        ("75%-25%", 2, 7),
+        (" 50% ", 0, 5),
+    ],
+)
+def test_valid_percentage_input(
+    notation: str,
+    start: int,
+    end: int,
+    rating: HandRating,
+) -> None:
+    encoded = encode_input(notation, mode=4, rating=rating)
+
+    np.testing.assert_array_equal(
+        encoded.hands,
+        rating.hands[start:end],
+    )
+    np.testing.assert_array_equal(
+        encoded.masks,
+        rating.masks[start:end],
+    )
+    np.testing.assert_array_equal(
+        encoded.weights,
+        np.ones(end - start, dtype=np.float32),
+    )
+
+    assert encoded.hands.dtype == np.uint8
+    assert encoded.masks.dtype == np.uint64
+    assert encoded.weights.dtype == np.float32
+
+
+
+@pytest.mark.parametrize(
+    "notation",
+    [
+        "0%",
+        "101%",
+        "-5%",
+        "50%-60%",
+        "50%-50%",
+        "50%-101%",
+        "abc%",
+        "50%%",
+        "50%-",
+    ],
+)
+def test_invalid_percentage_input(
+    notation: str,
+    rating: HandRating,
+) -> None:
+    with pytest.raises(ValueError):
+        encode_input(notation, mode=4, rating=rating)
+
+
+
+def test_encode_input_with_literal_hands(
+    rating: HandRating,
+) -> None:
+    notation = "AsKsQhJh@80,AdKdQcJc@50"
+
+    result = encode_input(notation, mode=4, rating=rating)
+    expected = encode_range(notation, mode=4)
+
+    np.testing.assert_array_equal(result.hands, expected.hands)
+    np.testing.assert_array_equal(result.masks, expected.masks)
+    np.testing.assert_array_equal(result.weights, expected.weights)
+
+
+
+def test_percentage_input_shares_ranking_memory(
+    rating: HandRating,
+) -> None:
+    encoded = encode_input("50%", mode=4, rating=rating)
+
+    assert np.shares_memory(encoded.hands, rating.hands)
+    assert np.shares_memory(encoded.masks, rating.masks)
+
+
+
+def test_percentage_input_does_not_modify_rating(
+    rating: HandRating,
+) -> None:
+    original_hands = rating.hands.copy()
+    original_masks = rating.masks.copy()
+
+    encode_input("50%-20%", mode=4, rating=rating)
+
+    np.testing.assert_array_equal(rating.hands, original_hands)
+    np.testing.assert_array_equal(rating.masks, original_masks)
