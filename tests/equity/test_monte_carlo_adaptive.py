@@ -5,7 +5,7 @@ from threading import Event
 import numpy as np
 import pytest
 
-import plorangelab.equity.api as equity_module
+import plorangelab.equity.engine as equity_module
 import plorangelab.equity.monte_carlo as mc_module
 from plorangelab.equity import compute_equity
 

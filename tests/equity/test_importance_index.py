@@ -15,7 +15,7 @@ from plorangelab.equity.importance_sampling import (
     _select_indexed_hand,
 )
 from plorangelab.equity import compute_equity
-from plorangelab.equity import api as api_module
+from plorangelab.equity import engine as api_module
 
 from ._helpers import _weighted_players
 

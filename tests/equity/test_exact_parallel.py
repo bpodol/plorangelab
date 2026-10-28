@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from numba.typed import List
 
-import plorangelab.equity.api as equity_module
+import plorangelab.equity.engine as equity_module
 import plorangelab.equity.exact as exact_module
 from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity

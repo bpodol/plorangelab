@@ -6,7 +6,7 @@ from numba.typed import List
 
 from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
-from plorangelab.equity import api as api_module
+from plorangelab.equity import engine as api_module
 from plorangelab.equity.importance_sampling import (
     _build_compatibility_index,
     _importance_statistics,
@@ -223,7 +223,7 @@ def test_importance_batch_handles_dead_end_without_invalid_selection() -> None:
 def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from plorangelab.equity import api as api_module
+    from plorangelab.equity import engine as api_module
 
     board = encode_board(RIVER)
 
