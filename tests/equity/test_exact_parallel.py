@@ -51,7 +51,7 @@ def test_parallel_exact_matches_sequential_across_modes_streets_and_players(
     player_count: int,
 ) -> None:
     board = np.arange(board_cards, dtype=np.uint8)
-    blocked = set(int(card) for card in board)
+    blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
     players = []
     for player_index in range(player_count):
@@ -212,7 +212,7 @@ def test_parallel_exact_preserves_multiway_split_pots() -> None:
 @pytest.mark.parametrize("mode", [4, 5])
 def test_parallel_exact_handles_one_by_thousand_unbalanced_ranges(mode: int) -> None:
     board = encode_board(RIVER)
-    blocked = set(int(card) for card in board)
+    blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
     pool_size = len(available) // 2
     first_pool = available[:pool_size]
@@ -237,7 +237,7 @@ def test_parallel_exact_handles_one_by_thousand_unbalanced_ranges(mode: int) -> 
 @pytest.mark.parametrize("mode", [4, 5])
 def test_parallel_exact_is_reproducible_across_thread_counts(mode: int) -> None:
     board = encode_board(RIVER)
-    blocked = set(int(card) for card in board)
+    blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
     pool_size = len(available) // 2
     players = []

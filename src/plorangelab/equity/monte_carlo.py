@@ -422,10 +422,12 @@ def _run_batched_monte_carlo(
                 confidence_multiplier,
             )
 
-        if simulations >= min_samples:
-            if all(margin is not None and margin <= target_moe for margin in margins.values()):
-                stop_reason = "target_reached"
-                break
+        if simulations >= min_samples and all(
+            margin is not None and margin <= target_moe
+            for margin in margins.values()
+        ):
+            stop_reason = "target_reached"
+            break
         
         if simulations >= requested_samples:
             stop_reason = "max_simulations"

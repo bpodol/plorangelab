@@ -72,10 +72,9 @@ def benchmark_encode_range() -> None:
         range_string = generate_range(n)
         benchmark(
             f"encode_range | {n:,} hands",
-            lambda: encode_range(range_string, 4),
+            lambda range_string=range_string: encode_range(range_string, 4),
             items_per_call=n,
             iterations=5 if n <= 1_000 else 1,
-            repeats=11,
         )
 
 
@@ -106,10 +105,9 @@ def benchmark_numba_evaluate_hands() -> None:
             hands = generate_hands(n, mode, board)
             benchmark(
                 f"Numba PLO{mode} | {n:,} hands",
-                lambda: numba_evaluate_hands(hands, board),
+                lambda hands=hands, board=board: numba_evaluate_hands(hands, board),
                 items_per_call=n,
                 iterations=5 if n == 1_000 else 1,
-                repeats=11,
             )
 
 
@@ -121,10 +119,9 @@ def benchmark_numba_evaluate_hands_parallel() -> None:
             hands = generate_hands(n, mode, board)
             benchmark(
                 f"Numba PLO{mode} | {n:,} hands",
-                lambda: numba_evaluate_hands_parallel(hands, board),
+                lambda hands=hands, board=board: numba_evaluate_hands_parallel(hands, board),
                 items_per_call=n,
                 iterations=5 if n == 1_000 else 1,
-                repeats=11,
             )
 
 
@@ -278,20 +275,20 @@ def benchmark_evaluator_stages() -> None:
         ):
             benchmark(
                 f"PLO{mode} | {title}",
-                lambda stage=stage: _run_stage(hands, board, stage),
+                lambda hands=hands, board=board, stage=stage: _run_stage(
+                    hands, board, stage
+                ),
                 items_per_call=n,
                 iterations=1,
-                repeats=11,
             )
 
         # Separately measure the real function to quantify checksum/profiling
         # overhead. Do not conflate its result with stage 3's result.
         benchmark(
             f"PLO{mode} | Production numba_evaluate_hands (reference)",
-            lambda: numba_evaluate_hands(hands, board),
+            lambda hands=hands, board=board: numba_evaluate_hands(hands, board),
             items_per_call=n,
             iterations=1,
-            repeats=11,
         )
 
 

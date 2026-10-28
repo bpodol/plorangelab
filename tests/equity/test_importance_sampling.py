@@ -85,16 +85,16 @@ def test_indexed_and_rejection_samplers_agree_statistically(
     players = _weighted_players(4)
     board = encode_board("2c3d5h7s9c")
 
-    common = dict(
-        players=players,
-        mode=4,
-        board=board,
-        method="monte-carlo",
-        min_samples=10_000,
-        max_samples=10_000,
-        target_moe=0.0,
-        seed=101,
-    )
+    common = {
+        "players": players,
+        "mode": 4,
+        "board": board,
+        "method": "monte-carlo",
+        "min_samples": 10_000,
+        "max_samples": 10_000,
+        "target_moe": 0.0,
+        "seed": 101,
+    }
 
     monkeypatch.setattr(
         api_module,

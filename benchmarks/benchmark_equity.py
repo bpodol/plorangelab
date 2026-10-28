@@ -416,15 +416,17 @@ def main() -> None:
         _, estimate, survivors = conservative_showdowns(ranges, scenario.mode, board)
         print(f"\n{scenario.label} | unblocked={survivors}")
         if estimate <= _EXACT_MAX_SHOWDOWNS:
-            exact_call = lambda: compute_equity(ranges, scenario.mode, board=board, method="exact")
+            exact_call = lambda ranges=ranges, mode=scenario.mode, board=board: compute_equity(
+                ranges, mode, board=board, method="exact"
+            )
             exact_timing = measure(exact_call, args.repeats)
             exact_evaluations = actual_exact_evaluations(ranges, scenario.mode, board)
             records.append(display_run(scenario, exact_timing, "exact", estimate, exact_evaluations))
         else:
             print(f"  exact         skipped: {estimate:,} > {_EXACT_MAX_SHOWDOWNS:,} workload cap")
             exact_timing = None
-        mc_call = lambda: compute_equity(
-            ranges, scenario.mode, board=board, method="monte-carlo",
+        mc_call = lambda ranges=ranges, mode=scenario.mode, board=board: compute_equity(
+            ranges, mode, board=board, method="monte-carlo",
             target_moe=args.target_moe, min_samples=args.min_samples,
             max_samples=args.max_samples, seed=42,
         )
@@ -437,8 +439,8 @@ def main() -> None:
             )
             print(f"  equity difference vs exact: max absolute {diff:.5f}")
         if args.fixed_samples:
-            fixed_call = lambda: compute_equity(
-                ranges, scenario.mode, board=board, method="monte-carlo",
+            fixed_call = lambda ranges=ranges, mode=scenario.mode, board=board: compute_equity(
+                ranges, mode, board=board, method="monte-carlo",
                 target_moe=0.0, min_samples=args.fixed_samples,
                 max_samples=args.fixed_samples, seed=42,
             )
@@ -451,8 +453,8 @@ def main() -> None:
         ranges, board = make_inputs(scenario)
         _, estimate, survivors = conservative_showdowns(ranges, scenario.mode, board)
         print(f"\n{scenario.label} | unblocked={survivors} | work estimate={estimate:,}")
-        call = lambda: compute_equity(
-            ranges, scenario.mode, board=board, method="auto",
+        call = lambda ranges=ranges, mode=scenario.mode, board=board: compute_equity(
+            ranges, mode, board=board, method="auto",
             target_moe=args.target_moe, min_samples=args.min_samples,
             max_samples=args.max_samples, seed=42,
         )

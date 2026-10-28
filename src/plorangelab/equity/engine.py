@@ -103,7 +103,7 @@ def validate_equity_inputs(
 
     for i, player in enumerate(players):
         if not isinstance(player, EncodedRange):
-            raise ValueError(f"Player {i + 1} must be an EncodedRange")
+            raise TypeError(f"Player {i + 1} must be an EncodedRange")
 
         if (
             not isinstance(player.hands, np.ndarray)

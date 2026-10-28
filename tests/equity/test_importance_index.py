@@ -241,17 +241,17 @@ def test_scan_fallback_matches_indexed_public_results(
         lambda *args: 0,
     )
 
-    kwargs = dict(
-        players=_weighted_players(4),
-        mode=4,
-        board=encode_board("2c3d5h7s9c"),
-        method="monte-carlo",
-        min_samples=2_000,
-        max_samples=2_000,
-        batch_size=500,
-        target_moe=0.0,
-        seed=73,
-    )
+    kwargs = {
+        "players": _weighted_players(4),
+        "mode": 4,
+        "board": encode_board("2c3d5h7s9c"),
+        "method": "monte-carlo",
+        "min_samples": 2_000,
+        "max_samples": 2_000,
+        "batch_size": 500,
+        "target_moe": 0.0,
+        "seed": 73,
+    }
 
     indexed_result = compute_equity(**kwargs)
 

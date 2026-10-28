@@ -161,14 +161,16 @@ def numba_evaluate_hand(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> in
         raise ValueError("board must be a one-dimensional array of exactly 5 cards")
     if any(int(card) >= 52 for card in hand) or any(int(card) >= 52 for card in board):
         raise ValueError("card IDs must be between 0 and 51")
-    if len(set(int(card) for card in hand)) != len(hand):
+    if len({int(card) for card in hand}) != len(hand):
         raise ValueError("hand cannot contain duplicate cards")
-    if len(set(int(card) for card in board)) != len(board):
+    if len({int(card) for card in board}) != len(board):
         raise ValueError("board cannot contain duplicate cards")
-    if set(int(card) for card in hand) & set(int(card) for card in board):
+    if {int(card) for card in hand} & {int(card) for card in board}:
         raise ValueError("hand and board cannot contain the same card")
 
     return _evaluate_hand_core(hand, board)
+
+
 
 @njit(cache=True)
 def _evaluate_hand_core(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> int:
