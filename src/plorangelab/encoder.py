@@ -1,8 +1,9 @@
+import re
 import numpy as np
 from numpy.typing import NDArray
 from typing import Literal
 from dataclasses import dataclass
-from time import perf_counter
+from plorangelab.rating import HandsRating
 from numba import njit
 
 Mode = Literal[4, 5]
@@ -259,6 +260,34 @@ def _encode_hands(
     )
 
 
+
+def _encode_percentage(notation: str, hands_rating: HandsRating):
+    pattern = r"(\d+(?:\.\d+)?)%(?:-(\d+(?:\.\d+)?)%)?"
+
+    match = re.fullmatch(pattern, notation.strip())
+
+    if match is None:
+        raise ValueError(f"Invalid percentage notation: {notation!r}")
+
+    upper = float(match.group(1))
+    lower = float(match.group(2)) if match.group(2) else 0.0
+
+    if not 0 <= lower < upper <= 100:
+        raise ValueError("Percentages must satisfy 0 <= lower < upper <= 100")    
+
+    start = int(len(hands_rating.hands) * lower / 100)
+    end = int(len(hands_rating.hands) * upper / 100)
+
+    if start == end:
+        raise ValueError("Percentage range contains no hands")
+
+    return EncodedRange(
+        hands=hands_rating.hands[start:end],
+        masks=hands_rating.masks[start:end],
+        weights=np.ones(end - start, dtype=np.float32),
+    )
+
+
 def encode_range(hands: str, mode: Mode) -> EncodedRange:
     """Encode comma-separated hands and optional weights.
 
@@ -298,3 +327,17 @@ def encode_range(hands: str, mode: Mode) -> EncodedRange:
     encoded_range = _encode_hands(hand_strings, weight_values, mode)
 
     return encoded_range
+
+
+
+def encode_input(
+    input_str: str,
+    mode: Mode,
+    rating: dict[Mode, HandsRating]
+) -> EncodedRange:
+    input_str = input_str.strip()
+
+    if "%" in input_str:
+        return _encode_percentage(input_str, rating[mode])
+
+    return encode_range(input_str, mode)
