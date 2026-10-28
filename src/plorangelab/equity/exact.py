@@ -8,6 +8,7 @@ from numba.typed import List
 from numpy.typing import NDArray
 
 from plorangelab.encoder import EncodedRange, Mode, build_mask
+
 from .evaluator import numba_evaluate_hands
 
 _EXACT_PARALLEL_MIN_SHOWDOWNS = 1_000
@@ -28,8 +29,7 @@ def _accumulate_exact_showdown(
 
     highest_score = scores[0]
     for p in range(1, player_count):
-        if scores[p] > highest_score:
-            highest_score = scores[p]
+        highest_score = max(highest_score, scores[p])
 
     winners_count = 0
     for p in range(player_count):

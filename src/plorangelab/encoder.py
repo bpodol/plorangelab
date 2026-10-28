@@ -1,10 +1,12 @@
 import re
-import numpy as np
-from numpy.typing import NDArray
-from typing import Literal
 from dataclasses import dataclass
-from plorangelab.rating import HandRating
+from typing import Literal
+
+import numpy as np
 from numba import njit
+from numpy.typing import NDArray
+
+from plorangelab.rating import HandRating
 
 Mode = Literal[4, 5]
 

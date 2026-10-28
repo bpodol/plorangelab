@@ -1,9 +1,9 @@
+from dataclasses import dataclass
+from importlib.resources import files
+from typing import Literal
+
 import numpy as np
 from numpy.typing import NDArray
-from dataclasses import dataclass
-from typing import Literal
-from importlib.resources import files
-
 
 Mode = Literal[4, 5]
 

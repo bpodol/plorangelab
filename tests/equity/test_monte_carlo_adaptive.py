@@ -11,7 +11,6 @@ from plorangelab.equity import compute_equity
 
 from ._helpers import _configured_ranges, _guaranteed_split_players
 
-
 # Precision stopping and unweighted uncertainty
 
 def test_adaptive_monte_carlo_stops_when_target_is_reached() -> None:

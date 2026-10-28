@@ -8,7 +8,6 @@ from plorangelab.equity import compute_equity
 
 from ._helpers import RIVER, TURN, _configured_ranges
 
-
 # Board blocking and equity conservation
 
 def test_board_blocked_hands_are_removed_before_calculation() -> None:

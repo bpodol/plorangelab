@@ -1,20 +1,21 @@
+from collections.abc import Callable
 from math import sqrt
 from threading import Event
-from typing import Callable
 
 import numpy as np
 from numba import njit, prange
 from numba.typed import List
 from numpy.typing import NDArray
 
+from plorangelab.encoder import Mode
+
+from .evaluator import numba_evaluate_hands
 from .monte_carlo import (
+    _MAX_BATCH_ATTEMPTS,
     MonteCarloResult,
     StopReason,
-    _MAX_BATCH_ATTEMPTS,
     deal_card,
 )
-from plorangelab.encoder import Mode
-from .evaluator import numba_evaluate_hands
 
 _INDEX_MAX_HANDS = 50_000
 
@@ -356,8 +357,7 @@ def _run_importance_batch(
         best = scores[0]
 
         for player in range(1, player_count):
-            if scores[player] > best:
-                best = scores[player]
+            best = max(best, scores[player])
 
         winner_count = 0
 

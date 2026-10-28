@@ -8,7 +8,6 @@ from plorangelab.equity import compute_equity
 
 from ._helpers import RIVER, _guaranteed_split_players
 
-
 # Player and board validation
 
 @pytest.mark.parametrize("player_count", [1, 7])

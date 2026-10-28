@@ -15,7 +15,6 @@ from plorangelab.equity.importance_sampling import (
 
 from ._helpers import RIVER, _weighted_players
 
-
 # Exact/rejection agreement and statistical properties
 
 @pytest.mark.parametrize("mode", [4, 5])
@@ -272,7 +271,6 @@ def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
         )
 
 def test_importance_statistics_account_for_unequal_sample_weights() -> None:
-    from plorangelab.equity.importance_sampling import _importance_statistics
 
     equities, margins, ess = _importance_statistics(
         4.0,

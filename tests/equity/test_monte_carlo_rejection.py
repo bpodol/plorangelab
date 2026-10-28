@@ -10,7 +10,6 @@ from plorangelab.equity import compute_equity
 
 from ._helpers import RIVER, TURN
 
-
 # Legal sampling and board runouts
 
 def test_monte_carlo_rejects_colliding_hands() -> None:

@@ -14,7 +14,6 @@ from plorangelab.equity import compute_equity
 
 from ._helpers import RIVER, _make_range_from_ids
 
-
 # Sequential/parallel comparison helper
 
 def _run_exact_kernel_equity(kernel, players, mode, board) -> dict[str, float]:

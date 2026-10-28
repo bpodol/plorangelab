@@ -10,7 +10,6 @@ from plorangelab.equity import compute_equity
 
 from ._helpers import RIVER, _configured_ranges, _make_range_from_ids
 
-
 # Equity correctness
 
 def test_exact_equity_returns_guaranteed_winner_and_loser() -> None:

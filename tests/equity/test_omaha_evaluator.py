@@ -6,7 +6,6 @@ import pytest
 from plorangelab.encoder import encode_board, encode_range
 from plorangelab.equity.evaluator import numba_evaluate_hand, numba_rank_combination
 
-
 # Poker card-string helpers for constructing intentionally invalid inputs
 
 RANKS_ENCODE = {

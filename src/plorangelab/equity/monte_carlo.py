@@ -1,9 +1,10 @@
 """Adaptive Monte Carlo equity engine with Numba sampling kernels."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import sqrt
 from threading import Event
-from typing import Literal, Callable
+from typing import Literal
 
 import numpy as np
 from numba import njit, prange
@@ -11,6 +12,7 @@ from numba.typed import List
 from numpy.typing import NDArray
 
 from plorangelab.encoder import EncodedRange, Mode, build_mask
+
 from .evaluator import numba_evaluate_hands
 
 _MAX_SIMULATIONS = 1_200_000

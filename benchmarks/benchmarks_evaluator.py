@@ -11,6 +11,7 @@ from collections.abc import Callable
 from itertools import combinations, islice
 
 import numpy as np
+from numba import njit
 from numpy.typing import NDArray
 
 from plorangelab.encoder import encode_board, encode_range
@@ -19,7 +20,6 @@ from plorangelab.equity.evaluator import (
     numba_evaluate_hands_parallel,
     numba_rank_combination,
 )
-from numba import njit
 
 
 def benchmark(
@@ -240,8 +240,7 @@ def _generate_sort_and_rank(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -
                         sort5_desc(cards)
                         checksum += _checksum_cards(cards)
                         score = numba_rank_combination(cards)
-                        if score > best_score:
-                            best_score = score
+                        best_score = max(best_score, score)
 
     return checksum + best_score
 

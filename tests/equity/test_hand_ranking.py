@@ -5,7 +5,6 @@ import pytest
 from plorangelab.encoder import encode_board
 from plorangelab.equity.evaluator import numba_rank_combination
 
-
 # Representative five-card hands: strongest, weaker, then a lower-kicker hand.
 # Each test chooses the relevant comparisons for its category.
 

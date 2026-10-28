@@ -1,8 +1,8 @@
-from numpy.typing import NDArray
-import numpy as np
 from typing import Literal
+
+import numpy as np
 from numba import njit, prange
-from plorangelab.encoder import EncodedRange, build_mask, Mode
+from numpy.typing import NDArray
 
 #0-high card
 #1-one pair
@@ -189,8 +189,7 @@ def _evaluate_hand_core(hand: NDArray[np.uint8], board: NDArray[np.uint8]) -> in
                         sort5_desc(cards)
                         score = numba_rank_combination(cards)
 
-                        if score > best_score:
-                            best_score = score
+                        best_score = max(best_score, score)
 
     return best_score 
 

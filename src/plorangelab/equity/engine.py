@@ -1,25 +1,28 @@
 """Public equity API: validate inputs, choose an engine, return results."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event
-from typing import Literal, Callable
+from typing import Literal
 
 import numpy as np
-from numpy.typing import NDArray
 from numba.typed import List
+from numpy.typing import NDArray
 
 from plorangelab.encoder import EncodedRange, Mode, build_mask
+
 from .exact import _EXACT_MAX_SHOWDOWNS, _estimate_exact_showdowns, run_exact_equity
+from .importance_sampling import _run_importance_monte_carlo
 from .monte_carlo import (
     _MAX_BATCH_SIZE,
     _MAX_SIMULATIONS,
-    _prepare_monte_carlo,
-    _run_batched_monte_carlo,
-    StopReason,
-    _probe_collision_acceptance,
     MonteCarloResult,
+    StopReason,
+    _prepare_monte_carlo,
+    _probe_collision_acceptance,
+    _run_batched_monte_carlo,
 )
-from .importance_sampling import _run_importance_monte_carlo
+
 
 @dataclass(frozen=True)
 class EquityResult:

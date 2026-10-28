@@ -12,7 +12,6 @@ from plorangelab.equity import compute_equity
 
 from ._helpers import RIVER, _guaranteed_split_players, _make_range_from_ids
 
-
 # Local dispatch test doubles
 
 def _river_candidate_range(count: int) -> EncodedRange:
