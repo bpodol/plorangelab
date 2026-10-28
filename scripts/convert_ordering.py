@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv_path", type=Path)
     parser.add_argument("--mode", type=int, choices=(4, 5), required=True)
-    parser.add_argument("--output-dir", type=Path, default=Path("data/rankings"))
+    parser.add_argument("--output-dir", type=Path, default=Path("plorangelab\src\plorangelab\resources\rating"))
     args = parser.parse_args()
 
     convert_ordering(args.csv_path, args.mode, args.output_dir)
