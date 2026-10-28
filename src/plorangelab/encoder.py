@@ -3,7 +3,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Literal
 from dataclasses import dataclass
-from plorangelab.rating import HandsRating
+from plorangelab.rating import HandRating
 from numba import njit
 
 Mode = Literal[4, 5]
@@ -261,7 +261,7 @@ def _encode_hands(
 
 
 
-def _encode_percentage(notation: str, hands_rating: HandsRating):
+def _encode_percentage(notation: str, hands_rating: HandRating):
     pattern = r"(\d+(?:\.\d+)?)%(?:-(\d+(?:\.\d+)?)%)?"
 
     match = re.fullmatch(pattern, notation.strip())
@@ -333,7 +333,7 @@ def encode_range(hands: str, mode: Mode) -> EncodedRange:
 def encode_input(
     input_str: str,
     mode: Mode,
-    rating: HandsRating
+    rating: HandRating
 ) -> EncodedRange:
     input_str = input_str.strip()
 

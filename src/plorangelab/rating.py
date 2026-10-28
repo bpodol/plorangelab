@@ -11,12 +11,12 @@ Mode = Literal[4, 5]
 rankings_dir = files("plorangelab").joinpath("resources", "rating")
 
 @dataclass
-class HandsRating:
+class HandRating:
     hands: NDArray[np.uint8]
     masks: NDArray[np.uint64]
 
 
-def load_rating() -> dict[Mode, HandsRating]:
+def load_rating() -> dict[Mode, HandRating]:
     ratings = {}
 
     for mode in (4, 5):
@@ -26,6 +26,6 @@ def load_rating() -> dict[Mode, HandsRating]:
         with rankings_dir.joinpath(f"plo{mode}_masks.npy").open("rb") as f:
             masks = np.load(f)
 
-        ratings[mode] = HandsRating(hands=hands, masks=masks)
+        ratings[mode] = HandRating(hands=hands, masks=masks)
 
     return ratings
