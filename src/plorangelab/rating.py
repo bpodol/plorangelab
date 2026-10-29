@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 Mode = Literal[4, 5]
 
 
-rankings_dir = files("plorangelab").joinpath("resources", "rating")
+ratings_dir = files("plorangelab").joinpath("resources", "rating")
 
 @dataclass
 class HandRating:
@@ -20,10 +20,10 @@ def load_rating() -> dict[Mode, HandRating]:
     ratings = {}
 
     for mode in (4, 5):
-        with rankings_dir.joinpath(f"plo{mode}_hands.npy").open("rb") as f:
+        with ratings_dir.joinpath(f"plo{mode}_hands.npy").open("rb") as f:
             hands = np.load(f)
 
-        with rankings_dir.joinpath(f"plo{mode}_masks.npy").open("rb") as f:
+        with ratings_dir.joinpath(f"plo{mode}_masks.npy").open("rb") as f:
             masks = np.load(f)
 
         ratings[mode] = HandRating(hands=hands, masks=masks)
