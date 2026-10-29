@@ -413,7 +413,7 @@ def _run_batched_monte_carlo(
         simulations += batch_simulations
         attempts += batch_attempts
 
-        if simulations >= 0 and (on_progress is not None or simulations >= min_samples):
+        if simulations > 0 and (on_progress is not None or simulations >= min_samples):
             equities, margins = _equity_statistics(
                 share_sums,
                 squared_share_sums,
