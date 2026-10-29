@@ -267,8 +267,12 @@ def test_scan_fallback_matches_indexed_public_results(
         == 2_000
     )
 
-    for name in indexed_result.equities:
-        assert indexed_result.equities[name] == pytest.approx(
-            fallback_result.equities[name],
+    for indexed_equity, fallback_equity in zip(
+        indexed_result.equities,
+        fallback_result.equities,
+        strict=True,
+    ):
+        assert indexed_equity == pytest.approx(
+            fallback_equity,
             abs=1e-12,
         )

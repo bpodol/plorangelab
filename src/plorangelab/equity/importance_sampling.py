@@ -413,15 +413,14 @@ def _importance_statistics(
     squared_weight_shares: NDArray[np.float64],
     squared_weight_squared_shares: NDArray[np.float64],
     confidence_multiplier: float,
-) -> tuple[dict[str, float], dict[str, float | None], float]:
+) -> tuple[list[float], list[float | None], float]:
     """Calculate weighted equities, approximate MOEs, and effective sample size."""
     effective_samples = weight_sum * weight_sum / squared_weight_sum
 
-    equities = {}
-    margins = {}
+    equities = []
+    margins = []
 
     for index in range(len(weighted_shares)):
-        label = f"player {index + 1}:"
 
         equity = float(weighted_shares[index] / weight_sum)
 
@@ -440,8 +439,8 @@ def _importance_statistics(
                 / weight_sum
             )
 
-        equities[label] = equity
-        margins[label] = margin
+        equities.append(equity)
+        margins.append(margin)
 
     return equities, margins, effective_samples
 
@@ -548,7 +547,7 @@ def _run_importance_monte_carlo(
 
             if effective_samples >= min_samples and all(
                 margin is not None and margin <= target_moe
-                for margin in margins.values()
+                for margin in margins
             ):
                 stop_reason = "target_reached"
                 break

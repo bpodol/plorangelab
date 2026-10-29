@@ -28,9 +28,9 @@ from .monte_carlo import (
 class EquityResult:
     """Equity values and, for Monte Carlo, stopping diagnostics."""
 
-    equities: dict[str, float]
+    equities: list[float]
     method: Literal["exact", "monte-carlo"]
-    margins_of_error: dict[str, float | None] | None
+    margins_of_error: list[float | None] | None
     simulations: int | None
     attempts: int | None
     stop_reason: StopReason | None

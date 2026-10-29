@@ -349,7 +349,7 @@ def run_exact_equity(
     mode: Mode,
     board: NDArray[np.uint8] | None = None,
     max_showdowns: int | None = _EXACT_MAX_SHOWDOWNS,
-) -> dict[str, float]:
+) -> list[float]:
     """Calculate exact weighted equity with the suitable Numba kernel.
 
     Small estimated workloads stay sequential; larger workloads partition the
@@ -437,9 +437,9 @@ def run_exact_equity(
             "No compatible positive-weight hand combinations exist"
         )
 
-    return {
-        f"player {i + 1}:": float(
+    return [
+        float(
             pot_shares[i] / total_weight
         )
         for i in range(player_count)
-    }
+    ]

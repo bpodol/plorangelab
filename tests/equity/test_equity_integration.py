@@ -20,7 +20,7 @@ def test_board_blocked_hands_are_removed_before_calculation() -> None:
         players, mode=4, board=encode_board(RIVER), method="exact"
     ).equities
 
-    assert equity == {"player 1:": 0.0, "player 2:": 1.0}
+    assert equity == [0.0, 1.0]
 
 @pytest.mark.parametrize("method", ["exact", "monte-carlo"])
 def test_equities_conserve_the_pot(method: str) -> None:
@@ -37,7 +37,7 @@ def test_equities_conserve_the_pot(method: str) -> None:
         method=method,  # type: ignore[arg-type]
     ).equities
 
-    assert sum(equity.values()) == pytest.approx(1.0)
+    assert sum(equity) == pytest.approx(1.0)
 
 
 # Exact vs sampled equity
@@ -61,8 +61,12 @@ def test_exact_and_monte_carlo_equity_agree_within_sampling_tolerance() -> None:
         method="monte-carlo",
     ).equities
 
-    for player in exact:
-        assert sampled[player] == pytest.approx(exact[player], abs=0.01)
+    for sampled_equity, exact_equity in zip(
+        sampled, exact, strict=True
+    ):
+        assert sampled_equity == pytest.approx(
+            exact_equity, abs=0.01
+        )
 
 def test_exact_and_monte_carlo_agree_for_weighted_multi_hand_ranges() -> None:
     players = [
@@ -83,10 +87,14 @@ def test_exact_and_monte_carlo_agree_for_weighted_multi_hand_ranges() -> None:
         method="monte-carlo",
     ).equities
 
-    assert 0 < exact["player 1:"] < 1
-    assert 0 < exact["player 2:"] < 1
-    for player in exact:
-        assert sampled[player] == pytest.approx(exact[player], abs=0.015)
+    assert 0 < exact[0] < 1
+    assert 0 < exact[1] < 1
+    for sampled_equity, exact_equity in zip(
+        sampled, exact, strict=True
+    ):
+        assert sampled_equity == pytest.approx(
+            exact_equity, abs=0.015
+        )
 
 def test_monte_carlo_flop_agrees_with_exact_equity() -> None:
     # Integration check: sampled flop equity agrees with exact enumeration.
@@ -108,8 +116,12 @@ def test_monte_carlo_flop_agrees_with_exact_equity() -> None:
         method="monte-carlo",
     ).equities
 
-    for player in exact:
-        assert sampled[player] == pytest.approx(exact[player], abs=0.02)
+    for sampled_equity, exact_equity in zip(
+        sampled, exact, strict=True
+    ):
+        assert sampled_equity == pytest.approx(
+            exact_equity, abs=0.02
+        )
 
 
 # Input immutability

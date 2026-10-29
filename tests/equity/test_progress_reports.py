@@ -52,16 +52,13 @@ def test_rejection_progress_callback(
     for update in updates:
         assert update.sampler == "rejection"
         assert update.stop_reason is None
-        assert update.equities == {
-            "player 1:": 0.5,
-            "player 2:": 0.5,
-        }
+        assert update.equities == [0.5, 0.5]
 
     # Verify the MOE uses cumulative statistics.
-    assert updates[0].margins_of_error["player 1:"] == pytest.approx(
+    assert updates[0].margins_of_error[0] == pytest.approx(
         1.96 * np.sqrt(0.5 / 2)
     )
-    assert updates[1].margins_of_error["player 1:"] == pytest.approx(
+    assert updates[1].margins_of_error[0] == pytest.approx(
         1.96 * np.sqrt((1 / 3) / 4)
     )
 
@@ -139,14 +136,10 @@ def test_importance_progress_callback(
             update.simulations
         )
 
-        assert update.equities == {
-            "player 1:": 0.5,
-            "player 2:": 0.5,
-            "player 3:": 0.0,
-        }
+        assert update.equities == [0.5, 0.5, 0]
 
-        assert update.margins_of_error["player 1:"] > 0
-        assert update.margins_of_error["player 3:"] == 0.0
+        assert update.margins_of_error[0] > 0
+        assert update.margins_of_error[2] == 0.0
 
     assert result.sampler == "importance"
     assert result.stop_reason == "target_reached"
@@ -290,10 +283,7 @@ def test_no_progress_for_exact_equity(
     updates: list[MonteCarloResult] = []
 
     def fake_exact_equity(**kwargs):
-        return {
-            "player 1:": 0.5,
-            "player 2:": 0.5,
-        }
+        return [0.5, 0.5]
 
     monkeypatch.setattr(
         equity_module, "run_exact_equity", fake_exact_equity
@@ -309,9 +299,6 @@ def test_no_progress_for_exact_equity(
 
     assert updates == []
     assert result.method == "exact"
-    assert result.equities == {
-        "player 1:": 0.5,
-        "player 2:": 0.5,
-    }
+    assert result.equities == [0.5, 0.5]
     assert result.simulations is None
     assert result.margins_of_error is None

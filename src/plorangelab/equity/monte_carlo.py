@@ -28,8 +28,8 @@ StopReason = Literal[
 class MonteCarloResult:
     """Equity estimates and stopping diagnostics for an adaptive run."""
 
-    equities: dict[str, float]
-    margins_of_error: dict[str, float | None]
+    equities: list[float]
+    margins_of_error: list[float | None]
     simulations: int
     attempts: int
     stop_reason: StopReason | None
@@ -309,14 +309,13 @@ def _equity_statistics(
     squared_share_sums: NDArray[np.float64],
     simulations: int,
     confidence_multiplier: float,
-) -> tuple[dict[str, float], dict[str, float | None]]:
-    equities: dict[str, float] = {}
-    margins: dict[str, float | None] = {}
+) -> tuple[list[float], list[float | None]]:
+    equities: list[float] = []
+    margins: list[float | None] = []
 
-    for player, (share_sum, squared_sum) in enumerate(
-        zip(share_sums, squared_share_sums), start=1
+    for i, (share_sum, squared_sum) in enumerate(
+        zip(share_sums, squared_share_sums)
     ):
-        label = f"player {player}:"
         equity = float(share_sum / simulations)
         if simulations < 2:
             margin = None
@@ -329,8 +328,8 @@ def _equity_statistics(
                 0.0,
             )
             margin = confidence_multiplier * sqrt(variance / simulations)
-        equities[label] = equity
-        margins[label] = margin
+        equities.append(equity)
+        margins.append(margin)
 
     return equities, margins
 
@@ -424,7 +423,7 @@ def _run_batched_monte_carlo(
 
         if simulations >= min_samples and all(
             margin is not None and margin <= target_moe
-            for margin in margins.values()
+            for margin in margins
         ):
             stop_reason = "target_reached"
             break

@@ -22,7 +22,7 @@ def test_exact_equity_returns_guaranteed_winner_and_loser() -> None:
         players, mode=4, board=encode_board(RIVER), method="exact"
     ).equities
 
-    assert equity == {"player 1:": 1.0, "player 2:": 0.0}
+    assert equity == [1.0, 0.0]
 
 def test_exact_equity_splits_a_guaranteed_tie_equally() -> None:
     players = [
@@ -34,8 +34,8 @@ def test_exact_equity_splits_a_guaranteed_tie_equally() -> None:
         players, mode=4, board=encode_board(RIVER), method="exact"
     ).equities
 
-    assert equity["player 1:"] == pytest.approx(0.5)
-    assert equity["player 2:"] == pytest.approx(0.5)
+    assert equity[0] == pytest.approx(0.5)
+    assert equity[1] == pytest.approx(0.5)
 
 def test_exact_equity_splits_a_three_way_tie_into_thirds() -> None:
     board = encode_board("2c3d4hKsQc")
@@ -47,7 +47,7 @@ def test_exact_equity_splits_a_three_way_tie_into_thirds() -> None:
 
     equity = compute_equity(players, mode=4, board=board, method="exact").equities
 
-    for value in equity.values():
+    for value in equity:
         assert value == pytest.approx(1 / 3)
 
 def test_exact_equity_respects_range_weights() -> None:
@@ -60,8 +60,8 @@ def test_exact_equity_respects_range_weights() -> None:
         players, mode=4, board=encode_board(RIVER), method="exact"
     ).equities
 
-    assert equity["player 1:"] == pytest.approx(2 / 3)
-    assert equity["player 2:"] == pytest.approx(1 / 3)
+    assert equity[0] == pytest.approx(2 / 3)
+    assert equity[1] == pytest.approx(1 / 3)
 
 def test_exact_equity_excludes_colliding_hands() -> None:
     # P1's first hand collides with P2 and would win.
@@ -79,10 +79,7 @@ def test_exact_equity_excludes_colliding_hands() -> None:
         method="exact",
     ).equities
 
-    assert equity == {
-        "player 1:": 0.0,
-        "player 2:": 1.0,
-    }
+    assert equity == [0.0, 1.0]
 
 @pytest.mark.parametrize(
     ("player_count", "mode", "multi_hand"),
@@ -100,8 +97,9 @@ def test_exact_equity_supports_player_modes_and_range_sizes(
 
     equity = compute_equity(players, mode=mode, board=board, method="exact").equities
 
-    assert list(equity) == [f"player {index}:" for index in range(1, player_count + 1)]
-    assert sum(equity.values()) == pytest.approx(1.0)
+    assert len(equity) == player_count
+    assert all(0.0 <= value <= 1.0 for value in equity)
+    assert sum(equity) == pytest.approx(1.0)
 
 
 # Limits and invariance
@@ -154,7 +152,9 @@ def test_exact_equity_is_invariant_to_weight_scaling(scale):
         scaled_players, mode=4, board=board, method="exact"
     ).equities
 
-    for player in baseline:
-        assert actual[player] == pytest.approx(
-            baseline[player], abs=1e-12
+    for actual_equity, baseline_equity in zip(
+        actual, baseline, strict=True
+    ):
+        assert actual_equity == pytest.approx(
+            baseline_equity, abs=1e-12
         )

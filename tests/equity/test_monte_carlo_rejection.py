@@ -31,7 +31,7 @@ def test_monte_carlo_rejects_colliding_hands() -> None:
         method="monte-carlo",
     ).equities
 
-    assert equity == {"player 1:": 0.0, "player 2:": 1.0}
+    assert equity == [0.0, 1.0]
 
 @pytest.mark.parametrize(
     "board_text",
@@ -55,7 +55,7 @@ def test_monte_carlo_supports_each_board_state(board_text: str | None) -> None:
         seed=19,
     ).equities
 
-    assert sum(equity.values()) == pytest.approx(1.0)
+    assert sum(equity) == pytest.approx(1.0)
 
 def test_deal_card_never_returns_board_or_hand_cards() -> None:
     # Exercise the same compiled deal_card() used by Monte Carlo directly.
@@ -204,7 +204,7 @@ def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent() ->
     ).equities
 
     assert small_batches == single_batch
-    assert small_batches == {"player 1:": 0.9762, "player 2:": 0.0238}
+    assert small_batches == [0.9762, 0.0238]
 
 def test_fixed_budget_three_way_ties_are_batch_independent() -> None:
     board = encode_board("3d4h5s9cTc")
@@ -230,6 +230,6 @@ def test_fixed_budget_three_way_ties_are_batch_independent() -> None:
 
     for result in results[1:]:
         np.testing.assert_allclose(
-            list(result.values()), list(results[0].values()), rtol=0, atol=1e-15
+            list(result), list(results[0]), rtol=0, atol=1e-15
         )
-    assert list(results[0].values()) == pytest.approx([1 / 3, 1 / 3, 1 / 3])
+    assert list(results[0]) == pytest.approx([1 / 3, 1 / 3, 1 / 3])

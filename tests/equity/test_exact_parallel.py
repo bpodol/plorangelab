@@ -16,7 +16,7 @@ from ._helpers import RIVER, _make_range_from_ids
 
 # Sequential/parallel comparison helper
 
-def _run_exact_kernel_equity(kernel, players, mode, board) -> dict[str, float]:
+def _run_exact_kernel_equity(kernel, players, mode, board) -> list[float]:
     valid_players = equity_module.prepare_ranges(players, board)
     hands = List([player.hands for player in valid_players])
     masks = List([player.masks for player in valid_players])
@@ -34,10 +34,7 @@ def _run_exact_kernel_equity(kernel, players, mode, board) -> dict[str, float]:
         )
     else:
         pot_shares, total_weight = kernel(*kernel_args)
-    return {
-        f"player {index + 1}:": float(share / total_weight)
-        for index, share in enumerate(pot_shares)
-    }
+    return [float(share / total_weight) for share in pot_shares]
 
 
 # Parallel correctness and workload shapes
@@ -70,9 +67,9 @@ def test_parallel_exact_matches_sequential_across_modes_streets_and_players(
     )
 
     np.testing.assert_allclose(
-        list(parallel.values()), list(sequential.values()), rtol=0, atol=1e-12
+        parallel, sequential, rtol=0, atol=1e-12
     )
-    assert sum(parallel.values()) == pytest.approx(1.0)
+    assert sum(parallel) == pytest.approx(1.0)
 
 @pytest.mark.parametrize("mode", [4, 5])
 def test_parallel_exact_matches_weighted_ranges_with_collisions(mode: int) -> None:
@@ -96,9 +93,9 @@ def test_parallel_exact_matches_weighted_ranges_with_collisions(mode: int) -> No
     )
 
     np.testing.assert_allclose(
-        list(parallel.values()), list(sequential.values()), rtol=0, atol=1e-12
+        parallel, sequential, rtol=0, atol=1e-12
     )
-    assert sum(parallel.values()) == pytest.approx(1.0)
+    assert sum(parallel) == pytest.approx(1.0)
 
 @pytest.mark.parametrize("mode", [4, 5])
 @pytest.mark.parametrize("player_count", [3, 4, 5, 6])
@@ -149,9 +146,9 @@ def test_parallel_exact_multiway_weighted_collisions_use_multiple_partitions(
         numba.set_num_threads(original_threads)
 
     np.testing.assert_allclose(
-        list(parallel.values()), list(sequential.values()), rtol=0, atol=1e-12
+        parallel, sequential, rtol=0, atol=1e-12
     )
-    assert sum(parallel.values()) == pytest.approx(1.0)
+    assert sum(parallel) == pytest.approx(1.0)
 
 def test_exact_public_api_uses_sequential_kernel_with_one_numba_thread(
     monkeypatch: pytest.MonkeyPatch,
@@ -186,7 +183,7 @@ def test_exact_public_api_uses_sequential_kernel_with_one_numba_thread(
         parallel_must_not_run,
     )
     result = compute_equity(players, mode=4, board=board, method="exact")
-    assert sum(result.equities.values()) == pytest.approx(1.0)
+    assert sum(result.equities) == pytest.approx(1.0)
 
 def test_parallel_exact_preserves_multiway_split_pots() -> None:
     board = encode_board("2c3d4hKsQc")
@@ -203,10 +200,10 @@ def test_parallel_exact_preserves_multiway_split_pots() -> None:
         exact_module._run_exact_equity_kernel_parallel, players, 4, board
     )
 
-    assert list(sequential.values()) == pytest.approx([1 / 3] * 3)
-    assert list(parallel.values()) == pytest.approx([1 / 3] * 3)
+    assert sequential == pytest.approx([1 / 3] * 3)
+    assert parallel == pytest.approx([1 / 3] * 3)
     np.testing.assert_allclose(
-        list(parallel.values()), list(sequential.values()), rtol=0, atol=1e-12
+        parallel, sequential, rtol=0, atol=1e-12
     )
 
 @pytest.mark.parametrize("mode", [4, 5])
@@ -230,9 +227,9 @@ def test_parallel_exact_handles_one_by_thousand_unbalanced_ranges(mode: int) -> 
     )
 
     np.testing.assert_allclose(
-        list(parallel.values()), list(sequential.values()), rtol=0, atol=1e-12
+        parallel, sequential, rtol=0, atol=1e-12
     )
-    assert sum(parallel.values()) == pytest.approx(1.0)
+    assert sum(parallel) == pytest.approx(1.0)
 
 @pytest.mark.parametrize("mode", [4, 5])
 def test_parallel_exact_is_reproducible_across_thread_counts(mode: int) -> None:
@@ -268,7 +265,7 @@ def test_parallel_exact_is_reproducible_across_thread_counts(mode: int) -> None:
                 players, mode=mode, board=board, method="exact"
             )
             assert repeated == first
-            results.append(list(first.equities.values()))
+            results.append(first.equities.copy())
     finally:
         numba.set_num_threads(original_threads)
 

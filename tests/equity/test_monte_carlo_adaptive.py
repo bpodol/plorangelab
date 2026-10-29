@@ -32,8 +32,8 @@ def test_adaptive_monte_carlo_stops_when_target_is_reached() -> None:
     assert result.stop_reason == "target_reached"
     assert result.simulations == 4
     assert result.attempts == 4
-    assert result.equities == {"player 1:": 0.5, "player 2:": 0.5}
-    assert result.margins_of_error == {"player 1:": 0.0, "player 2:": 0.0}
+    assert result.equities == [0.5, 0.5]
+    assert result.margins_of_error == [0.0, 0.0]
 
 def test_adaptive_stops_at_max_samples_when_precision_is_not_reached(
     monkeypatch: pytest.MonkeyPatch,
@@ -75,8 +75,8 @@ def test_adaptive_stops_at_max_samples_when_precision_is_not_reached(
     assert result.stop_reason == "max_simulations"
     assert result.simulations == 5
     assert result.attempts == 5
-    assert result.margins_of_error["player 1:"] > 0
-    assert result.margins_of_error["player 2:"] > 0
+    assert result.margins_of_error[0] > 0
+    assert result.margins_of_error[1] > 0
 
 def test_equity_statistics_include_split_pots_and_sample_variance() -> None:
     # Observations are (1, 0), (0.5, 0.5), and (0, 1): one split pot.
@@ -88,9 +88,9 @@ def test_equity_statistics_include_split_pots_and_sample_variance() -> None:
     )
 
     expected_moe = 1.96 * np.sqrt(0.25 / 3)
-    assert equities == {"player 1:": 0.5, "player 2:": 0.5}
-    assert margins["player 1:"] == pytest.approx(expected_moe)
-    assert margins["player 2:"] == pytest.approx(expected_moe)
+    assert equities == [0.5, 0.5]
+    assert margins[0] == pytest.approx(expected_moe)
+    assert margins[1] == pytest.approx(expected_moe)
 
 
 # Cancellation and partial estimates
@@ -152,7 +152,7 @@ def test_adaptive_cancellation_between_batches_returns_partial_estimate(
     assert calls == 1
     assert result.stop_reason == "cancelled"
     assert result.simulations == 2
-    assert result.equities == {"player 1:": 0.5, "player 2:": 0.5}
+    assert result.equities == [0.5, 0.5]
 
 
 # Attempt and memory budgets
@@ -195,7 +195,7 @@ def test_attempt_limit_returns_partial_adaptive_batch_without_losing_successes(
     assert result.stop_reason == "attempt_limit"
     assert result.simulations == 1
     assert result.attempts == 10_000
-    assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
+    assert result.equities == [1.0, 0.0]
 
 def test_fixed_budget_memory_is_bounded_by_batch_size(
     monkeypatch: pytest.MonkeyPatch,
@@ -224,7 +224,7 @@ def test_fixed_budget_memory_is_bounded_by_batch_size(
     assert sum(allocated_batch_sizes) == 11
     assert allocated_batch_sizes == [4, 4, 3]
     assert max(allocated_batch_sizes) <= 4
-    assert sum(result.equities.values()) == pytest.approx(1.0)
+    assert sum(result.equities) == pytest.approx(1.0)
 
 def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
     monkeypatch: pytest.MonkeyPatch,
@@ -269,4 +269,4 @@ def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
     assert result.stop_reason == "cancelled"
     assert result.simulations == 1
     assert result.attempts == mc_module._MAX_BATCH_ATTEMPTS + 1
-    assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
+    assert result.equities == [1.0, 0.0]

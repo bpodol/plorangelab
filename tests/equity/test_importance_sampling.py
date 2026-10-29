@@ -64,17 +64,17 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
             <= result.simulations + 1e-7
         )
 
-        assert sum(result.equities.values()) == pytest.approx(
+        assert sum(result.equities) == pytest.approx(
             1.0, abs=1e-10
         )
 
-        estimates.append(list(result.equities.values()))
+        estimates.append(list(result.equities))
 
     mean_equity = np.mean(estimates, axis=0)
 
     np.testing.assert_allclose(
         mean_equity,
-        list(exact.equities.values()),
+        list(exact.equities),
         atol=0.025,
         rtol=0,
     )
@@ -113,9 +113,11 @@ def test_indexed_and_rejection_samplers_agree_statistically(
     assert importance.sampler == "importance"
     assert rejection.sampler == "rejection"
 
-    for label in importance.equities:
-        assert importance.equities[label] == pytest.approx(
-            rejection.equities[label],
+    for importance_equity, rejection_equity in zip(
+        importance.equities, rejection.equities, strict=True
+    ):
+        assert importance_equity == pytest.approx(
+            rejection_equity,
             abs=0.035,
         )
 
@@ -164,10 +166,10 @@ def test_indexed_importance_supports_modes_and_streets(
 
     assert all(
         np.isfinite(value) and 0 <= value <= 1
-        for value in result.equities.values()
+        for value in result.equities
     )
 
-    assert sum(result.equities.values()) == pytest.approx(
+    assert sum(result.equities) == pytest.approx(
         1.0, abs=1e-10
     )
 
@@ -262,13 +264,12 @@ def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
     assert sampled.simulations == 20_000
     assert 1 < sampled.effective_samples <= sampled.simulations
 
-    assert sum(sampled.equities.values()) == pytest.approx(1.0)
+    assert sum(sampled.equities) == pytest.approx(1.0)
 
-    for name in exact.equities:
-        assert sampled.equities[name] == pytest.approx(
-            exact.equities[name],
-            abs=0.02,
-        )
+    for sampled_equity, exact_equity in zip(
+        sampled.equities, exact.equities, strict=True
+    ):
+        assert sampled_equity == pytest.approx(exact_equity, abs=0.02)
 
 def test_importance_statistics_account_for_unequal_sample_weights() -> None:
 
@@ -281,14 +282,8 @@ def test_importance_statistics_account_for_unequal_sample_weights() -> None:
         1.96,
     )
 
-    assert equities == {
-        "player 1:": pytest.approx(0.25),
-        "player 2:": pytest.approx(0.75),
-    }
+    assert equities == [pytest.approx(0.25), pytest.approx(0.75)]
 
     assert ess == pytest.approx(1.6)
 
-    assert margins == {
-        "player 1:": None,
-        "player 2:": None,
-    }
+    assert margins == [None, None]
