@@ -257,7 +257,7 @@ def measure(call, repeats: int) -> Timing:
 
 
 def _verify_result(result: EquityResult) -> None:
-    equity_total = sum(result.equities.values())
+    equity_total = sum(result.equities)
     if not np.isclose(equity_total, 1.0, atol=1e-8):
         raise AssertionError(f"Equities do not sum to 1: {result}")
 
@@ -276,7 +276,7 @@ def display_run(
     if requested == "auto":
         print(f" -> {result.method}", end="")
     if result.method == "monte-carlo":
-        max_moe = max((v for v in (moe or {}).values() if v is not None), default=None)
+        max_moe = max((v for v in (moe or {}) if v is not None), default=None)
         sampler = result.sampler or "rejection"
         rate_name = "completion" if sampler == "importance" else "acceptance"
 
@@ -338,7 +338,7 @@ def display_run(
             else None
         ),
         "valid_per_second": (simulations / timing.seconds if simulations else None),
-        "max_moe": max((v for v in (moe or {}).values() if v is not None), default=None),
+        "max_moe": max((v for v in (moe or {}) if v is not None), default=None),
         "stop_reason": result.stop_reason,
     }
 
@@ -434,8 +434,12 @@ def main() -> None:
         records.append(display_run(scenario, mc_timing, "adaptive MC", estimate))
         if exact_timing is not None:
             diff = max(
-                abs(mc_timing.result.equities[key] - exact_timing.result.equities[key])
-                for key in exact_timing.result.equities
+                abs(mc - exact)
+                for mc, exact in zip(
+                    mc_timing.result.equities,
+                    exact_timing.result.equities,
+                    strict=True,
+                )
             )
             print(f"  equity difference vs exact: max absolute {diff:.5f}")
         if args.fixed_samples:
@@ -519,8 +523,12 @@ def main() -> None:
             records.append(display_run(scenario, mc_timing, "adaptive MC", estimate))
             if exact_timing is not None:
                 diff = max(
-                    abs(mc_timing.result.equities[k] - exact_timing.result.equities[k])
-                    for k in exact_timing.result.equities
+                    abs(mc - exact)
+                    for mc, exact in zip(
+                        mc_timing.result.equities,
+                        exact_timing.result.equities,
+                        strict=True,
+                    )
                 )
                 print(f"  equity difference vs exact: max absolute {diff:.5f}")
 
