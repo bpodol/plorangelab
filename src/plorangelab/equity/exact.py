@@ -8,6 +8,7 @@ from numba.typed import List
 from numpy.typing import NDArray
 
 from plorangelab.encoder import EncodedRange, Mode, build_mask
+from plorangelab.rank_combination import RankLookup
 
 from .evaluator import numba_evaluate_hands
 
@@ -23,9 +24,11 @@ def _accumulate_exact_showdown(
     matchup_weight,
     pot_shares,
     total_weight,
+    rank_table,
+    binomial_table,
 ):
     """Evaluate one showdown and add its weighted pot shares."""
-    scores = numba_evaluate_hands(selected_hands, current_board)
+    scores = numba_evaluate_hands(selected_hands, current_board, rank_table=rank_table, binomial_table=binomial_table)
 
     highest_score = scores[0]
     for p in range(1, player_count):
@@ -53,6 +56,8 @@ def _run_exact_equity_kernel(
     board,
     board_mask,
     mode,
+    rank_table,
+    binomial_table,
 ):
     """
     Enumerate all compatible matchups and board runouts. Complete river boards
@@ -123,6 +128,8 @@ def _run_exact_equity_kernel(
                     matchup_weight,
                     pot_shares,
                     total_weight,
+                    rank_table=rank_table,
+                    binomial_table=binomial_table
                 )
             else:
                 # Build the deck remaining after blockers.
@@ -153,6 +160,8 @@ def _run_exact_equity_kernel(
                         matchup_weight,
                         pot_shares,
                         total_weight,
+                        rank_table=rank_table,
+                        binomial_table=binomial_table,
                     )
 
                     # Advance to the next board combination.
@@ -203,6 +212,8 @@ def _run_exact_equity_kernel_parallel(
     board_mask,
     mode,
     requested_workers,
+    rank_table,
+    binomial_table
 ):
     """Enumerate exact equity in balanced, thread-local Cartesian partitions."""
     player_count = len(hands)
@@ -270,6 +281,8 @@ def _run_exact_equity_kernel_parallel(
                         matchup_weight,
                         worker_shares,
                         worker_total,
+                        rank_table=rank_table,
+                        binomial_table=binomial_table,
                     )
                 else:
                     available_count = 0
@@ -295,6 +308,8 @@ def _run_exact_equity_kernel_parallel(
                             matchup_weight,
                             worker_shares,
                             worker_total,
+                            rank_table=rank_table,
+                            binomial_table=binomial_table,
                         )
 
                         index = missing_board - 1
@@ -347,6 +362,7 @@ def _estimate_exact_showdowns(
 def run_exact_equity(
     players: list[EncodedRange],
     mode: Mode,
+    rank_lookup: RankLookup,
     board: NDArray[np.uint8] | None = None,
     max_showdowns: int | None = _EXACT_MAX_SHOWDOWNS,
 ) -> list[float]:
@@ -421,6 +437,8 @@ def run_exact_equity(
             board_mask,
             mode,
             get_num_threads(),
+            rank_table=rank_lookup.rank_table,
+            binomial_table=rank_lookup.binomial_table,
         )
     else:
         pot_shares, total_weight = _run_exact_equity_kernel(
@@ -430,6 +448,8 @@ def run_exact_equity(
             board=board,
             board_mask=board_mask,
             mode=mode,
+            rank_table=rank_lookup.rank_table,
+            binomial_table=rank_lookup.binomial_table,
         )
 
     if total_weight == 0:

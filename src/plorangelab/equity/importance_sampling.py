@@ -8,6 +8,7 @@ from numba.typed import List
 from numpy.typing import NDArray
 
 from plorangelab.encoder import Mode
+from plorangelab.rank_combination import RankLookup
 
 from .evaluator import numba_evaluate_hands
 from .monte_carlo import (
@@ -223,6 +224,8 @@ def _run_importance_batch(
     memberships: List,
     subset_masses: List,
     indexed: bool,
+    rank_table: NDArray[np.uint32],
+    binomial_table: NDArray[np.uint32],
 ):
     """Generate compatible matchups using sequential importance sampling."""
     player_count = len(hands)
@@ -352,6 +355,8 @@ def _run_importance_batch(
         scores = numba_evaluate_hands(
             sampled_hands[sim],
             sampled_boards[sim],
+            rank_table=rank_table,
+            binomial_table=binomial_table,
         )
 
         best = scores[0]
@@ -463,7 +468,8 @@ def _run_importance_monte_carlo(
     min_samples: int,
     confidence_multiplier: float,
     cancel_event: Event | None = None,
-    on_progress: Callable[[MonteCarloResult], None] | None = None
+    on_progress: Callable[[MonteCarloResult], None] | None = None,
+    rank_lookup: RankLookup
 ) -> MonteCarloResult:
     """Run weighted batches until precision, cancellation, or resource limits."""
     player_count = len(hands)
@@ -514,6 +520,8 @@ def _run_importance_monte_carlo(
             memberships,
             subset_masses,
             indexed,
+            rank_table=rank_lookup.rank_table,
+            binomial_table=rank_lookup.binomial_table,
         )
 
         (

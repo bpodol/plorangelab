@@ -4,6 +4,8 @@ import random
 
 import numpy as np
 import pytest
+
+from plorangelab.rank_combination import RankLookup
 from numba.typed import List
 
 from plorangelab.encoder import build_mask, encode_board
@@ -149,7 +151,7 @@ def test_indexed_selector_handles_no_compatible_hands() -> None:
 @pytest.mark.parametrize("mode", [4, 5])
 def test_indexed_batch_matches_original_scan_with_same_seed(
     mode: int,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players = _weighted_players(mode)
     board = encode_board("2c3d5h7s9c")
 
@@ -188,6 +190,8 @@ def test_indexed_batch_matches_original_scan_with_same_seed(
         membership,
         lookup,
         False,
+        rank_lookup.rank_table,
+        rank_lookup.binomial_table,
     )
 
     indexed = _run_importance_batch(
@@ -196,6 +200,8 @@ def test_indexed_batch_matches_original_scan_with_same_seed(
         membership,
         lookup,
         True,
+        rank_lookup.rank_table,
+        rank_lookup.binomial_table,
     )
 
     assert indexed[-2:] == scan[-2:]
@@ -234,7 +240,7 @@ def test_index_guard_falls_back_above_threshold(
 
 def test_scan_fallback_matches_indexed_public_results(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     monkeypatch.setattr(
         api_module,
         "_probe_collision_acceptance",
@@ -253,10 +259,10 @@ def test_scan_fallback_matches_indexed_public_results(
         "seed": 73,
     }
 
-    indexed_result = compute_equity(**kwargs)
+    indexed_result = compute_equity(**kwargs, rank_lookup=rank_lookup)
 
     monkeypatch.setattr(importance_sampling, "_INDEX_MAX_HANDS", 1)
-    fallback_result = compute_equity(**kwargs)
+    fallback_result = compute_equity(**kwargs, rank_lookup=rank_lookup)
 
     assert indexed_result.sampler == "importance"
     assert fallback_result.sampler == "importance"

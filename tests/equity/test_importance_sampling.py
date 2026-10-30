@@ -2,6 +2,8 @@
 
 import numpy as np
 import pytest
+
+from plorangelab.rank_combination import RankLookup
 from numba.typed import List
 
 from plorangelab.encoder import build_mask, encode_board, encode_range
@@ -26,7 +28,7 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
     monkeypatch: pytest.MonkeyPatch,
     mode: int,
     board_text: str,
-) -> None:
+rank_lookup: RankLookup) -> None:
     monkeypatch.setattr(
         api_module,
         "_probe_collision_acceptance",
@@ -37,7 +39,8 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
     board = encode_board(board_text)
 
     exact = compute_equity(
-        players, mode=mode, board=board, method="exact"
+        players, mode=mode, board=board, method="exact",
+        rank_lookup=rank_lookup,
     )
 
     estimates = []
@@ -53,7 +56,7 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
             batch_size=1_000,
             target_moe=0.0,
             seed=seed,
-        )
+        rank_lookup=rank_lookup)
 
         assert result.sampler == "importance"
         assert result.simulations == 4_000
@@ -81,7 +84,7 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
 
 def test_indexed_and_rejection_samplers_agree_statistically(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players = _weighted_players(4)
     board = encode_board("2c3d5h7s9c")
 
@@ -101,14 +104,14 @@ def test_indexed_and_rejection_samplers_agree_statistically(
         "_probe_collision_acceptance",
         lambda *args: 0,
     )
-    importance = compute_equity(**common)
+    importance = compute_equity(**common, rank_lookup=rank_lookup)
 
     monkeypatch.setattr(
         api_module,
         "_probe_collision_acceptance",
         lambda *args: 1024,
     )
-    rejection = compute_equity(**common)
+    rejection = compute_equity(**common, rank_lookup=rank_lookup)
 
     assert importance.sampler == "importance"
     assert rejection.sampler == "rejection"
@@ -133,7 +136,7 @@ def test_indexed_importance_supports_modes_and_streets(
     monkeypatch: pytest.MonkeyPatch,
     mode: int,
     board_text: str | None,
-) -> None:
+rank_lookup: RankLookup) -> None:
     monkeypatch.setattr(
         api_module,
         "_probe_collision_acceptance",
@@ -152,7 +155,7 @@ def test_indexed_importance_supports_modes_and_streets(
         batch_size=250,
         seed=5,
         target_moe=0.0,
-    )
+    rank_lookup=rank_lookup)
 
     assert result.sampler == "importance"
     assert result.simulations == 1_000
@@ -173,7 +176,7 @@ def test_indexed_importance_supports_modes_and_streets(
         1.0, abs=1e-10
     )
 
-def test_importance_batch_handles_dead_end_without_invalid_selection() -> None:
+def test_importance_batch_handles_dead_end_without_invalid_selection(rank_lookup: RankLookup) -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("AsQsJcTc", 4),  # Always collides with player 1.
@@ -209,7 +212,7 @@ def test_importance_batch_handles_dead_end_without_invalid_selection() -> None:
         membership,
         lookup,
         True,
-    )
+    rank_lookup.rank_table, rank_lookup.binomial_table)
 
     assert result[-2:] == (0, 25)
     assert result[0] == 0.0
@@ -223,7 +226,7 @@ def test_importance_batch_handles_dead_end_without_invalid_selection() -> None:
 
 def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     from plorangelab.equity import engine as api_module
 
     board = encode_board(RIVER)
@@ -239,7 +242,7 @@ def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
         mode=4,
         board=board,
         method="exact",
-    )
+    rank_lookup=rank_lookup)
 
     # Force the importance-sampling path.
     monkeypatch.setattr(
@@ -258,7 +261,7 @@ def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
         batch_size=2_000,
         seed=103,
         target_moe=0.0,
-    )
+    rank_lookup=rank_lookup)
 
     assert sampled.sampler == "importance"
     assert sampled.simulations == 20_000

@@ -5,6 +5,8 @@ from threading import Event
 
 import pytest
 
+from plorangelab.rank_combination import RankLookup
+
 import plorangelab.equity.engine as equity_module
 import plorangelab.equity.monte_carlo as mc_module
 from plorangelab.encoder import EncodedRange, encode_board, encode_range
@@ -25,8 +27,8 @@ def _stub_monte_carlo_coordinator(monkeypatch: pytest.MonkeyPatch) -> None:
         equity_module,
         "_run_batched_monte_carlo",
         lambda *args, **kwargs: mc_module.MonteCarloResult(
-            equities={"player 1:": 0.75, "player 2:": 0.25},
-            margins_of_error={"player 1:": 0.1, "player 2:": 0.1},
+            equities=[0.75, 0.25],
+            margins_of_error=[0.1, 0.1],
             simulations=4,
             attempts=5,
             stop_reason="target_reached",
@@ -37,7 +39,7 @@ def _stub_exact_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         equity_module,
         "run_exact_equity",
-        lambda **kwargs: {"player 1:": 1.0, "player 2:": 0.0},
+        lambda **kwargs: [1.0, 0.0],
     )
 
 
@@ -45,25 +47,25 @@ def _stub_exact_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_auto_uses_adaptive_monte_carlo_preflop_and_returns_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("KsKhJdTd", 4),
     ]
     _stub_monte_carlo_coordinator(monkeypatch)
 
-    result = compute_equity(players, mode=4, method="auto")
+    result = compute_equity(players, mode=4, method="auto", rank_lookup=rank_lookup)
 
     assert result.method == "monte-carlo"
-    assert result.equities == {"player 1:": 0.75, "player 2:": 0.25}
-    assert result.margins_of_error == {"player 1:": 0.1, "player 2:": 0.1}
+    assert result.equities == [0.75, 0.25]
+    assert result.margins_of_error == [0.1, 0.1]
     assert result.simulations == 4
     assert result.attempts == 5
     assert result.stop_reason == "target_reached"
 
 def test_auto_uses_exact_for_a_small_postflop_workload(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     board = encode_board(RIVER)
     players = [
         _river_candidate_range(1),
@@ -71,10 +73,10 @@ def test_auto_uses_exact_for_a_small_postflop_workload(
     ]
     _stub_exact_calculation(monkeypatch)
 
-    result = compute_equity(players, mode=4, board=board)
+    result = compute_equity(players, mode=4, board=board, rank_lookup=rank_lookup)
 
     assert result.method == "exact"
-    assert result.equities == {"player 1:": 1.0, "player 2:": 0.0}
+    assert result.equities == [1.0, 0.0]
     assert result.margins_of_error is None
     assert result.simulations is None
     assert result.attempts is None
@@ -82,29 +84,29 @@ def test_auto_uses_exact_for_a_small_postflop_workload(
 
 def test_auto_uses_exact_at_the_showdown_limit(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     board = encode_board(RIVER)
     players = [_river_candidate_range(500), _river_candidate_range(1_000)]
     _stub_exact_calculation(monkeypatch)
 
-    result = compute_equity(players, mode=4, board=board)
+    result = compute_equity(players, mode=4, board=board, rank_lookup=rank_lookup)
 
     assert result.method == "exact"
 
 def test_auto_uses_monte_carlo_above_the_showdown_limit(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     board = encode_board(RIVER)
     players = [_river_candidate_range(501), _river_candidate_range(1_000)]
     _stub_monte_carlo_coordinator(monkeypatch)
 
-    result = compute_equity(players, mode=4, board=board)
+    result = compute_equity(players, mode=4, board=board, rank_lookup=rank_lookup)
 
     assert result.method == "monte-carlo"
 
 def test_auto_estimates_after_removing_board_blocked_hands(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     board = encode_board(RIVER)
     available = [card for card in range(52) if card not in set(map(int, board))]
     blocked_hand = (int(board[0]), *available[:3])
@@ -126,11 +128,11 @@ def test_auto_estimates_after_removing_board_blocked_hands(
     def exact_after_filtering(**kwargs: object):
         captured["first_range_size"] = len(kwargs["players"][0].hands)
         captured["second_range_size"] = len(kwargs["players"][1].hands)
-        return {"player 1:": 1.0, "player 2:": 0.0}
+        return [1.0, 0.0]
 
     monkeypatch.setattr(equity_module, "choose_method", observe_estimate)
     monkeypatch.setattr(equity_module, "run_exact_equity", exact_after_filtering)
-    result = compute_equity(players, mode=4, board=board)
+    result = compute_equity(players, mode=4, board=board, rank_lookup=rank_lookup)
 
     assert result.method == "exact"
     assert captured == {
@@ -142,7 +144,8 @@ def test_auto_estimates_after_removing_board_blocked_hands(
 
 @pytest.mark.parametrize("method", ["exact", "monte-carlo"])
 def test_explicit_method_overrides_bypass_auto_selection(
-    method: str, monkeypatch: pytest.MonkeyPatch
+    method: str, monkeypatch: pytest.MonkeyPatch,
+    rank_lookup: RankLookup,
 ) -> None:
     board = encode_board(RIVER)
     players = [
@@ -156,7 +159,7 @@ def test_explicit_method_overrides_bypass_auto_selection(
     monkeypatch.setattr(equity_module, "choose_method", unexpected_selection)
     if method == "exact":
         _stub_exact_calculation(monkeypatch)
-        result = compute_equity(players, mode=4, board=board, method="exact")
+        result = compute_equity(players, mode=4, board=board, method="exact", rank_lookup=rank_lookup)
     else:
         _stub_monte_carlo_coordinator(monkeypatch)
         result = compute_equity(
@@ -166,7 +169,7 @@ def test_explicit_method_overrides_bypass_auto_selection(
             method="monte-carlo",
             min_samples=1,
             max_samples=1,
-        )
+        rank_lookup=rank_lookup)
 
     assert result.method == method
 
@@ -175,7 +178,7 @@ def test_explicit_method_overrides_bypass_auto_selection(
 
 def test_adaptive_cancellation_precedes_input_validation(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players, board = _guaranteed_split_players()
     cancelled = Event()
     cancelled.set()
@@ -193,11 +196,11 @@ def test_adaptive_cancellation_precedes_input_validation(
             board=board,
             method="monte-carlo",
             cancel_event=cancelled,
-        )
+        rank_lookup=rank_lookup)
 
 def test_adaptive_cancellation_after_validation_skips_preparation(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players, board = _guaranteed_split_players()
     cancelled = Event()
 
@@ -220,4 +223,52 @@ def test_adaptive_cancellation_after_validation_skips_preparation(
             board=board,
             method="monte-carlo",
             cancel_event=cancelled,
+        rank_lookup=rank_lookup)
+
+
+def test_public_api_passes_the_same_lookup_object_to_exact_engine(
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
+    """The API should forward its shared dependency without rebuilding it."""
+    players, board = _guaranteed_split_players()
+    received = []
+
+    def fake_exact(**kwargs):
+        received.append(kwargs["rank_lookup"])
+        return [0.5, 0.5]
+
+    monkeypatch.setattr(equity_module, "run_exact_equity", fake_exact)
+    result = compute_equity(
+        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+    )
+
+    assert result.equities == [0.5, 0.5]
+    assert received == [rank_lookup]
+    assert received[0] is rank_lookup
+
+
+def test_public_api_passes_the_same_lookup_object_to_rejection_engine(
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
+    players, board = _guaranteed_split_players()
+    received = []
+
+    def fake_mc(*args, **kwargs):
+        received.append(kwargs["rank_lookup"])
+        return mc_module.MonteCarloResult(
+            equities=[0.5, 0.5],
+            margins_of_error=[0.0, 0.0],
+            simulations=4,
+            attempts=4,
+            stop_reason="target_reached",
         )
+
+    monkeypatch.setattr(equity_module, "_run_batched_monte_carlo", fake_mc)
+    result = compute_equity(
+        players, mode=4, board=board, method="monte-carlo",
+        min_samples=4, max_samples=4, rank_lookup=rank_lookup,
+    )
+
+    assert result.equities == [0.5, 0.5]
+    assert received == [rank_lookup]
+    assert received[0] is rank_lookup

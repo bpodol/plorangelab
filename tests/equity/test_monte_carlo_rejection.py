@@ -4,6 +4,8 @@ import numba
 import numpy as np
 import pytest
 
+from plorangelab.rank_combination import RankLookup
+
 import plorangelab.equity.monte_carlo as mc_module
 from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
@@ -12,7 +14,7 @@ from ._helpers import RIVER, TURN
 
 # Legal sampling and board runouts
 
-def test_monte_carlo_rejects_colliding_hands() -> None:
+def test_monte_carlo_rejects_colliding_hands(rank_lookup: RankLookup) -> None:
     # A colliding P1 hand (AA) would win, but its only legal hand loses.
     # This tests rejection through the public API without mocking compiled code.
     players = [
@@ -29,7 +31,7 @@ def test_monte_carlo_rejects_colliding_hands() -> None:
         max_samples=200,
         seed=7,
         method="monte-carlo",
-    ).equities
+    rank_lookup=rank_lookup).equities
 
     assert equity == [0.0, 1.0]
 
@@ -38,7 +40,7 @@ def test_monte_carlo_rejects_colliding_hands() -> None:
     [None, "2c3d5h", "2c3d5h7s", RIVER],
     ids=["preflop", "flop", "turn", "river"],
 )
-def test_monte_carlo_supports_each_board_state(board_text: str | None) -> None:
+def test_monte_carlo_supports_each_board_state(board_text: str | None, rank_lookup: RankLookup) -> None:
     board = None if board_text is None else encode_board(board_text)
     players = [
         encode_range("AsAhKdQc", 4),
@@ -53,7 +55,7 @@ def test_monte_carlo_supports_each_board_state(board_text: str | None) -> None:
         min_samples=8,
         max_samples=8,
         seed=19,
-    ).equities
+    rank_lookup=rank_lookup).equities
 
     assert sum(equity) == pytest.approx(1.0)
 
@@ -81,7 +83,7 @@ def test_deal_card_never_returns_board_or_hand_cards() -> None:
     with pytest.raises(ValueError, match="Deck is empty"):
         mc_module.deal_card(deck, rng)
 
-def test_monte_carlo_raises_when_attempt_limit_is_exceeded() -> None:
+def test_monte_carlo_raises_when_attempt_limit_is_exceeded(rank_lookup: RankLookup) -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("AsQsJcTc", 4),
@@ -96,12 +98,12 @@ def test_monte_carlo_raises_when_attempt_limit_is_exceeded() -> None:
             max_samples=1,
             seed=5,
             method="monte-carlo",
-        )
+        rank_lookup=rank_lookup)
 
 
 # Determinism and batch-size independence
 
-def test_monte_carlo_results_are_reproducible_for_the_same_seed() -> None:
+def test_monte_carlo_results_are_reproducible_for_the_same_seed(rank_lookup: RankLookup) -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("KsKhJdTd", 4),
@@ -118,7 +120,7 @@ def test_monte_carlo_results_are_reproducible_for_the_same_seed() -> None:
         target_moe=0.0,
         seed=101,
         method="monte-carlo",
-    ).equities
+    rank_lookup=rank_lookup).equities
     second = compute_equity(
         players,
         mode=4,
@@ -128,11 +130,11 @@ def test_monte_carlo_results_are_reproducible_for_the_same_seed() -> None:
         target_moe=0.0,
         seed=101,
         method="monte-carlo",
-    ).equities
+    rank_lookup=rank_lookup).equities
 
     assert first == second
 
-def test_monte_carlo_deterministic_across_thread_counts() -> None:
+def test_monte_carlo_deterministic_across_thread_counts(rank_lookup: RankLookup) -> None:
     """Same seed must produce identical equities with 1, 2, 4, or 8 threads."""
 
     players = [
@@ -164,7 +166,7 @@ def test_monte_carlo_deterministic_across_thread_counts() -> None:
                 target_moe=0.0,
                 seed=42,
                 method="monte-carlo",
-            )
+            rank_lookup=rank_lookup)
             results.append(equity)
 
         for result in results[1:]:
@@ -173,7 +175,7 @@ def test_monte_carlo_deterministic_across_thread_counts() -> None:
     finally:
         numba.set_num_threads(original_threads)
 
-def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent() -> None:
+def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent(rank_lookup: RankLookup) -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("KsKhJdTd", 4),
@@ -190,7 +192,7 @@ def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent() ->
         seed=31,
         method="monte-carlo",
         batch_size=127,
-    ).equities
+    rank_lookup=rank_lookup).equities
     single_batch = compute_equity(
         players,
         mode=4,
@@ -201,12 +203,12 @@ def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent() ->
         seed=31,
         method="monte-carlo",
         batch_size=10_000,
-    ).equities
+    rank_lookup=rank_lookup).equities
 
     assert small_batches == single_batch
     assert small_batches == [0.9762, 0.0238]
 
-def test_fixed_budget_three_way_ties_are_batch_independent() -> None:
+def test_fixed_budget_three_way_ties_are_batch_independent(rank_lookup: RankLookup) -> None:
     board = encode_board("3d4h5s9cTc")
     players = [
         encode_range("6c7cAsAh", 4),
@@ -224,7 +226,7 @@ def test_fixed_budget_three_way_ties_are_batch_independent() -> None:
             seed=23,
             method="monte-carlo",
             batch_size=batch_size,
-        ).equities
+        rank_lookup=rank_lookup).equities
         for batch_size in (7, 31, 101)
     ]
 

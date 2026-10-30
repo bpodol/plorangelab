@@ -12,6 +12,7 @@ from numba.typed import List
 from numpy.typing import NDArray
 
 from plorangelab.encoder import EncodedRange, Mode, build_mask
+from plorangelab.rank_combination import RankLookup
 
 from .evaluator import numba_evaluate_hands
 
@@ -128,6 +129,8 @@ def _run_monte_carlo_batch(
     batch_size: int,
     attempt_budget: int,
     rng: np.random.Generator,
+    rank_table: NDArray[np.uint32],
+    binomial_table: NDArray[np.uint32],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], int, int]:
     """Sample and evaluate up to ``batch_size`` valid Omaha showdowns.
 
@@ -209,6 +212,8 @@ def _run_monte_carlo_batch(
         scores = numba_evaluate_hands(
             sampled_hands[sim],
             sampled_boards[sim],
+            rank_table=rank_table,
+            binomial_table=binomial_table,
         )
 
         highest_score = scores[0]
@@ -351,7 +356,8 @@ def _run_batched_monte_carlo(
     min_samples: int,
     confidence_multiplier: float,
     cancel_event: Event | None = None,
-    on_progress: Callable[[MonteCarloResult], None] | None = None
+    on_progress: Callable[[MonteCarloResult], None] | None = None,
+    rank_lookup: RankLookup
 ) -> MonteCarloResult:
     """Coordinate batches and aggregate every completed showdown.
 
@@ -403,6 +409,8 @@ def _run_batched_monte_carlo(
                 batch_size=batch_count,
                 attempt_budget=min(attempts_remaining, _MAX_BATCH_ATTEMPTS),
                 rng=rng,
+                rank_table=rank_lookup.rank_table,
+                binomial_table=rank_lookup.binomial_table,
             )
         )
 

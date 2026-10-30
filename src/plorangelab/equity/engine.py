@@ -10,6 +10,7 @@ from numba.typed import List
 from numpy.typing import NDArray
 
 from plorangelab.encoder import EncodedRange, Mode, build_mask
+from plorangelab.rank_combination import RankLookup
 
 from .exact import _EXACT_MAX_SHOWDOWNS, _estimate_exact_showdowns, run_exact_equity
 from .importance_sampling import _run_importance_monte_carlo
@@ -264,7 +265,8 @@ def compute_equity(
     batch_size: int = 10_000,
     seed: int = 3,
     cancel_event: Event | None = None,
-    on_progress: Callable[[MonteCarloResult], None] | None = None
+    on_progress: Callable[[MonteCarloResult], None] | None = None,
+    rank_lookup: RankLookup
 ) -> EquityResult:
     """Calculate equity exactly or with adaptive Monte Carlo.
 
@@ -315,6 +317,7 @@ def compute_equity(
         equities = run_exact_equity(
             players=valid_players,
             mode=mode,
+            rank_lookup=rank_lookup,
             board=board,
         )
         return EquityResult(
@@ -373,6 +376,7 @@ def compute_equity(
             confidence_multiplier=float(confidence_multiplier),
             cancel_event=cancel_event,
             on_progress=on_progress,
+            rank_lookup=rank_lookup,
         )
 
     else:
@@ -392,6 +396,7 @@ def compute_equity(
             confidence_multiplier=float(confidence_multiplier),
             cancel_event=cancel_event,
             on_progress=on_progress,
+            rank_lookup=rank_lookup,
         )
   
     return EquityResult(

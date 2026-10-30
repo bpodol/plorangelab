@@ -5,6 +5,8 @@ from threading import Event
 import numpy as np
 import pytest
 
+from plorangelab.rank_combination import RankLookup
+
 import plorangelab.equity.engine as equity_module
 import plorangelab.equity.importance_sampling as importance_module
 import plorangelab.equity.monte_carlo as mc_module
@@ -16,7 +18,7 @@ from ._helpers import _guaranteed_split_players
 
 def test_rejection_progress_callback(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players, board = _guaranteed_split_players()
     updates: list[MonteCarloResult] = []
 
@@ -43,7 +45,7 @@ def test_rejection_progress_callback(
         batch_size=2,
         target_moe=0.0,
         on_progress=updates.append,
-    )
+    rank_lookup=rank_lookup)
 
     assert len(updates) == 2
     assert [u.simulations for u in updates] == [2, 4]
@@ -68,7 +70,7 @@ def test_rejection_progress_callback(
 
 def test_importance_progress_callback(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players = [
         encode_range("AsKsQsJs", 4),
         encode_range("AhKhQhJh", 4),
@@ -91,7 +93,7 @@ def test_importance_progress_callback(
         lambda *args: (None, None, False),
     )
 
-    def balanced_importance_batch(*args):
+    def balanced_importance_batch(*args, **kwargs):
         assert args[7] == 2  # batch_size
 
         # Two equal-weight simulations:
@@ -123,7 +125,7 @@ def test_importance_progress_callback(
         batch_size=2,
         target_moe=0.5,
         on_progress=updates.append,
-    )
+    rank_lookup=rank_lookup)
 
     assert len(updates) == 2
     assert [u.simulations for u in updates] == [2, 4]
@@ -148,7 +150,7 @@ def test_importance_progress_callback(
 
 def test_cancellation_from_callback_rejection(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players, board = _guaranteed_split_players()
 
     cancelled = Event()
@@ -185,7 +187,7 @@ def test_cancellation_from_callback_rejection(
         target_moe=0.0,
         cancel_event=cancelled,
         on_progress=on_progress,
-    )
+    rank_lookup=rank_lookup)
 
     assert cancelled.is_set()
     assert batch_calls == 1
@@ -200,7 +202,7 @@ def test_cancellation_from_callback_rejection(
 
 def test_cancellation_from_callback_importance(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players = [
         encode_range("AsKsQsJs", 4),
         encode_range("AhKhQhJh", 4),
@@ -224,7 +226,7 @@ def test_cancellation_from_callback_importance(
         lambda *args: (None, None, False),
     )
 
-    def mock_batch(*args):
+    def mock_batch(*args, **kwargs):
         nonlocal batch_calls
         batch_calls += 1
 
@@ -260,7 +262,7 @@ def test_cancellation_from_callback_importance(
         target_moe=0.0,
         cancel_event=cancelled,
         on_progress=on_progress,
-    )
+    rank_lookup=rank_lookup)
 
     assert cancelled.is_set()
     assert batch_calls == 1
@@ -278,7 +280,7 @@ def test_cancellation_from_callback_importance(
 
 def test_no_progress_for_exact_equity(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+rank_lookup: RankLookup) -> None:
     players, board = _guaranteed_split_players()
     updates: list[MonteCarloResult] = []
 
@@ -295,7 +297,7 @@ def test_no_progress_for_exact_equity(
         board=board,
         method="exact",
         on_progress=updates.append,
-    )
+    rank_lookup=rank_lookup)
 
     assert updates == []
     assert result.method == "exact"
