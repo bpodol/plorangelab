@@ -45,7 +45,7 @@ class EncodedRange:
     weights: NDArray[np.float32]
 
 
-def build_mask(cards: np.uint8) -> np.uint64:
+def build_mask(cards: NDArray[np.uint8]) -> np.uint64:
     """
     Encode a set of cards as a 64-bit bitmask.
 
