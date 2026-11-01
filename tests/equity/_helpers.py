@@ -1,7 +1,6 @@
 """Small shared equity test data builders (not production fixtures)."""
 
 import numpy as np
-
 from plorangelab.encoder import EncodedRange, build_mask, encode_board, encode_range
 
 RIVER = "2c3d5h7s9c"

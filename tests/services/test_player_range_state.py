@@ -1,7 +1,6 @@
 """Tests for per-player board transitions, history, and copy-on-write state."""
 
 import pytest
-
 from plorangelab.encoder import EncodedRange, encode_range
 from plorangelab.services.player_range_state import Board, PlayerRangeState
 

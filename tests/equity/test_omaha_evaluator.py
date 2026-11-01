@@ -6,7 +6,6 @@ its caller and is not part of this test module's contract.
 
 import numpy as np
 import pytest
-
 from plorangelab.encoder import encode_board, encode_range
 from plorangelab.equity.evaluator import (
     numba_evaluate_hands,

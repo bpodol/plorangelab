@@ -5,7 +5,6 @@ import random
 import numpy as np
 import pytest
 from numba.typed import List
-
 from plorangelab.encoder import build_mask, encode_board
 from plorangelab.equity import compute_equity, importance_sampling
 from plorangelab.equity import engine as api_module

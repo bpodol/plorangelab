@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-
 from plorangelab.encoder import EncodedRange, build_mask, encode_board
 from plorangelab.equity import sanitize_range
 from plorangelab.types import Mode
