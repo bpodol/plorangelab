@@ -1,6 +1,7 @@
 """Session-scoped lookup shared by the equity test suite."""
 
 import pytest
+
 from plorangelab.rank_combination import RankLookup, build_lookup_tables
 
 

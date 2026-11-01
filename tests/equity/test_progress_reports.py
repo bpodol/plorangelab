@@ -3,10 +3,11 @@
 from threading import Event
 
 import numpy as np
+import pytest
+
 import plorangelab.equity.engine as equity_module
 import plorangelab.equity.importance_sampling as importance_module
 import plorangelab.equity.monte_carlo as mc_module
-import pytest
 from plorangelab.encoder import encode_range
 from plorangelab.equity.monte_carlo import MonteCarloResult
 from plorangelab.rank_combination import RankLookup

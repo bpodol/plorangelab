@@ -1,12 +1,10 @@
 from dataclasses import dataclass
 from importlib.resources import files
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
 from plorangelab.types import Mode
-
 
 ratings_dir = files("plorangelab").joinpath("resources", "rating")
 

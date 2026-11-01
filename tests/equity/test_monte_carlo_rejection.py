@@ -2,8 +2,9 @@
 
 import numba
 import numpy as np
-import plorangelab.equity.monte_carlo as mc_module
 import pytest
+
+import plorangelab.equity.monte_carlo as mc_module
 from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup

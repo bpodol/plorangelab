@@ -1,6 +1,5 @@
 import re
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 from numba import njit

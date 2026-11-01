@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from plorangelab.encoder import encode_board, encode_input, encode_range
 from plorangelab.rating import HandRating
 
@@ -93,6 +94,7 @@ def test_multiple_hands_keep_weights_aligned_with_rows() -> None:
 
 
 import pytest
+
 from plorangelab.encoder import encode_range
 
 

@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+
 from plorangelab.encoder import EncodedRange, build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup

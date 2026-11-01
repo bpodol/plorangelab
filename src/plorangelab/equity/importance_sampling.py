@@ -7,8 +7,8 @@ from numba import njit, prange
 from numba.typed import List
 from numpy.typing import NDArray
 
-from plorangelab.types import Mode
 from plorangelab.rank_combination import RankLookup
+from plorangelab.types import Mode
 
 from .evaluator import numba_evaluate_hands
 from .monte_carlo import (
