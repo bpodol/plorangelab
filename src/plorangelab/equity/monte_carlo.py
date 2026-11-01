@@ -9,8 +9,9 @@ from numba import njit, prange
 from numba.typed import List
 from numpy.typing import NDArray
 
-from plorangelab.encoder import EncodedRange, Mode, build_mask
+from plorangelab.encoder import EncodedRange, build_mask
 from plorangelab.rank_combination import RankLookup
+from plorangelab.types import Mode
 
 from .evaluator import numba_evaluate_hands
 from .results import MonteCarloResult, StopReason

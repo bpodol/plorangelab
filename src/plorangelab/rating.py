@@ -5,7 +5,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-Mode = Literal[4, 5]
+from plorangelab.types import Mode
 
 
 ratings_dir = files("plorangelab").joinpath("resources", "rating")

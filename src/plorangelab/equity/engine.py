@@ -8,8 +8,9 @@ import numpy as np
 from numba.typed import List
 from numpy.typing import NDArray
 
-from plorangelab.encoder import EncodedRange, Mode, build_mask
+from plorangelab.encoder import EncodedRange, build_mask
 from plorangelab.rank_combination import RankLookup
+from plorangelab.types import Mode
 
 from .exact import _EXACT_MAX_SHOWDOWNS, _estimate_exact_showdowns, run_exact_equity
 from .importance_sampling import _run_importance_monte_carlo

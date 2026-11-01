@@ -7,7 +7,7 @@ from numba import njit, prange
 from numba.typed import List
 from numpy.typing import NDArray
 
-from plorangelab.encoder import Mode
+from plorangelab.types import Mode
 from plorangelab.rank_combination import RankLookup
 
 from .evaluator import numba_evaluate_hands

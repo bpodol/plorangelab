@@ -7,8 +7,7 @@ from numba import njit
 from numpy.typing import NDArray
 
 from plorangelab.rating import HandRating
-
-Mode = Literal[4, 5]
+from plorangelab.types import Mode
 
 RANKS_ENCODE = {
     "2": 0,
