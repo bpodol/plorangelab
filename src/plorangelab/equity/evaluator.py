@@ -3,7 +3,8 @@ from typing import Literal
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
-from plorangelab.rank_combination import rank_combination_lookup, RankLookup
+
+from plorangelab.rank_combination import RankLookup, rank_combination_lookup
 
 #0-high card
 #1-one pair

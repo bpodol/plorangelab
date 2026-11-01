@@ -3,14 +3,12 @@
 from itertools import combinations, islice
 from threading import Event
 
-import pytest
-
-from plorangelab.rank_combination import RankLookup
-
 import plorangelab.equity.engine as equity_module
 import plorangelab.equity.monte_carlo as mc_module
+import pytest
 from plorangelab.encoder import EncodedRange, encode_board, encode_range
 from plorangelab.equity import compute_equity
+from plorangelab.rank_combination import RankLookup
 
 from ._helpers import RIVER, _guaranteed_split_players, _make_range_from_ids
 

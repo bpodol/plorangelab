@@ -8,7 +8,6 @@ from math import comb
 import numpy as np
 import pytest
 from numba import njit
-
 from plorangelab.encoder import encode_board
 from plorangelab.rank_combination import (
     RankLookup,

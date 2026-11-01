@@ -29,7 +29,6 @@ from typing import Literal
 import numba
 import numpy as np
 from numba import njit
-
 from plorangelab.encoder import EncodedRange, encode_board, encode_range
 from plorangelab.equity import EquityResult, compute_equity
 from plorangelab.equity.exact import _EXACT_MAX_SHOWDOWNS

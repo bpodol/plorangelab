@@ -2,10 +2,7 @@
 
 import numpy as np
 import pytest
-
-from plorangelab.rank_combination import RankLookup
 from numba.typed import List
-
 from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
 from plorangelab.equity import engine as api_module
@@ -14,6 +11,7 @@ from plorangelab.equity.importance_sampling import (
     _importance_statistics,
     _run_importance_batch,
 )
+from plorangelab.rank_combination import RankLookup
 
 from ._helpers import RIVER, _weighted_players
 

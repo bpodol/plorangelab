@@ -3,13 +3,11 @@
 from threading import Event
 
 import numpy as np
-import pytest
-
-from plorangelab.rank_combination import RankLookup
-
 import plorangelab.equity.engine as equity_module
 import plorangelab.equity.monte_carlo as mc_module
+import pytest
 from plorangelab.equity import compute_equity
+from plorangelab.rank_combination import RankLookup
 
 from ._helpers import _configured_ranges, _guaranteed_split_players
 

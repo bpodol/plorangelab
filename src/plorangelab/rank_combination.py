@@ -1,11 +1,10 @@
+from dataclasses import dataclass
 from math import comb
 from typing import Literal
-from dataclasses import dataclass
 
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
-
 
 #0-high card
 #1-one pair

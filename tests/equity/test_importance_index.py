@@ -4,10 +4,7 @@ import random
 
 import numpy as np
 import pytest
-
-from plorangelab.rank_combination import RankLookup
 from numba.typed import List
-
 from plorangelab.encoder import build_mask, encode_board
 from plorangelab.equity import compute_equity, importance_sampling
 from plorangelab.equity import engine as api_module
@@ -17,6 +14,7 @@ from plorangelab.equity.importance_sampling import (
     _run_importance_batch,
     _select_indexed_hand,
 )
+from plorangelab.rank_combination import RankLookup
 
 from ._helpers import _weighted_players
 

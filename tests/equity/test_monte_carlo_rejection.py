@@ -2,13 +2,11 @@
 
 import numba
 import numpy as np
-import pytest
-
-from plorangelab.rank_combination import RankLookup
-
 import plorangelab.equity.monte_carlo as mc_module
+import pytest
 from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
+from plorangelab.rank_combination import RankLookup
 
 from ._helpers import RIVER, TURN
 
