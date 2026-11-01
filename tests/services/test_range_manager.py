@@ -170,3 +170,21 @@ def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
     assert kwargs["cancel_event"] is cancel_event
     assert kwargs["target_moe"] == 0.002
     assert kwargs["rank_lookup"] is manager.rank_lookup
+
+
+
+def test_empty_board_resets_players(manager):
+    manager.add_range("AsAhKdQc", mode=4, player_index=0)
+    manager.change_board("2c3d4h")
+
+    assert manager.players[0].active_street is manager.players[0].flop
+
+    manager.change_board("")
+
+    player = manager.players[0]
+
+    assert manager.board is None
+    assert player.active_street is player.preflop
+    assert player.flop is None
+    assert player.turn is None
+    assert player.river is None

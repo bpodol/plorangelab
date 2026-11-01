@@ -39,6 +39,9 @@ class RangeManager:
         self.players[player_index] = None
 
     def change_board(self, input_board: str):
+        if input_board == "":
+            self.clear_board()
+            return
         new_board = Board.from_string(input_board)
         updated_players = self.players.copy()
         
