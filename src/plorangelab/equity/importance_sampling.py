@@ -13,10 +13,9 @@ from plorangelab.rank_combination import RankLookup
 from .evaluator import numba_evaluate_hands
 from .monte_carlo import (
     _MAX_BATCH_ATTEMPTS,
-    MonteCarloResult,
-    StopReason,
     deal_card,
 )
+from .results import MonteCarloResult, StopReason
 
 _INDEX_MAX_HANDS = 50_000
 

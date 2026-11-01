@@ -1,10 +1,8 @@
 """Adaptive Monte Carlo equity engine with Numba sampling kernels."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from math import sqrt
 from threading import Event
-from typing import Literal
 
 import numpy as np
 from numba import njit, prange
@@ -15,27 +13,11 @@ from plorangelab.encoder import EncodedRange, Mode, build_mask
 from plorangelab.rank_combination import RankLookup
 
 from .evaluator import numba_evaluate_hands
+from .results import MonteCarloResult, StopReason
 
 _MAX_SIMULATIONS = 1_200_000
 _MAX_BATCH_SIZE = 100_000  # About 8 MiB for six-player PLO5 batch buffers.
 _MAX_BATCH_ATTEMPTS = 100_000  # Maximum work between coordinator checks.
-
-StopReason = Literal[
-    "target_reached", "max_simulations", "cancelled", "attempt_limit"
-]
-
-
-@dataclass(frozen=True)
-class MonteCarloResult:
-    """Equity estimates and stopping diagnostics for an adaptive run."""
-
-    equities: list[float]
-    margins_of_error: list[float | None]
-    simulations: int
-    attempts: int
-    stop_reason: StopReason | None
-    sampler: Literal["rejection", "importance"] = "rejection"
-    effective_samples: float | None = None
 
 
 @njit(cache=True)

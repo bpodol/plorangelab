@@ -1,7 +1,6 @@
 """Public equity API: validate inputs, choose an engine, return results."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from threading import Event
 from typing import Literal
 
@@ -17,27 +16,11 @@ from .importance_sampling import _run_importance_monte_carlo
 from .monte_carlo import (
     _MAX_BATCH_SIZE,
     _MAX_SIMULATIONS,
-    MonteCarloResult,
-    StopReason,
     _prepare_monte_carlo,
     _probe_collision_acceptance,
     _run_batched_monte_carlo,
 )
-
-
-@dataclass(frozen=True)
-class EquityResult:
-    """Equity values and, for Monte Carlo, stopping diagnostics."""
-
-    equities: list[float]
-    method: Literal["exact", "monte-carlo"]
-    margins_of_error: list[float | None] | None
-    simulations: int | None
-    attempts: int | None
-    stop_reason: StopReason | None
-    sampler: Literal["rejection", "importance"] | None = None
-    effective_samples: float | None = None
-
+from .results import EquityResult, MonteCarloResult
 
 
 def choose_method(

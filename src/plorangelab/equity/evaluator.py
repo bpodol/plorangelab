@@ -1,21 +1,9 @@
-from typing import Literal
 
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
 from plorangelab.rank_combination import RankLookup, rank_combination_lookup
-
-#0-high card
-#1-one pair
-#2-two pair
-#3-three of a kind
-#4-straight
-#5-flush
-#6-full house
-#7-four of a kind
-#8-straight flush
-CombinationStrength = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
 
 
 def evaluate_hand(hand: NDArray[np.uint8], board: NDArray[np.uint8], rank_lookup: RankLookup) -> int:
