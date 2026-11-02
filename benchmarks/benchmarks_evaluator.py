@@ -13,6 +13,7 @@ from itertools import combinations, islice
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
+
 from plorangelab.encoder import encode_board, encode_range
 from plorangelab.equity.evaluator import (
     numba_evaluate_hands,

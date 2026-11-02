@@ -29,6 +29,7 @@ from time import perf_counter
 
 import numba
 import numpy as np
+
 from plorangelab.encoder import RANKS_DECODE, SUITS_DECODE, encode_range
 
 

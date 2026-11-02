@@ -4,6 +4,7 @@ from itertools import combinations, islice
 
 import numpy as np
 import pytest
+
 from plorangelab.encoder import EncodedRange, encode_board, encode_range
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup

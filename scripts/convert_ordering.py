@@ -9,6 +9,7 @@ import csv
 from pathlib import Path
 
 import numpy as np
+
 from plorangelab.encoder import _encode_hands
 
 

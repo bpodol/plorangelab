@@ -3,9 +3,9 @@
 from unittest.mock import Mock
 
 import pytest
-from plorangelab.bootstrap import EngineResources
 
 from plorangelab import bootstrap
+from plorangelab.bootstrap import EngineResources
 
 
 def test_load_resources_initializes_dependencies(

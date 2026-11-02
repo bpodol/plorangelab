@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
 from plorangelab.encoder import encode_range
 from plorangelab.services import range_manager as manager_module
 from plorangelab.services.range_manager import RangeManager
