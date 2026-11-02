@@ -38,8 +38,8 @@ class RangeManager:
             raise ValueError("Out of range player index")
         self.players[player_index] = None
 
-    def change_board(self, input_board: str):
-        if input_board == "":
+    def change_board(self, input_board: str | None):
+        if input_board is None:
             self.clear_board()
             return
         new_board = Board.from_string(input_board)
