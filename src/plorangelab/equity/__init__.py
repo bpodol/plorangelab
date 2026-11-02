@@ -2,5 +2,6 @@
 
 from .engine import compute_equity, sanitize_range
 from .results import EquityResult, MonteCarloResult
+from .exceptions import SamplingExhaustedError
 
-__all__ = ["EquityResult", "MonteCarloResult", "compute_equity", "sanitize_range"]
+__all__ = ["EquityResult", "MonteCarloResult", "compute_equity", "sanitize_range", "SamplingExhaustedError"]

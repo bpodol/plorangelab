@@ -14,6 +14,7 @@ from plorangelab.rank_combination import RankLookup
 from plorangelab.types import Mode
 
 from .evaluator import numba_evaluate_hands
+from .exceptions import SamplingExhaustedError
 from .results import MonteCarloResult, StopReason
 
 _MAX_SIMULATIONS = 1_200_000
@@ -449,7 +450,7 @@ def _run_batched_monte_carlo(
         stop_reason = "max_simulations"
 
     if simulations == 0:
-        raise RuntimeError(
+        raise SamplingExhaustedError(
             f"Sampling limit exceeded: 0/{requested_samples} valid simulations "
             f"after {attempts} attempts"
         )

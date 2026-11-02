@@ -172,13 +172,13 @@ def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
 
 
 
-def test_empty_board_resets_players(manager):
+def test_none_board_resets_players(manager):
     manager.add_range("AsAhKdQc", mode=4, player_index=0)
     manager.change_board("2c3d4h")
 
     assert manager.players[0].active_street is manager.players[0].flop
 
-    manager.change_board("")
+    manager.change_board(None)
 
     player = manager.players[0]
 

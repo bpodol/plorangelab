@@ -7,6 +7,7 @@ import pytest
 from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup
+from plorangelab.equity import SamplingExhaustedError
 
 from ._helpers import RIVER, TURN
 
@@ -87,7 +88,7 @@ def test_monte_carlo_raises_when_attempt_limit_is_exceeded(rank_lookup: RankLook
         encode_range("AsQsJcTc", 4),
     ]
 
-    with pytest.raises(RuntimeError, match="Sampling limit exceeded"):
+    with pytest.raises(SamplingExhaustedError, match="Sampling limit exceeded"):
         compute_equity(
             players,
             mode=4,
