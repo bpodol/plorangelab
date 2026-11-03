@@ -25,7 +25,6 @@ def test_jobs_have_independent_state() -> None:
 
 def test_start_job_forwards_progress_and_returns_result() -> None:
     manager = Mock()
-    notify = Mock()
     on_finished = Mock()
     update = object()
     result = object()
@@ -45,14 +44,13 @@ def test_start_job_forwards_progress_and_returns_result() -> None:
             executor=executor,
             mode=4,
             target_moe=0.002,
-            notify=notify,
             on_finished=on_finished,
         )
         assert job.future is not None
         assert job.future.result(timeout=3) == ([0, 4], result)
 
     assert job.get_progress() is update
-    notify.assert_called_once_with(update)
+    assert job.get_progress() is update
     on_finished.assert_called_once_with()
     manager.calculate_equity.assert_called_once()
 
@@ -74,7 +72,6 @@ def test_cancel_signals_running_calculation() -> None:
             executor=executor,
             mode=4,
             target_moe=0.002,
-            notify=Mock(),
         )
         assert job.future is not None
         assert started.wait(timeout=3), "The worker did not start"
@@ -97,7 +94,6 @@ def test_on_finished_runs_if_calculation_fails() -> None:
             executor=executor,
             mode=4,
             target_moe=0.002,
-            notify=Mock(),
             on_finished=on_finished,
         )
         assert job.future is not None

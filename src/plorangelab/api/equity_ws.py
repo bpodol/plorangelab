@@ -7,10 +7,12 @@ from contextlib import suppress
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from plorangelab.services.equity_job import EquityJob
 from plorangelab.services.session_manager import Session, SessionManager
 
 from .equity_ws_runtime import (
     cancel_equity_calculation,
+    get_equity_job,
     publish_equity_updates,
     submit_equity_calculation,
 )
@@ -36,6 +38,19 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
     async def send(message: dict) -> None:
         async with send_lock:
             await websocket.send_json(message)
+
+    async def replace_publisher(job: EquityJob) -> None:
+        nonlocal publisher_task
+
+        if publisher_task is not None:
+            publisher_task.cancel()
+
+            with suppress(asyncio.CancelledError):
+                await publisher_task
+
+        publisher_task = asyncio.create_task(
+            publish_equity_updates(job, send)
+        )
 
     try:
         while True:
@@ -79,7 +94,7 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
                     })
                     continue
 
-                job, queue, error = await submit_equity_calculation(
+                job, error = await submit_equity_calculation(
                     session=session,
                     request=request,
                     executor=websocket.app.state.executor,
@@ -94,11 +109,41 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
 
                 assert job is not None
 
-                await send({"type": "started"})
+                await send({
+                    "type": "started",
+                    "job_id": job.job_id,
+                })
 
-                publisher_task = asyncio.create_task(
-                    publish_equity_updates(job, queue, send)
+                await replace_publisher(job)
+                
+            elif command == "resume":
+                job = await asyncio.to_thread(
+                    get_equity_job, session
                 )
+
+                if job is None:
+                    await send({
+                        "type": "error",
+                        "detail": "No calculation to resume",
+                    })
+                    continue
+
+                requested_id = message.get("job_id")
+
+                if requested_id is not None and requested_id != job.job_id:
+                    await send({
+                        "type": "error",
+                        "detail": "Job ID does not match",
+                    })
+                    continue
+
+                await send({
+                    "type": "resumed",
+                    "job_id": job.job_id,
+                    "status": job.get_status(),
+                })
+
+                await replace_publisher(job)
 
             elif command == "cancel":
                 error = await asyncio.to_thread(

@@ -3,8 +3,10 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from typing import Any
+
+from fastapi import WebSocketDisconnect
 
 from plorangelab.equity import MonteCarloResult, SamplingExhaustedError
 from plorangelab.services.equity_job import EquityJob, start_equity_job
@@ -14,7 +16,6 @@ from .schemas import EquityDetails, EquityRequest, EquityResponse
 
 logger = logging.getLogger(__name__)
 
-ProgressQueue = asyncio.Queue[tuple[str, MonteCarloResult | None]]
 SendMessage = Callable[[dict[str, Any]], Awaitable[None]]
 
 
@@ -22,19 +23,7 @@ async def submit_equity_calculation(
     session: Session,
     request: EquityRequest,
     executor: ThreadPoolExecutor,
-) -> tuple[EquityJob | None, ProgressQueue, str | None]:
-    loop = asyncio.get_running_loop()
-    queue: ProgressQueue = asyncio.Queue(maxsize=2)
-
-    def enqueue(event: tuple[str, MonteCarloResult | None]) -> None:
-        # Keep the latest updates, including the final "done" notification.
-        if queue.full():
-            queue.get_nowait()
-        queue.put_nowait(event)
-
-    def notify_progress(update: MonteCarloResult) -> None:
-        # The engine calls this from a worker thread.
-        loop.call_soon_threadsafe(enqueue, ("progress", update))
+) -> tuple[EquityJob | None, str | None]:
 
     def submit() -> tuple[EquityJob | None, str | None]:
         with session.lock:
@@ -53,67 +42,123 @@ async def submit_equity_calculation(
                 executor=executor,
                 mode=request.mode,
                 target_moe=request.target_moe,
-                notify=notify_progress,
                 on_finished=session.touch,
             )
             session.equity_job = job
             return job, None
 
-    job, error = await asyncio.to_thread(submit)
+    return await asyncio.to_thread(submit)
 
-    if job is not None:
-        assert job.future is not None
-        job.future.add_done_callback(
-            lambda _future: loop.call_soon_threadsafe(enqueue, ("done", None))
+def get_equity_job(session: Session) -> EquityJob | None:
+    with session.lock:
+        if session.closed:
+            return None
+
+        return session.equity_job
+
+
+def build_final_message(job: EquityJob) -> dict:
+    try:
+        ids, result = job.future.result()
+        response = EquityResponse(
+            equities=dict(zip(ids, result.equities, strict=True)),
+            details=EquityDetails(
+                method=result.method,
+                margins_of_error=result.margins_of_error,
+                simulations=result.simulations,
+                attempts=result.attempts,
+                stop_reason=result.stop_reason,
+                sampler=result.sampler,
+                effective_samples=result.effective_samples,
+            ),
         )
+        message = {
+            "type": "result",
+            "job_id": job.job_id,
+            **response.model_dump(mode="json"),
+        }
 
-    return job, queue, error
+    except SamplingExhaustedError as exc:
+        message = {
+            "type": "error",
+            "job_id": job.job_id,
+            "detail": str(exc),
+        }
+
+    except CancelledError:
+        return {
+            "type": "cancelled",
+            "job_id": job.job_id,
+        } 
+
+    except Exception:
+        logger.exception("Equity calculation failed")
+        message = {
+            "type": "error", 
+            "job_id": job.job_id,
+            "detail": "Internal calculation error",
+        }
+
+    return message
 
 
 async def publish_equity_updates(
     job: EquityJob,
-    queue: ProgressQueue,
     send: SendMessage,
 ) -> None:
-    while True:
-        event_type, update = await queue.get()
+    loop = asyncio.get_running_loop()
+    changed = asyncio.Event()
 
-        if event_type == "progress":
-            assert update is not None
-            await send({
-                "type": "progress",
-                "simulations": update.simulations,
-                "margins_of_error": update.margins_of_error,
-            })
-            continue
-
-        # "done" is enqueued only after the Future completes.
-        assert job.future is not None
+    def wake() -> None:
         try:
-            ids, result = job.future.result()
-            response = EquityResponse(
-                equities=dict(zip(ids, result.equities, strict=True)),
-                details=EquityDetails(
-                    method=result.method,
-                    margins_of_error=result.margins_of_error,
-                    simulations=result.simulations,
-                    attempts=result.attempts,
-                    stop_reason=result.stop_reason,
-                    sampler=result.sampler,
-                    effective_samples=result.effective_samples,
-                ),
-            )
-            message = {"type": "result", **response.model_dump(mode="json")}
+            loop.call_soon_threadsafe(changed.set)
+        except RuntimeError:
+            # The connection's event loop may have closed.
+            pass
 
-        except SamplingExhaustedError as exc:
-            message = {"type": "error", "detail": str(exc)}
+    job.subscribe(wake)
+    last_progress: MonteCarloResult | None = None
 
-        except Exception:
-            logger.exception("Equity calculation failed")
-            message = {"type": "error", "detail": "Internal calculation error"}
+    try:
+        while True:
+            changed.clear()
 
-        await send(message)
-        return
+            # A newer connection may have replaced us.
+            if not job.is_subscriber(wake):
+                return
+
+            status = job.get_status()
+
+            if status in ("completed", "cancelled", "failed"):
+                if not job.is_subscriber(wake):
+                    return
+
+                await send(build_final_message(job))
+                return
+
+            progress = job.get_progress()
+
+            if progress is not None and progress is not last_progress:
+                if not job.is_subscriber(wake):
+                    return
+
+                last_progress = progress
+
+                await send({
+                    "type": "progress",
+                    "job_id": job.job_id,
+                    "simulations": progress.simulations,
+                    "margins_of_error": progress.margins_of_error,
+                })
+
+            await changed.wait()
+
+    except (WebSocketDisconnect, OSError):
+        pass
+
+    finally:
+        job.unsubscribe(wake)
+
 
 
 def cancel_equity_calculation(session: Session) -> str | None:

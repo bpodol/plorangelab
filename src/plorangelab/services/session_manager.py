@@ -16,7 +16,6 @@ class Session:
     last_activity: float
     equity_job: EquityJob | None = None
     lock: Lock = field(default_factory=Lock, repr=False)
-
     closed: bool = False
 
     def touch(self) -> None:
