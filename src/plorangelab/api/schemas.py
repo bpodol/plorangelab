@@ -35,6 +35,15 @@ class EquityResponse(BaseModel):
     equities: dict[int, float]
     details: EquityDetails
 
+class BoardResponse(BaseModel):
+    players: list[int]
+
+class RangeResponse(BaseModel):
+    hands: int
+
+class SessionResponse(BaseModel): 
+    session_id: str
+
 
 
 

@@ -11,6 +11,9 @@ from .equity_ws import router as equity_wc_router
 from .schemas import (
     BoardRequest,
     RangeRequest,
+    BoardResponse,
+    RangeResponse,
+    SessionResponse,
 )
 
 SESSION_TTL = 30 * 60
@@ -47,14 +50,14 @@ def get_session(session_id: str) -> Session:
     return session
 
 
-@app.post("/api/sessions", status_code=201)
+@app.post("/api/sessions", status_code=201, response_model=SessionResponse)
 def create_session():
     session_id = app.state.session_manager.create_session()
-    return {"session_id": session_id}
+    return SessionResponse(session_id=session_id)
 
 
 
-@app.post("/api/sessions/{session_id}/range")
+@app.post("/api/sessions/{session_id}/range", response_model=RangeResponse)
 def add_range(session_id: str, request: RangeRequest):
     session = get_session(session_id)
 
@@ -72,11 +75,9 @@ def add_range(session_id: str, request: RangeRequest):
 
         added_hands = session.manager.players[request.player_id].active_street.ranges[-1].hands
 
-        return {
-            "hands": len(added_hands)
-        }
+        return RangeResponse(hands=len(added_hands))
 
-@app.put("/api/sessions/{session_id}/board")
+@app.put("/api/sessions/{session_id}/board", response_model=BoardResponse)
 def change_board(session_id: str, request: BoardRequest):
     session = get_session(session_id)
 
@@ -91,6 +92,13 @@ def change_board(session_id: str, request: BoardRequest):
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
+        players = [
+            len(player.active_street.ranges[-1].hands) 
+            if player is not None else 0
+            for player in session.manager.players
+        ]
+
+        return BoardResponse(players=players)
 
 @app.delete("/api/sessions/{session_id}/range", status_code=204)
 def delete_range(session_id: str, player_id: int):

@@ -63,11 +63,17 @@ def test_board_updates_and_clearing_persist(client: TestClient) -> None:
 
     changed = client.put(url, json={"board": "AsKd2c"})
     assert changed.status_code == 200
+    assert changed.json() == {
+        "players": [1, 0, 0, 0, 0, 0]
+    }
     assert manager.board is not None
     assert len(manager.players[0].active_street.ranges[-1].hands) == 1
 
     cleared = client.put(url, json={"board": None})
     assert cleared.status_code == 200
+    assert cleared.json() == {
+        "players": [2, 0, 0, 0, 0, 0]
+    }
     assert manager.board is None
     assert manager.players[0].active_street is manager.players[0].preflop
     assert len(manager.players[0].active_street.ranges[-1].hands) == 2
