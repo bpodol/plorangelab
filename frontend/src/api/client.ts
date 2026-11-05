@@ -1,14 +1,8 @@
-
-export async function apiRequest<T>(
-  url: string,
-  options: RequestInit = {}
-): Promise<T> {
+export async function apiRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, options);
 
   if (!response.ok) {
-    throw new Error(
-      `API request failed: ${response.status} ${response.statusText}`
-    );
+    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
   }
 
   if (response.status === 204) {
