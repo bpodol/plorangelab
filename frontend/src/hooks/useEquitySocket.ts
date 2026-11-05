@@ -108,7 +108,7 @@ export function useEquitySocket(sessionId: string | null) {
     };
   }, [sessionId]);
 
-  function startEquity(mode: Mode) {
+  function startEquity(mode: Mode, targetMoe: number) {
     const socket = socketRef.current;
 
     if (socket?.readyState !== WebSocket.OPEN) return;
@@ -117,7 +117,7 @@ export function useEquitySocket(sessionId: string | null) {
       JSON.stringify({
         type: 'start',
         mode,
-        target_moe: 0.002,
+        target_moe: targetMoe,
       }),
     );
   }

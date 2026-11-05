@@ -15,6 +15,14 @@ function App() {
   const { equityStatus, isConnected, equityMessage, startEquity } = useEquitySocket(sessionId);
   const { players, updateHandCounts, updatePlayer, handleAddRange, handleDeleteRange } =
     usePlayerRanges(sessionId, mode);
+  const [targetMoeInput, setTargetMoeInput] = useState('0.0015');
+  const targetMoe = Number(targetMoeInput);
+
+  const isValidTargetMoe =
+    targetMoeInput.trim() !== '' &&
+    Number.isFinite(targetMoe) &&
+    targetMoe > 0 &&
+    targetMoe < 0.005;
 
   async function handleCreateSession() {
     setIsLoading(true);
@@ -103,9 +111,20 @@ function App() {
         ))}
       </section>
 
+      <label htmlFor="target_moe">target MOE</label>
+
+      <input
+        id="target_moe"
+        type="number"
+        min="0"
+        max="0.005"
+        value={targetMoeInput}
+        onChange={(event) => setTargetMoeInput(event.target.value)}
+      />
+
       <button
-        onClick={() => startEquity(mode)}
-        disabled={!isConnected || equityStatus === 'running'}
+        onClick={() => startEquity(mode, targetMoe)}
+        disabled={!isConnected || equityStatus === 'running' || !isValidTargetMoe}
       >
         Calculate Equity
       </button>

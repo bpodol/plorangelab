@@ -85,7 +85,7 @@ test('sends a start command only when connected', () => {
   const { result } = renderHook(() => useEquitySocket('session-123'));
 
   act(() => {
-    result.current.startEquity(4);
+    result.current.startEquity(4, 0.0015);
   });
 
   expect(socket.send).not.toHaveBeenCalled();
@@ -95,7 +95,7 @@ test('sends a start command only when connected', () => {
   });
 
   act(() => {
-    result.current.startEquity(5);
+    result.current.startEquity(5, 0.0015);
   });
 
   expect(socket.send).toHaveBeenCalledOnce();
@@ -104,7 +104,7 @@ test('sends a start command only when connected', () => {
     JSON.stringify({
       type: 'start',
       mode: 5,
-      target_moe: 0.002,
+      target_moe: 0.0015,
     }),
   );
 });
