@@ -503,3 +503,100 @@ test('resumes and recovers a job completed during disconnection', () => {
     vi.useRealTimers();
   }
 });
+
+test('sends a cancel command only when connected', () => {
+  const socket = setupSocket();
+
+  const { result } = renderHook(() => useEquitySocket('session-123'));
+
+  // Socket is still connecting.
+  act(() => {
+    result.current.cancelEquity();
+  });
+
+  expect(socket.send).not.toHaveBeenCalled();
+
+  // Connection opens.
+  act(() => {
+    socket.open();
+    result.current.cancelEquity();
+  });
+
+  expect(socket.send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ type: 'cancel' }));
+
+  // Connection closes.
+  act(() => {
+    socket.disconnect();
+    result.current.cancelEquity();
+  });
+
+  expect(socket.send).toHaveBeenCalledTimes(1);
+});
+
+test('confirms cancellation and does not resume a cancelled job', () => {
+  vi.useFakeTimers();
+
+  try {
+    const firstSocket = new FakeWebSocket();
+    const secondSocket = new FakeWebSocket();
+
+    mockSocketSequence(firstSocket, secondSocket);
+
+    const { result, unmount } = renderHook(() => useEquitySocket('session-123'));
+
+    act(() => {
+      firstSocket.open();
+      firstSocket.emitMessage({
+        type: 'started',
+        job_id: 'job-123',
+      });
+    });
+
+    expect(result.current.equityStatus).toBe('running');
+
+    // Request cancellation.
+    act(() => {
+      result.current.cancelEquity();
+    });
+
+    expect(firstSocket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'cancel' }));
+
+    // Sending a request does not mean cancellation is complete.
+    expect(result.current.equityStatus).toBe('running');
+
+    act(() => {
+      firstSocket.emitMessage({
+        type: 'cancel_requested',
+      });
+    });
+
+    expect(result.current.equityStatus).toBe('running');
+
+    // Backend confirms cancellation.
+    act(() => {
+      firstSocket.emitMessage({
+        type: 'cancelled',
+        job_id: 'job-123',
+      });
+    });
+
+    expect(result.current.equityStatus).toBe('cancelled');
+
+    // Reconnect after cancellation.
+    act(() => {
+      firstSocket.disconnect();
+      vi.advanceTimersByTime(1000);
+      secondSocket.open();
+    });
+
+    expect(result.current.isConnected).toBe(true);
+
+    // A cancelled job must not be resumed.
+    expect(secondSocket.send).not.toHaveBeenCalled();
+
+    unmount();
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});

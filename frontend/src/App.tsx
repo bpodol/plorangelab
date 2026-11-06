@@ -12,7 +12,8 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [boardMessage, setBoardMessage] = useState<string | null>(null);
   const [mode, setMode] = useState<4 | 5>(4);
-  const { equityStatus, isConnected, equityMessage, startEquity } = useEquitySocket(sessionId);
+  const { equityStatus, isConnected, equityMessage, startEquity, cancelEquity } =
+    useEquitySocket(sessionId);
   const { players, updateHandCounts, updatePlayer, handleAddRange, handleDeleteRange } =
     usePlayerRanges(sessionId, mode);
   const [targetMoeInput, setTargetMoeInput] = useState('0.0015');
@@ -22,7 +23,7 @@ function App() {
     targetMoeInput.trim() !== '' &&
     Number.isFinite(targetMoe) &&
     targetMoe > 0 &&
-    targetMoe < 0.005;
+    targetMoe <= 0.005;
 
   async function handleCreateSession() {
     setIsLoading(true);
@@ -127,6 +128,10 @@ function App() {
         disabled={!isConnected || equityStatus === 'running' || !isValidTargetMoe}
       >
         Calculate Equity
+      </button>
+
+      <button onClick={() => cancelEquity()} disabled={equityStatus !== 'running' || !isConnected}>
+        Cancel Equity
       </button>
 
       <section>

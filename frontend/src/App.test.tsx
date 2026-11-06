@@ -295,3 +295,61 @@ test('disables calculation when target MOE is empty', async () => {
   expect(calculateButton).toBeDisabled();
   expect(socket.send).not.toHaveBeenCalled();
 });
+
+test('enables cancellation only while connected and running', async () => {
+  vi.mocked(createSession).mockResolvedValue({
+    session_id: 'session-123',
+  });
+
+  const user = userEvent.setup();
+  render(<App />);
+
+  const cancelButton = screen.getByRole('button', {
+    name: /cancel equity/i,
+  });
+
+  // No session or running job.
+  expect(cancelButton).toBeDisabled();
+
+  await user.click(screen.getByRole('button', { name: /create session/i }));
+
+  await screen.findByText('Session: session-123');
+
+  act(() => {
+    socket.open();
+  });
+
+  // Connected, but no job running.
+  expect(cancelButton).toBeDisabled();
+
+  await user.click(screen.getByRole('button', { name: /calculate equity/i }));
+
+  // Backend confirms that the job started.
+  act(() => {
+    socket.onmessage?.(
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'started',
+          job_id: 'job-123',
+        }),
+      }),
+    );
+  });
+
+  expect(cancelButton).toBeEnabled();
+
+  await user.click(cancelButton);
+
+  expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'cancel' }));
+
+  // Requesting cancellation should not immediately mark it cancelled.
+  expect(screen.getByText('Status: running')).toBeInTheDocument();
+
+  // Connection loss makes cancellation unavailable.
+  act(() => {
+    socket.readyState = WebSocket.CLOSED;
+    socket.onclose?.();
+  });
+
+  expect(cancelButton).toBeDisabled();
+});
