@@ -12,99 +12,135 @@ export function useEquitySocket(sessionId: string | null) {
 
   const [isConnected, setIsConnected] = useState(false);
 
+  const jobRef = useRef<string | null>(null);
+
   useEffect(() => {
+    jobRef.current = null;
     setIsConnected(false);
     setEquityStatus('idle');
     setEquityMessage(null);
 
     if (sessionId === null) return;
 
-    const socket = connectEquityWebSocket(sessionId);
-    socketRef.current = socket;
+    const activeSessionId = sessionId;
 
-    socket.onopen = () => {
-      if (socketRef.current !== socket) return;
+    let disposed = false;
+    let retryCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-      setIsConnected(true);
-      console.log('WebSocket connected');
-    };
+    function connect() {
+      if (disposed) return;
+      const socket = connectEquityWebSocket(activeSessionId);
+      socketRef.current = socket;
 
-    socket.onmessage = (event) => {
-      if (socketRef.current !== socket) return;
-
-      try {
-        const raw: unknown = JSON.parse(event.data);
-
-        if (
-          typeof raw !== 'object' ||
-          raw === null ||
-          !('type' in raw) ||
-          typeof raw.type !== 'string'
-        ) {
-          throw new Error('Invalid WebSocket message');
+      socket.onopen = () => {
+        if (disposed || socketRef.current !== socket) return;
+        retryCount = 0;
+        setIsConnected(true);
+        if (jobRef.current !== null) {
+          socket.send(
+            JSON.stringify({
+              type: 'resume',
+              job_id: jobRef.current,
+            }),
+          );
         }
+      };
 
-        const message = raw as EquityMessage;
+      socket.onmessage = (event) => {
+        if (disposed || socketRef.current !== socket) return;
 
-        setEquityMessage(message);
+        try {
+          const raw: unknown = JSON.parse(event.data);
 
-        switch (message.type) {
-          case 'started':
-            setEquityStatus('running');
-            console.log('Job started:', message.job_id);
-            break;
+          if (
+            typeof raw !== 'object' ||
+            raw === null ||
+            !('type' in raw) ||
+            typeof raw.type !== 'string'
+          ) {
+            throw new Error('Invalid WebSocket message');
+          }
 
-          case 'resumed':
-            console.log('Job resumed:', message.job_id);
-            console.log('Current status:', message.status);
-            break;
+          const message = raw as EquityMessage;
 
-          case 'progress':
-            setEquityStatus('running');
-            console.log('Simulations:', message.simulations);
-            console.log('Margins of error:', message.margins_of_error);
-            break;
+          setEquityMessage(message);
 
-          case 'result':
-            setEquityStatus('completed');
-            console.log('Equities:', message.equities);
-            console.log('Details:', message.details);
-            break;
+          switch (message.type) {
+            case 'started':
+              setEquityStatus('running');
+              jobRef.current = message.job_id;
+              console.log('Job started:', message.job_id);
+              break;
 
-          case 'cancel_requested':
-            console.log('Cancellation requested');
-            break;
+            case 'resumed':
+              setEquityStatus('running');
+              console.log('Job resumed:', message.job_id);
+              console.log('Current status:', message.status);
+              break;
 
-          case 'cancelled':
-            setEquityStatus('cancelled');
-            break;
+            case 'progress':
+              setEquityStatus('running');
+              console.log('Simulations:', message.simulations);
+              console.log('Margins of error:', message.margins_of_error);
+              break;
 
-          case 'error':
-            setEquityStatus('error');
-            console.error(message.detail);
-            break;
+            case 'result':
+              setEquityStatus('completed');
+              jobRef.current = null;
+              console.log('Equities:', message.equities);
+              console.log('Details:', message.details);
+              break;
+
+            case 'cancel_requested':
+              console.log('Cancellation requested');
+              break;
+
+            case 'cancelled':
+              setEquityStatus('cancelled');
+              jobRef.current = null;
+              break;
+
+            case 'error':
+              setEquityStatus('error');
+              jobRef.current = null;
+              console.error(message.detail);
+              break;
+          }
+        } catch (err) {
+          console.error('Failed to process WebSocket message:', err);
         }
-      } catch (err) {
-        console.error('Failed to process WebSocket message:', err);
-      }
-    };
+      };
 
-    socket.onerror = () => {
-      console.error('WebSocket error');
-    };
+      socket.onerror = () => {
+        console.error('WebSocket error');
+      };
 
-    socket.onclose = () => {
-      if (socketRef.current === socket) {
+      socket.onclose = () => {
+        if (disposed || socketRef.current !== socket) return;
+
         socketRef.current = null;
         setIsConnected(false);
-      }
-    };
+
+        const delay = Math.min(1000 * 2 ** retryCount, 10000);
+        retryCount++;
+
+        retryTimer = setTimeout(connect, delay);
+      };
+    }
+
+    connect();
 
     return () => {
-      if (socketRef.current === socket) {
-        socketRef.current = null;
+      disposed = true;
+
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
       }
-      socket.close();
+
+      const socket = socketRef.current;
+      socketRef.current = null;
+      socket?.close();
     };
   }, [sessionId]);
 
