@@ -24,13 +24,59 @@ test('returns parsed JSON for a successful response', async () => {
 });
 
 test.each([
+  ['string detail', { detail: 'Board contains duplicate cards' }, 'Board contains duplicate cards'],
+  [
+    'validation errors',
+    {
+      detail: [{ msg: 'Field required' }, { msg: 'Invalid player ID' }],
+    },
+    'Field required; Invalid player ID',
+  ],
+  [
+    'missing detail',
+    { error: 'Something went wrong' },
+    'API request failed: 422 Unprocessable Entity',
+  ],
+  ['empty validation errors', { detail: [] }, 'API request failed: 422 Unprocessable Entity'],
+])('handles %s', async (_name, body, expectedError) => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      statusText: 'Unprocessable Entity',
+      json: vi.fn().mockResolvedValue(body),
+    }),
+  );
+
+  await expect(apiRequest('/api/test')).rejects.toThrow(expectedError);
+});
+
+test('falls back to HTTP status when error response is not valid JSON', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      json: vi.fn().mockRejectedValue(new SyntaxError('Invalid JSON')),
+    }),
+  );
+
+  await expect(apiRequest('/api/test')).rejects.toThrow(
+    'API request failed: 500 Internal Server Error',
+  );
+});
+
+test.each([
   [404, 'Not Found'],
   [422, 'Unprocessable Entity'],
-])('throws an error for HTTP %i', async (status, statusText) => {
+])('throws an error for HTTP %i without error details', async (status, statusText) => {
   const mockResponse = {
     ok: false,
     status,
     statusText,
+    json: vi.fn().mockResolvedValue({}),
   };
 
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
