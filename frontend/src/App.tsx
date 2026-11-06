@@ -101,6 +101,7 @@ function App() {
             disabled={sessionId === null || player.isLoading}
             isLoading={player.isLoading}
             error={player.error}
+            hasAppliedRange={player.hasAppliedRange}
           />
         ))}
       </section>

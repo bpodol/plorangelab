@@ -257,3 +257,32 @@ test('enables cancellation only while connected and running', async () => {
 
   expect(cancelButton).toBeDisabled();
 });
+
+test('submits the complete large range instead of its preview', async () => {
+  vi.mocked(createSession).mockResolvedValue({
+    session_id: 'session-123',
+  });
+  vi.mocked(addRange).mockResolvedValue({ hands: 150 });
+
+  const user = userEvent.setup();
+  render(<App />);
+
+  await user.click(screen.getByRole('button', { name: /create session/i }));
+  await screen.findByText('Session: session-123');
+
+  const fullRange = 'AsAhKdQc,'.repeat(150);
+  const input = screen.getByRole('textbox', { name: 'Player 1' });
+
+  await user.click(input);
+  await user.paste(fullRange);
+
+  expect(input).toHaveValue(fullRange.slice(0, 300));
+
+  await user.click(screen.getAllByRole('button', { name: /add range/i })[0]);
+
+  expect(addRange).toHaveBeenCalledWith(0, fullRange, 4, 'session-123');
+
+  await waitFor(() => {
+    expect(screen.queryByRole('button', { name: /clear input/i })).not.toBeInTheDocument();
+  });
+});
