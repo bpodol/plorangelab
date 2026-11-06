@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { connectEquityWebSocket, type EquityMessage } from '../api/equity';
 import type { Mode } from '../api/sessions';
 
-type EquityStatus = 'idle' | 'running' | 'completed' | 'error' | 'cancelling' | 'cancelled';
+export type EquityStatus = 'idle' | 'running' | 'completed' | 'error' | 'cancelling' | 'cancelled';
 
 export function useEquitySocket(sessionId: string | null) {
   const socketRef = useRef<WebSocket | null>(null);
