@@ -10,8 +10,8 @@ from plorangelab.services.session_manager import Session, SessionManager
 from .equity_ws import router as equity_wc_router
 from .schemas import (
     BoardRequest,
-    RangeRequest,
     BoardResponse,
+    RangeRequest,
     RangeResponse,
     SessionResponse,
 )
