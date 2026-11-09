@@ -194,13 +194,15 @@ def test_none_board_resets_players(manager):
 def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
     manager.add_range(BASE_RANGE, mode=4, player_index=0)
     original = manager.players[0]
-    manager.add_filter("AA", player_index=0, name="aces")
+    coverage = manager.add_filter("AA", player_index=0, name="aces")
+    assert coverage == pytest.approx(0.25)
     after_save = manager.players[0]
     assert after_save is not original
     assert original.current_range is original.preflop.filter_manager.base_range
     assert after_save.current_range is after_save.preflop.filter_manager.base_range
 
-    manager.set_filter_active("aces", player_index=0, active=True)
+    coverage = manager.set_filter_active("aces", player_index=0, active=True)
+    assert coverage == pytest.approx(0.25)
     activated = manager.players[0]
     assert activated is not after_save
     assert len(activated.current_range.masks) == 1
@@ -212,7 +214,8 @@ def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
         manager.add_filter("A|", player_index=0)
     assert manager.players[0] is activated
 
-    manager.clear_filters(player_index=0)
+    coverage = manager.clear_filters(player_index=0)
+    assert coverage == 1.0
     assert manager.players[0].current_range is (
         manager.players[0].preflop.filter_manager.base_range
     )
@@ -226,15 +229,18 @@ def test_nested_group_management_via_range_manager(manager: RangeManager) -> Non
     manager.add_group("premium", player_index=2)
     manager.add_filter("AA", player_index=2, path=("premium",))
     manager.add_filter("KK", player_index=2, path=("premium",))
-    manager.set_filter_active("premium", player_index=2, active=True)
+    coverage = manager.set_filter_active("premium", player_index=2, active=True)
+    assert coverage == pytest.approx(0.5)
     assert len(manager.players[2].current_range.masks) == 2
 
-    manager.set_filter_active(
+    coverage = manager.set_filter_active(
         "KK", player_index=2, active=False, path=("premium",)
     )
+    assert coverage == pytest.approx(0.25)
     assert len(manager.players[2].current_range.masks) == 1
 
-    manager.delete_filter("AA", player_index=2, path=("premium",))
+    coverage = manager.delete_filter("AA", player_index=2, path=("premium",))
+    assert coverage == 1.0
     assert manager.players[2].current_range is (
         manager.players[2].active_street.filter_manager.base_range
     )

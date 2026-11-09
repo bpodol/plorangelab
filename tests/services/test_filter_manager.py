@@ -46,7 +46,14 @@ def test_default_has_valid_original_range(manager, base):
 
 
 def test_root_filters_start_inactive_and_can_be_activated(manager, base):
-    manager.create_filter("A", name="aces")
+    coverage = manager.create_filter("A", name="aces")
+    expected = float(
+        np.sum(base.weights[:3], dtype=np.float64)
+        / np.sum(base.weights, dtype=np.float64)
+    )
+
+    assert coverage == pytest.approx(expected)
+    assert manager.filtered_coverage == 1.0
     assert manager.current_range is base
     leaf = manager.get_node(FilterAddress("aces"))
     assert leaf.active is False
@@ -117,7 +124,12 @@ def test_add_to_active_group_auto_activates_leaf(manager, base):
     manager.create_group("g")
     manager.create_filter("A", path=("g",))
     manager.set_active(FilterAddress("g"), True)
-    manager.create_filter("K", path=("g",))
+    coverage = manager.create_filter("K", path=("g",))
+
+    assert coverage == pytest.approx(
+        manager.get_coverage(FilterAddress("K", ("g",)))
+    )
+    assert manager.filtered_coverage > coverage
     assert manager.get_node(FilterAddress("K", ("g",))).active
     assert indices(base, manager.current_range) == {0, 1, 2, 3}
 
@@ -131,7 +143,8 @@ def test_empty_group_rejected_without_mutation(manager, base):
 
 
 def test_zero_match_filter_stays_inactive(manager, base):
-    manager.create_filter("TT")
+    coverage = manager.create_filter("TT")
+    assert coverage == 0.0
     with pytest.raises(ValueError, match="zero hands"):
         manager.set_active(FilterAddress("TT"), True)
     assert manager.current_range is base
@@ -142,6 +155,8 @@ def test_clear_retains_definitions_and_deactivates_nested_children(manager, base
     manager.create_filter("A", path=("g",))
     manager.set_active(FilterAddress("g"), True)
     manager.clear_all_filters()
+    assert manager.filtered_coverage == 1.0
+    assert manager.active_selection is None
     assert manager.current_range is base
     assert not manager.get_node(FilterAddress("g")).active
     assert not manager.get_node(FilterAddress("A", ("g",))).active

@@ -33,13 +33,14 @@ class RangeManager:
             raise ValueError("Player slot is empty")
         return player
 
-    def _edit_player(
-        self, player_index: int, change: Callable[[PlayerRangeState], None]
-    ) -> None:
+    def _edit_player[T](
+        self, player_index: int, change: Callable[[PlayerRangeState], T]
+    ) -> T:
         """Atomic manager-level updates: publish only after a successful edit."""
         updated = self._get_player(player_index).clone()
-        change(updated)
+        result = change(updated)
         self.players[player_index] = updated
+        return result
 
     def add_range(self, input_range: str, mode: Mode, player_index: int) -> None:
         if not 0 <= player_index <= 5:
@@ -90,8 +91,8 @@ class RangeManager:
         player_index: int,
         name: str | None = None,
         path: tuple[str, ...] = (),
-    ) -> None:
-        self._edit_player(
+    ) -> float:
+        return self._edit_player(
             player_index, lambda player: player.add_filter(expression, name, path)
         )
 
@@ -102,8 +103,8 @@ class RangeManager:
 
     def delete_filter(
         self, name: str, player_index: int, path: tuple[str, ...] = ()
-    ) -> None:
-        self._edit_player(
+    ) -> float:
+        return self._edit_player(
             player_index, lambda player: player.delete_filter(name, path)
         )
 
@@ -113,17 +114,13 @@ class RangeManager:
         player_index: int,
         active: bool,
         path: tuple[str, ...] = (),
-    ) -> None:
-        def change(player: PlayerRangeState) -> None:
-            if active:
-                player.activate_filter(name, path)
-            else:
-                player.deactivate_filter(name, path)
+    ) -> float:
+        return self._edit_player(
+            player_index, lambda player: player.set_filter_active(name, active, path)
+        )
 
-        self._edit_player(player_index, change)
-
-    def clear_filters(self, player_index: int) -> None:
-        self._edit_player(player_index, lambda player: player.clear_filters())
+    def clear_filters(self, player_index: int) -> float:
+        return self._edit_player(player_index, lambda player: player.clear_filters())
 
     def calculate_equity(
             self, 

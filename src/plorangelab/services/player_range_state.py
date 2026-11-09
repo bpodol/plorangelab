@@ -42,6 +42,10 @@ class StreetState:
     def current_range(self) -> EncodedRange:
         return self.filter_manager.current_range
 
+    @property
+    def filtered_coverage(self) -> float:
+        return self.filter_manager.filtered_coverage
+
     def clone(self) -> StreetState:
         return StreetState(board=self.board, filter_manager=self.filter_manager.clone())
 
@@ -64,6 +68,10 @@ class PlayerRangeState:
     @property
     def current_range(self) -> EncodedRange:
         return self.active_street.current_range
+
+    @property
+    def filtered_coverage(self) -> float:
+        return self.active_street.filtered_coverage
 
     def apply_board_change(self, board: Board) -> None:
         street_size = len(board.cards)
@@ -133,23 +141,23 @@ class PlayerRangeState:
 
     def add_filter(
         self, expression: str, name: str | None = None, path: tuple[str, ...] = ()
-    ) -> None:
-        self.active_street.filter_manager.create_filter(expression, name, path)
+    ) -> float:
+        return self.active_street.filter_manager.create_filter(expression, name, path)
 
     def add_group(self, name: str, path: tuple[str, ...] = ()) -> None:
         self.active_street.filter_manager.create_group(name, path)
 
-    def delete_filter(self, name: str, path: tuple[str, ...] = ()) -> None:
+    def delete_filter(self, name: str, path: tuple[str, ...] = ()) -> float:
         self.active_street.filter_manager.delete(FilterAddress(name, path))
+        return self.filtered_coverage
 
-    def activate_filter(self, name: str, path: tuple[str, ...] = ()) -> None:
-        self.active_street.filter_manager.set_active(FilterAddress(name, path), True)
+    def set_filter_active(self, name: str, active: bool, path: tuple[str, ...] = ()) -> float:
+        self.active_street.filter_manager.set_active(FilterAddress(name, path), active)
+        return self.filtered_coverage
 
-    def deactivate_filter(self, name: str, path: tuple[str, ...] = ()) -> None:
-        self.active_street.filter_manager.set_active(FilterAddress(name, path), False)
-
-    def clear_filters(self) -> None:
+    def clear_filters(self) -> float:
         self.active_street.filter_manager.clear_all_filters()
+        return self.filtered_coverage
 
     def clone(self) -> PlayerRangeState:
         cloned = copy(self)

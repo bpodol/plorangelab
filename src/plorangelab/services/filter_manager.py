@@ -97,7 +97,7 @@ class FilterManager:
         filter_expression: str,
         name: str | None = None,
         path: tuple[str, ...] = (),
-    ) -> None:
+    ) -> float:
         key = filter_expression if name is None else name
         self._check_name(key)
         children, ancestors = self._parent(path)
@@ -111,6 +111,7 @@ class FilterManager:
         coverage = self._coverage(selection)
         children[key] = Filter(filter_expression, selection, coverage, active)
         self._refresh()
+        return coverage
 
     def create_group(self, name: str, path: tuple[str, ...] = ()) -> None:
         self._check_name(name)
