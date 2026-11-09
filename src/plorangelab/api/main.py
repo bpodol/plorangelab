@@ -2,7 +2,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path
+from typing import Annotated
 
 from plorangelab.bootstrap import load_resources
 from plorangelab.services.session_manager import Session, SessionManager
@@ -17,7 +18,7 @@ from .schemas import (
 )
 
 SESSION_TTL = 30 * 60
-
+PlayerId = Annotated[int, Path(ge=0, le=5)]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,8 +58,8 @@ def create_session():
 
 
 
-@app.post("/api/sessions/{session_id}/range", response_model=RangeResponse)
-def add_range(session_id: str, request: RangeRequest):
+@app.put("/api/sessions/{session_id}/players/{player_id}", response_model=RangeResponse)
+def add_range(session_id: str, player_id: PlayerId, request: RangeRequest):
     session = get_session(session_id)
 
     with session.lock:
@@ -69,11 +70,11 @@ def add_range(session_id: str, request: RangeRequest):
             raise HTTPException(status_code=409, detail="Cannot modify ranges during equity calculation")
         
         try:
-            session.manager.add_range(request.hands, request.mode, request.player_id)
+            session.manager.add_range(request.hands, request.mode, player_id)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-        added_hands = session.manager.players[request.player_id].current_range.hands
+        added_hands = session.manager.players[player_id].current_range.hands
 
         return RangeResponse(hands=len(added_hands))
 
@@ -100,8 +101,8 @@ def change_board(session_id: str, request: BoardRequest):
 
         return BoardResponse(players=players)
 
-@app.delete("/api/sessions/{session_id}/range", status_code=204)
-def delete_range(session_id: str, player_id: int):
+@app.delete("/api/sessions/{session_id}/players/{player_id}", status_code=204)
+def delete_range(session_id: str, player_id: PlayerId):
     session = get_session(session_id)
     with session.lock:
         if session.closed:

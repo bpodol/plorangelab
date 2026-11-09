@@ -38,11 +38,11 @@ def test_unknown_and_expired_sessions(client: TestClient) -> None:
 
 def test_add_and_delete_range(client: TestClient) -> None:
     session_id = create_session(client)
-    url = f"/api/sessions/{session_id}/range"
+    url = f"/api/sessions/{session_id}/players/3"
 
-    added = client.post(
+    added = client.put(
         url,
-        json={"player_id": 3, "hands": "AsAhQcJd,KsKhTd9c", "mode": 4},
+        json={"hands": "AsAhQcJd,KsKhTd9c", "mode": 4},
     )
     assert added.status_code == 200
     assert added.json() == {"hands": 2}
@@ -50,7 +50,7 @@ def test_add_and_delete_range(client: TestClient) -> None:
     manager = client.app.state.session_manager.sessions[session_id].manager
     assert manager.players[3] is not None
 
-    deleted = client.delete(url, params={"player_id": 3})
+    deleted = client.delete(url)
     assert deleted.status_code == 204
     assert manager.players[3] is None
 
@@ -80,22 +80,22 @@ def test_board_updates_and_clearing_persist(client: TestClient) -> None:
 
 
 @pytest.mark.parametrize(
-    ("method", "suffix", "payload"),
+    ("method", "player_id", "payload"),
     [
-        ("post", "range", {"player_id": 6, "hands": "AsAhQcJd", "mode": 4}),
-        ("post", "range", {"player_id": 0, "hands": "AsAsQcJd", "mode": 4}),
+        ("put", 6, {"hands": "AsAhQcJd", "mode": 4}),
+        ("put", 0, {"hands": "AsAsQcJd", "mode": 4}),
         ("put", "board", {"board": "As"}),
     ],
 )
 def test_invalid_http_input_returns_422(
     client: TestClient,
     method: str,
-    suffix: str,
+    player_id: str,
     payload: dict,
 ) -> None:
     session_id = create_session(client)
     response = getattr(client, method)(
-        f"/api/sessions/{session_id}/{suffix}", json=payload
+        f"/api/sessions/{session_id}/players/{player_id}", json=payload
     )
     assert response.status_code == 422
 

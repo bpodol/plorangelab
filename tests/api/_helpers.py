@@ -18,9 +18,9 @@ def add_player(
     hands: str,
     mode: int = 4,
 ) -> None:
-    response = client.post(
-        f"/api/sessions/{session_id}/range",
-        json={"player_id": slot, "hands": hands, "mode": mode},
+    response = client.put(
+        f"/api/sessions/{session_id}/players/{slot}",
+        json={"hands": hands, "mode": mode},
     )
     assert response.status_code == 200, response.text
 

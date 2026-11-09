@@ -21,7 +21,6 @@ class EquityDetails(BaseModel):
 
 
 class RangeRequest(BaseModel):
-    player_id: int = Field(ge=0, le=5)
     hands: str
     mode: Mode
 
