@@ -9,6 +9,7 @@ from plorangelab.bootstrap import load_resources
 from plorangelab.services.session_manager import SessionManager
 
 from .routers.equity_ws import router as equity_ws_router
+from .routers.filters import router as filters_router
 from .routers.players import router as players_router
 from .routers.sessions import router as sessions_router
 
@@ -37,7 +38,7 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(sessions_router)
 app.include_router(players_router)
 app.include_router(equity_ws_router)
-
+app.include_router(filters_router)
 
 
 

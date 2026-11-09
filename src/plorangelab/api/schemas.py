@@ -34,15 +34,41 @@ class EquityResponse(BaseModel):
     equities: dict[int, float]
     details: EquityDetails
 
+
 class BoardResponse(BaseModel):
     players: list[int]
+
 
 class RangeResponse(BaseModel):
     hands: int
 
+
 class SessionResponse(BaseModel): 
     session_id: str
 
+
+class FilterCreateRequest(BaseModel):
+    expression: str = Field(min_length=1)
+    name: str | None = None
+    path: tuple[str, ...] = ()
+
+
+class GroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    path: tuple[str, ...] = ()
+
+
+class GroupResponse(BaseModel):
+    name: str
+    path: tuple[str, ...]
+
+
+class SetActiveRequest(BaseModel):
+    active: bool
+
+
+class FilterCoverageResponse(BaseModel):
+    coverage: float
 
 
 
