@@ -10,13 +10,13 @@ from pydantic import ValidationError
 from plorangelab.services.equity_job import EquityJob
 from plorangelab.services.session_manager import Session, SessionManager
 
-from .equity_ws_runtime import (
+from ..equity_ws_runtime import (
     cancel_equity_calculation,
     get_equity_job,
     publish_equity_updates,
     submit_equity_calculation,
 )
-from .schemas import EquityRequest
+from ..schemas import EquityRequest
 
 router = APIRouter()
 
