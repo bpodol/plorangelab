@@ -41,18 +41,17 @@ test.each(['AsKd2c', null] as const)('updates the board with value %s', async (b
   expect(result).toEqual(response);
 });
 
-test('adds a player range using POST', async () => {
+test('adds a player range using PUT', async () => {
   vi.mocked(apiRequest).mockResolvedValue({ hands: 1 });
 
   const result = await addRange(2, 'AsAhQcJd', 4, 'session-123');
 
-  expect(apiRequest).toHaveBeenCalledWith('/api/sessions/session-123/range', {
-    method: 'POST',
+  expect(apiRequest).toHaveBeenCalledWith('/api/sessions/session-123/players/2', {
+    method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      player_id: 2,
       hands: 'AsAhQcJd',
       mode: 4,
     }),
@@ -66,7 +65,7 @@ test('deletes a player range using DELETE', async () => {
 
   const result = await deleteRange('session-123', 2);
 
-  expect(apiRequest).toHaveBeenCalledWith('/api/sessions/session-123/range?player_id=2', {
+  expect(apiRequest).toHaveBeenCalledWith('/api/sessions/session-123/players/2', {
     method: 'DELETE',
   });
 

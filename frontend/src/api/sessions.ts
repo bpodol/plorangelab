@@ -36,13 +36,12 @@ export function addRange(
   mode: Mode,
   sessionId: string,
 ): Promise<RangeResponse> {
-  return apiRequest<RangeResponse>(`/api/sessions/${sessionId}/range`, {
-    method: 'POST',
+  return apiRequest<RangeResponse>(`/api/sessions/${sessionId}/players/${playerId}`, {
+    method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      player_id: playerId,
       hands,
       mode,
     }),
@@ -50,7 +49,7 @@ export function addRange(
 }
 
 export function deleteRange(sessionId: string, playerId: number): Promise<void> {
-  return apiRequest<void>(`/api/sessions/${sessionId}/range?player_id=${playerId}`, {
+  return apiRequest<void>(`/api/sessions/${sessionId}/players/${playerId}`, {
     method: 'DELETE',
   });
 }
