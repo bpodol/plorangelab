@@ -1,83 +1,73 @@
 # PLO RangeLab
 
-**A Python equity engine for Pot-Limit Omaha (PLO4 and PLO5).**
+**A poker range analysis and equity calculation application for Pot-Limit Omaha (PLO4 and PLO5).**
 
-This repository is an engineering-focused rebuild of an existing poker-analysis desktop application. The current milestone is a standalone, tested equity engine; the user interface and broader range-analysis features are not yet part of this rewrite.
+PLO RangeLab is a full-stack application built around a custom Python equity engine. It supports weighted hand ranges, multiway equity calculations, and range filtering.
+
+**Status:** Under active development. The equity engine and core backend are implemented, while the frontend, filtering API, and persistence are being developed.
 
 ## Features
 
-- **2–6 players**, with PLO4 and PLO5 hole-card rules.
-- **Weighted ranges** of explicitly specified hands (for example, `AsAhKdQc@75`).
-- **Preflop, flop, turn, and river** equity calculations.
-- **Exact enumeration** of compatible hands and board runouts, or **adaptive Monte Carlo** simulation.
-- Automatic method selection, card-blocker handling, split pots, seeded reproducibility, and Monte Carlo cancellation.
-- NumPy arrays, 64-bit card masks, and Numba-compiled evaluation kernels, including parallel exact enumeration.
+- **PLO4 and PLO5** support for 2–6 players.
+- **Weighted hand ranges** with card-blocker handling.
+- **Exact equity calculations** and adaptive Monte Carlo simulations.
+- **Preflop, flop, turn, and river** calculations.
+- **Range management and filtering** with grouped filters.
+- **WebSocket-based equity calculations** with progress updates and cancellation.
+- **Session-based REST API** for managing player ranges and boards.
 
-## Quick start
+## Tech Stack
 
-Install dependencies with [uv](https://docs.astral.sh/uv/):
+**Backend:** Python, FastAPI, NumPy, Numba, Pydantic, WebSockets.
+
+**Frontend:** React, TypeScript, Vite.
+
+**Testing & Tools:** pytest, Ruff, uv, Git.
+
+## Architecture
+
+The application separates its components into:
+
+- **Equity Engine:** Numba-compiled hand evaluation, exact enumeration, and Monte Carlo simulation.
+- **Services:** Session management, player ranges, filters, and equity job execution.
+- **API:** FastAPI REST endpoints and WebSocket communication.
+- **Frontend:** React interface for interacting with the backend.
+
+Equity calculations execute in dedicated worker threads to avoid blocking the API.
+
+## Getting Started
+
+Install Python dependencies:
 
 ```bash
 uv sync
 ```
 
-```python
-from plorangelab.encoder import encode_board, encode_range
-from plorangelab.equity import compute_equity
+Start the backend:
 
-players = [
-    encode_range("AsAhKdQc@75,QsQhJdTd@25", mode=4),
-    encode_range("KsKhJcTc", mode=4),
-]
-board = encode_board("2c3d5h7s9c")
-
-result = compute_equity(players, mode=4, board=board)
-print(result.method)    # "exact" for this small river workload
-print(result.equities)  # Per-player pot equity, from 0.0 to 1.0
+```bash
+uv run uvicorn plorangelab.api.main:app --reload
 ```
 
-`@75` assigns a hand a 75% relative weight; omitted weights default to 100%. Use `mode=5` for PLO5. Omit `board` for preflop calculations.
+## Tests
 
-### Calculation methods
-
-| Method | Behavior |
-| --- | --- |
-| `auto` (default) | Monte Carlo preflop; exact postflop for an estimated ≤500,000 showdowns; otherwise Monte Carlo |
-| `exact` | Enumerates compatible hand selections and remaining board cards, subject to the workload limit |
-| `monte-carlo` | Samples weighted, non-colliding hands and board runouts until the precision target or a resource limit is reached |
-
-Monte Carlo can be configured with `target_moe`, `min_samples`, `max_samples`, `batch_size`, and `seed`. Its result also includes per-player estimated margins of error, simulation/attempt counts, and the stopping reason. These margins are approximate, not guaranteed confidence bounds. Exact results have no sampling diagnostics.
-
-## Architecture
-
-```text
-src/plorangelab/
-├── encoder.py              # Shared card, board, and weighted-range encoding
-└── equity/
-    ├── __init__.py         # Public compute_equity and EquityResult exports
-    ├── api.py              # Validation, preparation, and algorithm selection
-    ├── exact.py            # Sequential/parallel exhaustive enumeration
-    ├── monte_carlo.py      # Adaptive sampling and uncertainty estimates
-    └── evaluator.py        # Numba-compiled Omaha hand ranking
-
-tests/
-├── equity/                 # API, exact, Monte Carlo, and evaluator tests
-└── test_encoder.py
-```
-
-Both algorithms use the same evaluator, which enforces Omaha's **exactly two hole cards and three board cards** rule. The public API keeps selection and validation separate from the computational kernels.
-
-## Tests and benchmarks
+Run the test suite:
 
 ```bash
 uv run pytest
-uv run ruff check .
-uv run python benchmarks/benchmark_equity.py
-uv run python benchmarks/benchmarks_evaluator.py
 ```
 
-Benchmarks warm up Numba before timing to exclude initial JIT compilation. The automatic-selection policy is informed by measured exact-vs-Monte-Carlo performance; see [benchmark findings](benchmarks/exact_vs_mc_findings.md) for the methodology and results.
+Run linting:
 
-## Status
+```bash
+uv run ruff check .
+```
 
-The equity engine and its modular test suite are implemented. This is **not yet a complete desktop poker-analysis application**; the interface and additional range-analysis tools will be developed in subsequent milestones.
+## Roadmap
+
+- Complete filtering API and frontend integration.
+- Implement database persistence.
+- Finalize the MVP interface.
+- Add targeted performance benchmarks and deployment documentation.
+
+---
