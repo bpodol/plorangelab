@@ -8,6 +8,7 @@ import pytest
 
 from plorangelab.encoder import encode_range
 from plorangelab.services import range_manager as manager_module
+from plorangelab.services.filter_manager import FilterAddress
 from plorangelab.services.range_manager import RangeManager
 
 BASE_RANGE = "AsAhKdQc,KsKhJdTd,QsQhJcTc,9s9h8d8c"
@@ -41,7 +42,7 @@ def test_add_replace_and_remove_range(manager: RangeManager) -> None:
 
     manager.add_range("JsJhTdTc", mode=4, player_index=2)
     assert manager.players[2] is not first_player
-    assert len(manager.players[2].preflop.ranges[0].masks) == 1
+    assert len(manager.players[2].preflop.filter_manager.base_range.masks) == 1
     assert all(player is None for i, player in enumerate(manager.players) if i != 2)
 
     manager.remove_range(2)
@@ -127,7 +128,7 @@ def test_clear_board_returns_players_to_preflop(
     assert current is not previous_player
     assert current.active_street is current.preflop
     assert current.flop is current.turn is current.river is None
-    assert current.preflop.ranges[-1] is previous_player.preflop.ranges[-1]
+    assert current.preflop.current_range is previous_player.preflop.current_range
     assert previous_player.flop is not None
 
 
@@ -161,7 +162,7 @@ def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
     kwargs = compute_mock.call_args.kwargs
     assert len(kwargs["players"]) == 2
     assert all(
-        actual is manager.players[index].active_street.ranges[-1]
+        actual is manager.players[index].current_range
         for actual, index in zip(kwargs["players"], ids, strict=True)
     )
     assert kwargs["mode"] == 4
@@ -188,3 +189,100 @@ def test_none_board_resets_players(manager):
     assert player.flop is None
     assert player.turn is None
     assert player.river is None
+
+
+def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, mode=4, player_index=0)
+    original = manager.players[0]
+    manager.add_filter("AA", player_index=0, name="aces")
+    after_save = manager.players[0]
+    assert after_save is not original
+    assert original.current_range is original.preflop.filter_manager.base_range
+    assert after_save.current_range is after_save.preflop.filter_manager.base_range
+
+    manager.set_filter_active("aces", player_index=0, active=True)
+    activated = manager.players[0]
+    assert activated is not after_save
+    assert len(activated.current_range.masks) == 1
+    assert not after_save.preflop.filter_manager.get_node(
+        FilterAddress("aces")
+    ).active
+
+    with pytest.raises(ValueError):
+        manager.add_filter("A|", player_index=0)
+    assert manager.players[0] is activated
+
+    manager.clear_filters(player_index=0)
+    assert manager.players[0].current_range is (
+        manager.players[0].preflop.filter_manager.base_range
+    )
+    assert not manager.players[0].preflop.filter_manager.get_node(
+        FilterAddress("aces")
+    ).active
+
+
+def test_nested_group_management_via_range_manager(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, mode=4, player_index=2)
+    manager.add_group("premium", player_index=2)
+    manager.add_filter("AA", player_index=2, path=("premium",))
+    manager.add_filter("KK", player_index=2, path=("premium",))
+    manager.set_filter_active("premium", player_index=2, active=True)
+    assert len(manager.players[2].current_range.masks) == 2
+
+    manager.set_filter_active(
+        "KK", player_index=2, active=False, path=("premium",)
+    )
+    assert len(manager.players[2].current_range.masks) == 1
+
+    manager.delete_filter("AA", player_index=2, path=("premium",))
+    assert manager.players[2].current_range is (
+        manager.players[2].active_street.filter_manager.base_range
+    )
+
+
+def test_filter_commands_reject_invalid_and_empty_slots(manager: RangeManager) -> None:
+    with pytest.raises(ValueError, match="empty"):
+        manager.add_filter("A", player_index=0)
+    with pytest.raises(ValueError, match="empty"):
+        manager.add_group("premium", player_index=1)
+    for index in (-1, 6):
+        with pytest.raises(ValueError, match="index"):
+            manager.add_filter("A", player_index=index)
+        with pytest.raises(ValueError, match="index"):
+            manager.clear_filters(player_index=index)
+
+
+def test_equity_receives_filtered_range_after_activation(
+    manager: RangeManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager.add_range(BASE_RANGE, mode=4, player_index=0)
+    manager.add_filter("QQ", player_index=0)
+    manager.set_filter_active("QQ", player_index=0, active=True)
+
+    compute_mock = Mock(return_value=object())
+    monkeypatch.setattr(manager_module, "compute_equity", compute_mock)
+    manager.calculate_equity(mode=4)
+
+    passed_range = compute_mock.call_args.kwargs["players"][0]
+    assert passed_range is manager.players[0].current_range
+    assert len(passed_range.masks) == 1
+
+
+def test_filtered_preflop_range_carries_to_board(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, mode=4, player_index=0)
+    manager.add_filter("AA", player_index=0)
+    manager.set_filter_active("AA", player_index=0, active=True)
+    old_player = manager.players[0]
+
+    manager.change_board("2c3d5h")
+    updated_player = manager.players[0]
+    assert updated_player is not old_player
+    assert len(updated_player.current_range.masks) == 1
+    assert updated_player.flop.filter_manager.base_range is not (
+        updated_player.preflop.filter_manager.base_range
+    )
+    assert updated_player.preflop.filter_manager.get_node(
+        FilterAddress("AA")
+    ).active

@@ -97,8 +97,8 @@ def test_websocket_progress_and_sparse_slot_results(
     assert kwargs["board"].shape == (3,)
 
     session = client.app.state.session_manager.sessions[session_id]
-    assert kwargs["players"][0] is session.manager.players[0].active_street.ranges[-1]
-    assert kwargs["players"][1] is session.manager.players[4].active_street.ranges[-1]
+    assert kwargs["players"][0] is session.manager.players[0].current_range
+    assert kwargs["players"][1] is session.manager.players[4].current_range
     assert kwargs["rank_lookup"] is client.app.state.session_manager.resources.rank_lookup
     assert kwargs["cancel_event"] is session.equity_job.cancel_event
 

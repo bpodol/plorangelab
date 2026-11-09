@@ -3,6 +3,7 @@
 import pytest
 
 from plorangelab.encoder import EncodedRange, encode_range
+from plorangelab.services.filter_manager import FilterAddress
 from plorangelab.services.player_range_state import Board, PlayerRangeState
 
 
@@ -22,7 +23,7 @@ def _masks(hands: EncodedRange) -> set[int]:
 
 def test_initial_state(player: PlayerRangeState, base_range: EncodedRange) -> None:
     assert player.active_street is player.preflop
-    assert player.preflop.ranges[0] is base_range
+    assert player.preflop.filter_manager.base_range is base_range
     assert player.preflop.board is None
     assert player.flop is player.turn is player.river is None
 
@@ -42,7 +43,7 @@ def test_board_changes_select_street_and_remove_blocked_hands(
 
         assert player.active_street is street
         assert street.board is board
-        assert _masks(street.ranges[-1]) == {
+        assert _masks(street.current_range) == {
             int(base_range.masks[i]) for i in surviving_indices
         }
 
@@ -59,7 +60,7 @@ def test_direct_board_jumps_from_preflop(
     player.apply_board_change(board)
 
     assert player.active_street.board is board
-    assert _masks(player.active_street.ranges[-1]) == {
+    assert _masks(player.active_street.current_range) == {
         int(mask)
         for mask in base_range.masks
         if not (mask & board.mask)
@@ -74,19 +75,20 @@ def test_direct_board_jumps_from_preflop(
         ("2c3d5hAsKs", "2c3d5hAsKs"),
     ],
 )
-def test_same_board_preserves_range_history(
+def test_same_board_preserves_filter_state(
     player: PlayerRangeState, board_text: str, reapplied_text: str
 ) -> None:
     board = Board.from_string(board_text)
     player.apply_board_change(board)
     saved_street = player.active_street
-    filtered = encode_range("QsQhJcTc", 4)
-    saved_street.ranges.append(filtered)
+    player.add_filter("QQ")
+    player.activate_filter("QQ")
+    filtered = saved_street.current_range
 
     player.apply_board_change(Board.from_string(reapplied_text))
 
     assert player.active_street is saved_street
-    assert player.active_street.ranges[-1] is filtered
+    assert player.current_range is filtered
 
 
 def test_new_flop_rebuilds_from_preflop_and_discards_later_streets(
@@ -100,35 +102,37 @@ def test_new_flop_rebuilds_from_preflop_and_discards_later_streets(
 
     assert player.active_street is player.flop
     assert player.turn is player.river is None
-    assert _masks(player.flop.ranges[-1]) == {
+    assert _masks(player.flop.current_range) == {
         int(base_range.masks[i]) for i in (0, 2, 3)
     }  # First hand, blocked by the old turn, is restored.
 
 
 def test_turn_inherits_filtered_flop_range(player: PlayerRangeState) -> None:
     player.apply_board_change(Board.from_string("2c3d5h"))
-    filtered = encode_range("QsQhJcTc", 4)
-    player.flop.ranges.append(filtered)
+    player.add_filter("QQ")
+    player.activate_filter("QQ")
+    filtered = player.flop.current_range
 
     player.apply_board_change(Board.from_string("2c3d5hAs"))
 
     assert player.active_street is player.turn
-    assert _masks(player.turn.ranges[-1]) == _masks(filtered)
-    assert player.flop.ranges[-1] is filtered
+    assert _masks(player.turn.current_range) == _masks(filtered)
+    assert player.flop.current_range is filtered
 
 
 def test_unrelated_turn_discards_flop_and_rebuilds_from_preflop(
     player: PlayerRangeState, base_range: EncodedRange
 ) -> None:
     player.apply_board_change(Board.from_string("2c3d5h"))
-    player.flop.ranges.append(encode_range("QsQhJcTc", 4))
+    player.add_filter("QQ")
+    player.activate_filter("QQ")
 
     # This turn isn't an extension of the saved flop.
     player.apply_board_change(Board.from_string("Ks7c8h6c"))
 
     assert player.flop is None
     assert player.active_street is player.turn
-    assert _masks(player.turn.ranges[-1]) == {
+    assert _masks(player.turn.current_range) == {
         int(base_range.masks[i]) for i in (0, 2, 3)
     }
 
@@ -138,9 +142,11 @@ def test_river_uses_nearest_compatible_street(
     player: PlayerRangeState, base_range: EncodedRange, parent: str
 ) -> None:
     player.apply_board_change(Board.from_string("2c3d5h"))
-    player.flop.ranges.append(encode_range("KsKhJdTd,QsQhJcTc", 4))
+    player.add_filter("KK|QQ")
+    player.activate_filter("KK|QQ")
     player.apply_board_change(Board.from_string("2c3d5hAs"))
-    player.turn.ranges.append(encode_range("QsQhJcTc", 4))
+    player.add_filter("QQ")
+    player.activate_filter("QQ")
 
     if parent == "turn":
         board_text = "2c3d5hAs6c"
@@ -155,7 +161,7 @@ def test_river_uses_nearest_compatible_street(
     player.apply_board_change(Board.from_string(board_text))
 
     assert player.active_street is player.river
-    assert _masks(player.river.ranges[-1]) == expected
+    assert _masks(player.river.current_range) == expected
     if parent == "flop":
         assert player.turn is None
         assert player.flop is not None
@@ -180,6 +186,9 @@ def test_clone_has_independent_street_containers_without_copying_ranges(
     if with_board:
         player.apply_board_change(Board.from_string("2c3d5hAs"))
 
+    # K is present in at least one hand on either street.
+    player.add_filter("K")
+    player.activate_filter("K")
     cloned = player.clone()
 
     assert cloned is not player
@@ -190,15 +199,21 @@ def test_clone_has_independent_street_containers_without_copying_ranges(
             assert copied is None
         else:
             assert copied is not original
-            assert copied.ranges is not original.ranges
-            assert copied.ranges[0] is original.ranges[0]
+            assert copied.filter_manager is not original.filter_manager
+            assert copied.filter_manager.base_range is original.filter_manager.base_range
             assert copied.board is original.board
             if player.active_street is original:
                 assert cloned.active_street is copied
 
-    old_length = len(player.active_street.ranges)
-    cloned.active_street.ranges.append(cloned.active_street.ranges[-1])
-    assert len(player.active_street.ranges) == old_length
+    assert cloned.current_range is player.current_range
+    assert cloned.active_street.filter_manager.get_node(FilterAddress("K")) is not (
+        player.active_street.filter_manager.get_node(FilterAddress("K"))
+    )
+    original_range = player.current_range
+    cloned.deactivate_filter("K")
+    assert cloned.current_range is cloned.active_street.filter_manager.base_range
+    assert player.current_range is original_range
+    assert player.active_street.filter_manager.get_node(FilterAddress("K")).active
 
 
 def test_blocked_entire_range_raises() -> None:
@@ -206,3 +221,74 @@ def test_blocked_entire_range_raises() -> None:
 
     with pytest.raises(ValueError, match="No combinations left"):
         player.apply_board_change(Board.from_string("As2c3d"))
+
+
+def test_filter_actions_apply_only_to_active_street(player: PlayerRangeState) -> None:
+    player.add_group("premium")
+    player.add_filter("AA", path=("premium",))
+    player.activate_filter("premium")
+    assert _masks(player.current_range) == _masks(encode_range("AsAhKdQc", 4))
+
+    player.apply_board_change(Board.from_string("2c3d5h"))
+    assert not player.flop.filter_manager.filters
+    assert _masks(player.flop.filter_manager.base_range) == _masks(
+        player.preflop.current_range
+    )
+
+    player.add_filter("K")
+    player.activate_filter("K")
+    assert _masks(player.current_range) == _masks(encode_range("AsAhKdQc", 4))
+    player.clear_filters()
+    assert player.current_range is player.flop.filter_manager.base_range
+    assert player.preflop.filter_manager.get_node(
+        FilterAddress("premium")
+    ).active
+
+
+def test_invalid_filter_does_not_mutate_existing_player_state(
+    player: PlayerRangeState,
+) -> None:
+    player.add_filter("AA")
+    player.activate_filter("AA")
+    previous_range = player.current_range
+    previous_names = tuple(player.active_street.filter_manager.filters)
+
+    with pytest.raises(ValueError):
+        player.add_filter("A|")
+
+    assert player.current_range is previous_range
+    assert tuple(player.active_street.filter_manager.filters) == previous_names
+
+
+def test_same_board_keeps_nested_filter_configuration(
+    player: PlayerRangeState,
+) -> None:
+    player.apply_board_change(Board.from_string("2c3d5h"))
+    player.add_group("premium")
+    player.add_filter("QQ", path=("premium",))
+    player.activate_filter("premium")
+    prior_street = player.flop
+    prior_range = player.current_range
+
+    player.apply_board_change(Board.from_string("5h3d2c"))
+
+    assert player.flop is prior_street
+    assert player.current_range is prior_range
+    assert player.flop.filter_manager.get_node(
+        FilterAddress("QQ", ("premium",))
+    ).active
+
+
+def test_failed_street_change_preserves_current_filters() -> None:
+    player = PlayerRangeState(encode_range("AsAhKdQc", 4), id=0, mode=4)
+    player.add_filter("AA")
+    player.activate_filter("AA")
+    original_preflop = player.preflop
+    original_range = player.current_range
+
+    with pytest.raises(ValueError, match="No combinations left"):
+        player.apply_board_change(Board.from_string("As2c3d"))
+
+    assert player.active_street is original_preflop
+    assert player.current_range is original_range
+    assert player.flop is None

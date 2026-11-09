@@ -73,7 +73,7 @@ def add_range(session_id: str, request: RangeRequest):
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-        added_hands = session.manager.players[request.player_id].active_street.ranges[-1].hands
+        added_hands = session.manager.players[request.player_id].current_range.hands
 
         return RangeResponse(hands=len(added_hands))
 
@@ -93,7 +93,7 @@ def change_board(session_id: str, request: BoardRequest):
             raise HTTPException(status_code=422, detail=str(exc))
 
         players = [
-            len(player.active_street.ranges[-1].hands) 
+            len(player.current_range.hands) 
             if player is not None else 0
             for player in session.manager.players
         ]
