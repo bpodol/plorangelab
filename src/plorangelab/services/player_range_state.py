@@ -18,8 +18,8 @@ from .filter_manager import (
 
 @dataclass(frozen=True, eq=False, slots=True)
 class Board:
-    cards: NDArray[np.uint8] 
-    mask: np.uint64 
+    cards: NDArray[np.uint8]
+    mask: np.uint64
 
     @classmethod
     def from_string(cls, board: str) -> Board:
@@ -31,7 +31,7 @@ class Board:
 
 
 @dataclass
-class StreetState: 
+class StreetState:
     board: Board | None
     filter_manager: FilterManager
 
@@ -56,7 +56,7 @@ class StreetState:
 def _extends(previous: Board, next_board: Board) -> bool:
     """True if the next board adds only cards, without replacing any."""
     return bool((previous.mask & next_board.mask) == previous.mask)
-    
+
 
 class PlayerRangeState:
     def __init__(self, hands: EncodedRange, id: int, mode: Mode):
@@ -108,7 +108,7 @@ class PlayerRangeState:
             self.river = None
             self.active_street = next_turn
             return
-        
+
         elif street_size == 5:
             if self.river is not None and board.mask == self.river.board.mask:
                 next_river = self.river
@@ -133,7 +133,7 @@ class PlayerRangeState:
             self.river = next_river
             self.active_street = next_river
             return
-        
+
         raise ValueError("Board can only contain 3, 4, or 5 cards")
 
     def clear_board(self) -> None:
@@ -154,7 +154,9 @@ class PlayerRangeState:
         self.active_street.filter_manager.delete(FilterAddress(name, path))
         return self.filtered_coverage
 
-    def set_filter_active(self, name: str, active: bool, path: tuple[str, ...] = ()) -> float:
+    def set_filter_active(
+        self, name: str, active: bool, path: tuple[str, ...] = ()
+    ) -> float:
         self.active_street.filter_manager.set_active(FilterAddress(name, path), active)
         return self.filtered_coverage
 
@@ -170,8 +172,10 @@ class PlayerRangeState:
         name: str,
         path: tuple[str, ...] = (),
     ) -> dict[str, object]:
-        return self.active_street.filter_manager.get_node_info(FilterAddress(name, path))
-    
+        return self.active_street.filter_manager.get_node_info(
+            FilterAddress(name, path)
+        )
+
     def clone(self) -> PlayerRangeState:
         cloned = copy(self)
         for name in ("preflop", "flop", "turn", "river"):

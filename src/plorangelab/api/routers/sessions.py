@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, HTTPException
 
 from ..dependencies import SessionDep, SessionManagerDep, editable_session
@@ -25,8 +24,7 @@ def change_board(request: BoardRequest, session: SessionDep):
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         players = [
-            len(player.current_range.hands)
-            if player is not None else 0
+            len(player.current_range.hands) if player is not None else 0
             for player in session.manager.players
         ]
 

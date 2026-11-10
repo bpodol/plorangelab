@@ -56,7 +56,6 @@ def _probe_collision_acceptance(
     return accepted
 
 
-
 @njit(cache=True)
 def _index_one_range(masks, probabilities):
     """Build card membership bitsets and weighted 8-hand lookup tables."""
@@ -75,9 +74,7 @@ def _index_one_range(masks, probabilities):
     for i in range(n):
         for card in range(52):
             if masks[i] & (np.uint64(1) << np.uint64(card)):
-                membership[card, i // 64] |= (
-                    np.uint64(1) << np.uint64(i % 64)
-                )
+                membership[card, i // 64] |= np.uint64(1) << np.uint64(i % 64)
 
     # Precompute weighted probability mass for all 256 subsets
     # of each consecutive block of eight hands.
@@ -88,17 +85,12 @@ def _index_one_range(masks, probabilities):
                 bit += 1
 
             hand_index = block * 8 + bit
-            subset_masses[block, pattern] = (
-                subset_masses[block, pattern ^ (1 << bit)]
-            )
+            subset_masses[block, pattern] = subset_masses[block, pattern ^ (1 << bit)]
 
             if hand_index < n:
-                subset_masses[block, pattern] += (
-                    probabilities[hand_index]
-                )
+                subset_masses[block, pattern] += probabilities[hand_index]
 
     return membership, subset_masses
-
 
 
 def _build_compatibility_index(
@@ -106,10 +98,7 @@ def _build_compatibility_index(
     probabilities: List,
 ) -> tuple[List, List, bool]:
     """Build bounded lookup tables once per Monte Carlo calculation."""
-    indexed = all(
-        len(player_masks) <= _INDEX_MAX_HANDS
-        for player_masks in masks
-    )
+    indexed = all(len(player_masks) <= _INDEX_MAX_HANDS for player_masks in masks)
 
     memberships = List()
     subset_masses = List()
@@ -128,7 +117,6 @@ def _build_compatibility_index(
         subset_masses.append(masses)
 
     return memberships, subset_masses, indexed
-
 
 
 @njit(inline="always")
@@ -158,11 +146,7 @@ def _select_indexed_hand(
 
     for block in range(subset_masses.shape[0]):
         legal = np.uint8(
-            (
-                ~blocked_words[block // 8]
-                >> np.uint64((block % 8) * 8)
-            )
-            & np.uint64(255)
+            (~blocked_words[block // 8] >> np.uint64((block % 8) * 8)) & np.uint64(255)
         )
 
         legal_blocks[block] = legal
@@ -206,7 +190,6 @@ def _select_indexed_hand(
                     return block * 8 + bit, total_mass
 
     return last_legal, total_mass
-
 
 
 @njit(parallel=True, cache=True)
@@ -266,9 +249,8 @@ def _run_importance_batch(
     simulations = 0
     attempts = 0
 
-    while (
-        simulations < batch_size
-        and attempts < min(attempt_budget, _MAX_BATCH_ATTEMPTS)
+    while simulations < batch_size and attempts < min(
+        attempt_budget, _MAX_BATCH_ATTEMPTS
     ):
         attempts += 1
 
@@ -409,8 +391,6 @@ def _run_importance_batch(
     )
 
 
-
-
 def _importance_statistics(
     weight_sum: float,
     squared_weight_sum: float,
@@ -426,7 +406,6 @@ def _importance_statistics(
     margins = []
 
     for index in range(len(weighted_shares)):
-
         equity = float(weighted_shares[index] / weight_sum)
 
         if effective_samples < 2:
@@ -439,16 +418,13 @@ def _importance_statistics(
             )
 
             margin = (
-                confidence_multiplier
-                * sqrt(max(0.0, residual_square))
-                / weight_sum
+                confidence_multiplier * sqrt(max(0.0, residual_square)) / weight_sum
             )
 
         equities.append(equity)
         margins.append(margin)
 
     return equities, margins, effective_samples
-
 
 
 def _run_importance_monte_carlo(
@@ -469,7 +445,7 @@ def _run_importance_monte_carlo(
     confidence_multiplier: float,
     cancel_event: Event | None = None,
     on_progress: Callable[[MonteCarloResult], None] | None = None,
-    rank_lookup: RankLookup
+    rank_lookup: RankLookup,
 ) -> MonteCarloResult:
     """Run weighted batches until precision, cancellation, or resource limits."""
     player_count = len(hands)
@@ -554,12 +530,11 @@ def _run_importance_monte_carlo(
             )
 
             if effective_samples >= min_samples and all(
-                margin is not None and margin <= target_moe
-                for margin in margins
+                margin is not None and margin <= target_moe for margin in margins
             ):
                 stop_reason = "target_reached"
                 break
-            
+
             if on_progress is not None and batch_simulations > 0:
                 on_progress(
                     MonteCarloResult(
@@ -569,7 +544,7 @@ def _run_importance_monte_carlo(
                         attempts=attempts,
                         stop_reason=None,
                         sampler="importance",
-                        effective_samples=effective_samples
+                        effective_samples=effective_samples,
                     )
                 )
 

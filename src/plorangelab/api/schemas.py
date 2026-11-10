@@ -16,8 +16,8 @@ class EquityDetails(BaseModel):
     simulations: int | None
     attempts: int | None
     stop_reason: StopReason | None
-    sampler: Literal["rejection", "importance"] | None 
-    effective_samples: float | None 
+    sampler: Literal["rejection", "importance"] | None
+    effective_samples: float | None
 
 
 class RangeRequest(BaseModel):
@@ -43,7 +43,7 @@ class RangeResponse(BaseModel):
     hands: int
 
 
-class SessionResponse(BaseModel): 
+class SessionResponse(BaseModel):
     session_id: str
 
 

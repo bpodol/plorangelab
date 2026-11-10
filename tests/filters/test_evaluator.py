@@ -22,7 +22,12 @@ def hands_mask(*hands: str) -> np.ndarray:
 
 
 def reference_atomic(atom: AtomicFilter, cards: tuple[int, ...]) -> bool:
-    slots = [int(requirement.mask) for req in atom.requirements for requirement in [req] for _ in range(req.count)]
+    slots = [
+        int(requirement.mask)
+        for req in atom.requirements
+        for requirement in [req]
+        for _ in range(req.count)
+    ]
 
     def backtrack(i: int, used: set[int]) -> bool:
         if i == len(slots):
@@ -51,17 +56,44 @@ def reference_ast(node, cards: tuple[int, ...]) -> bool:
 @pytest.mark.parametrize("mode", [4, 5])
 def test_against_independent_reference_randomized(mode: int) -> None:
     expressions = [
-        "A", "AA", "AAA", "AAAA", "As", "AsA", "Ass", "Asss",
-        "sAs", "AsKs", "AsKK", "s", "ss", "sss", "ssss", "As:s",
-        "A:!ss", "8!88", "(A|K):!ss", "((A|K):ss)|((Q|J):!AA)",
-        "!ss", "!(AA|KK)", "(s|h):!(A|K)", "(As|Ks):(s|c)",
-        "As:s!ss", "A:K:Q", "s!ss", "AsK", "A:s:!AA",
+        "A",
+        "AA",
+        "AAA",
+        "AAAA",
+        "As",
+        "AsA",
+        "Ass",
+        "Asss",
+        "sAs",
+        "AsKs",
+        "AsKK",
+        "s",
+        "ss",
+        "sss",
+        "ssss",
+        "As:s",
+        "A:!ss",
+        "8!88",
+        "(A|K):!ss",
+        "((A|K):ss)|((Q|J):!AA)",
+        "!ss",
+        "!(AA|KK)",
+        "(s|h):!(A|K)",
+        "(As|Ks):(s|c)",
+        "As:s!ss",
+        "A:K:Q",
+        "s!ss",
+        "AsK",
+        "A:s:!AA",
     ]
     if mode == 5:
         expressions += ["AsKsQsJsTs", "sssss", "Assss", "AKQJT"]
 
     rng = np.random.default_rng(1827)
-    hands = [tuple(int(x) for x in rng.choice(52, size=mode, replace=False)) for _ in range(400)]
+    hands = [
+        tuple(int(x) for x in rng.choice(52, size=mode, replace=False))
+        for _ in range(400)
+    ]
     masks = np.array(
         [build_mask(np.array(cards, dtype=np.uint8)) for cards in hands],
         dtype=np.uint64,
@@ -69,8 +101,12 @@ def test_against_independent_reference_randomized(mode: int) -> None:
 
     for expression in expressions:
         ast = encode_filter(expression, mode)
-        expected = np.array([reference_ast(ast, cards) for cards in hands], dtype=np.bool_)
-        assert np.array_equal(evaluate_filter(expression, masks, mode), expected), expression
+        expected = np.array(
+            [reference_ast(ast, cards) for cards in hands], dtype=np.bool_
+        )
+        assert np.array_equal(evaluate_filter(expression, masks, mode), expected), (
+            expression
+        )
         compiled = compile_filter(ast, mode)
         assert np.array_equal(evaluate_filter(compiled, masks), expected), expression
         assert np.array_equal(evaluate_filter(ast, masks, mode), expected), expression
@@ -118,7 +154,8 @@ def test_source_unchanged_and_result_is_independent() -> None:
 
 
 @pytest.mark.parametrize(
-    "bad_masks", [
+    "bad_masks",
+    [
         np.array([1], dtype=np.uint32),
         np.array([[1]], dtype=np.uint64),
         [np.uint64(1)],
@@ -148,9 +185,12 @@ def test_noncontiguous_input() -> None:
 def test_all_four_card_combinations_selected_by_rank() -> None:
     # Reference over all 270,725 PLO4 hands; Numba must not lose results.
     card_combos = combinations(range(52), 4)
-    raw_masks = np.fromiter((sum(1 << c for c in cards) for cards in card_combos), dtype=np.uint64)
+    raw_masks = np.fromiter(
+        (sum(1 << c for c in cards) for cards in card_combos), dtype=np.uint64
+    )
     selected = evaluate_filter("AA", raw_masks, 4)
     # Number of four-card hands with >= 2 Aces, derived combinatorially.
     from math import comb
-    expected = sum(comb(4, n) * comb(48, 4-n) for n in range(2,5))
+
+    expected = sum(comb(4, n) * comb(48, 4 - n) for n in range(2, 5))
     assert selected.sum() == expected

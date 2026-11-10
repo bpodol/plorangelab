@@ -17,7 +17,10 @@ from ._helpers import RIVER, _make_range_from_ids
 
 # Sequential/parallel comparison helper
 
-def _run_exact_kernel_equity(kernel, players, mode, board, rank_lookup: RankLookup) -> list[float]:
+
+def _run_exact_kernel_equity(
+    kernel, players, mode, board, rank_lookup: RankLookup
+) -> list[float]:
     valid_players = equity_module.prepare_ranges(players, board)
     hands = List([player.hands for player in valid_players])
     masks = List([player.masks for player in valid_players])
@@ -31,24 +34,27 @@ def _run_exact_kernel_equity(kernel, players, mode, board, rank_lookup: RankLook
     kernel_args = (hands, masks, weights, board, board_mask, mode)
     if kernel is exact_module._run_exact_equity_kernel_parallel:
         pot_shares, total_weight = kernel(
-            *kernel_args, numba.get_num_threads(),
-            rank_lookup.rank_table, rank_lookup.binomial_table,
+            *kernel_args,
+            numba.get_num_threads(),
+            rank_lookup.rank_table,
+            rank_lookup.binomial_table,
         )
     else:
-        pot_shares, total_weight = kernel(*kernel_args, rank_lookup.rank_table, rank_lookup.binomial_table)
+        pot_shares, total_weight = kernel(
+            *kernel_args, rank_lookup.rank_table, rank_lookup.binomial_table
+        )
     return [float(share / total_weight) for share in pot_shares]
 
 
 # Parallel correctness and workload shapes
 
+
 @pytest.mark.parametrize("mode", [4, 5])
 @pytest.mark.parametrize("board_cards", [3, 4, 5])
 @pytest.mark.parametrize("player_count", [2, 3, 4, 5, 6])
 def test_parallel_exact_matches_sequential_across_modes_streets_and_players(
-    mode: int,
-    board_cards: int,
-    player_count: int,
-rank_lookup: RankLookup) -> None:
+    mode: int, board_cards: int, player_count: int, rank_lookup: RankLookup
+) -> None:
     board = np.arange(board_cards, dtype=np.uint8)
     blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
@@ -56,25 +62,28 @@ rank_lookup: RankLookup) -> None:
     for player_index in range(player_count):
         start = player_index * mode
         players.append(
-            _make_range_from_ids(
-                [tuple(available[start : start + mode])], mode
-            )
+            _make_range_from_ids([tuple(available[start : start + mode])], mode)
         )
 
     sequential = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel, players, mode, board
-    , rank_lookup)
-    parallel = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel_parallel, players, mode, board
-    , rank_lookup)
-
-    np.testing.assert_allclose(
-        parallel, sequential, rtol=0, atol=1e-12
+        exact_module._run_exact_equity_kernel, players, mode, board, rank_lookup
     )
+    parallel = _run_exact_kernel_equity(
+        exact_module._run_exact_equity_kernel_parallel,
+        players,
+        mode,
+        board,
+        rank_lookup,
+    )
+
+    np.testing.assert_allclose(parallel, sequential, rtol=0, atol=1e-12)
     assert sum(parallel) == pytest.approx(1.0)
 
+
 @pytest.mark.parametrize("mode", [4, 5])
-def test_parallel_exact_matches_weighted_ranges_with_collisions(mode: int, rank_lookup: RankLookup) -> None:
+def test_parallel_exact_matches_weighted_ranges_with_collisions(
+    mode: int, rank_lookup: RankLookup
+) -> None:
     board = encode_board(RIVER)
     if mode == 4:
         players = [
@@ -88,21 +97,25 @@ def test_parallel_exact_matches_weighted_ranges_with_collisions(mode: int, rank_
         ]
 
     sequential = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel, players, mode, board
-    , rank_lookup)
-    parallel = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel_parallel, players, mode, board
-    , rank_lookup)
-
-    np.testing.assert_allclose(
-        parallel, sequential, rtol=0, atol=1e-12
+        exact_module._run_exact_equity_kernel, players, mode, board, rank_lookup
     )
+    parallel = _run_exact_kernel_equity(
+        exact_module._run_exact_equity_kernel_parallel,
+        players,
+        mode,
+        board,
+        rank_lookup,
+    )
+
+    np.testing.assert_allclose(parallel, sequential, rtol=0, atol=1e-12)
     assert sum(parallel) == pytest.approx(1.0)
+
 
 @pytest.mark.parametrize("mode", [4, 5])
 @pytest.mark.parametrize("player_count", [3, 4, 5, 6])
 def test_parallel_exact_multiway_weighted_collisions_use_multiple_partitions(
-    mode: int, player_count: int,
+    mode: int,
+    player_count: int,
     rank_lookup: RankLookup,
 ) -> None:
     board = encode_board(RIVER)
@@ -140,22 +153,25 @@ def test_parallel_exact_multiway_weighted_collisions_use_multiple_partitions(
         numba.set_num_threads(min(4, numba.config.NUMBA_NUM_THREADS))
         assert matchup_count >= numba.get_num_threads()
         sequential = _run_exact_kernel_equity(
-            exact_module._run_exact_equity_kernel, players, mode, board
-        , rank_lookup)
+            exact_module._run_exact_equity_kernel, players, mode, board, rank_lookup
+        )
         parallel = _run_exact_kernel_equity(
-            exact_module._run_exact_equity_kernel_parallel, players, mode, board
-        , rank_lookup)
+            exact_module._run_exact_equity_kernel_parallel,
+            players,
+            mode,
+            board,
+            rank_lookup,
+        )
     finally:
         numba.set_num_threads(original_threads)
 
-    np.testing.assert_allclose(
-        parallel, sequential, rtol=0, atol=1e-12
-    )
+    np.testing.assert_allclose(parallel, sequential, rtol=0, atol=1e-12)
     assert sum(parallel) == pytest.approx(1.0)
 
+
 def test_exact_public_api_uses_sequential_kernel_with_one_numba_thread(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     board = encode_board(RIVER)
     blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
@@ -185,8 +201,11 @@ rank_lookup: RankLookup) -> None:
         "_run_exact_equity_kernel_parallel",
         parallel_must_not_run,
     )
-    result = compute_equity(players, mode=4, board=board, method="exact", rank_lookup=rank_lookup)
+    result = compute_equity(
+        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+    )
     assert sum(result.equities) == pytest.approx(1.0)
+
 
 def test_parallel_exact_preserves_multiway_split_pots(rank_lookup: RankLookup) -> None:
     board = encode_board("2c3d4hKsQc")
@@ -197,20 +216,21 @@ def test_parallel_exact_preserves_multiway_split_pots(rank_lookup: RankLookup) -
     ]
 
     sequential = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel, players, 4, board
-    , rank_lookup)
+        exact_module._run_exact_equity_kernel, players, 4, board, rank_lookup
+    )
     parallel = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel_parallel, players, 4, board
-    , rank_lookup)
+        exact_module._run_exact_equity_kernel_parallel, players, 4, board, rank_lookup
+    )
 
     assert sequential == pytest.approx([1 / 3] * 3)
     assert parallel == pytest.approx([1 / 3] * 3)
-    np.testing.assert_allclose(
-        parallel, sequential, rtol=0, atol=1e-12
-    )
+    np.testing.assert_allclose(parallel, sequential, rtol=0, atol=1e-12)
+
 
 @pytest.mark.parametrize("mode", [4, 5])
-def test_parallel_exact_handles_one_by_thousand_unbalanced_ranges(mode: int, rank_lookup: RankLookup) -> None:
+def test_parallel_exact_handles_one_by_thousand_unbalanced_ranges(
+    mode: int, rank_lookup: RankLookup
+) -> None:
     board = encode_board(RIVER)
     blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
@@ -223,19 +243,24 @@ def test_parallel_exact_handles_one_by_thousand_unbalanced_ranges(mode: int, ran
     players = [first, second]
 
     sequential = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel, players, mode, board
-    , rank_lookup)
-    parallel = _run_exact_kernel_equity(
-        exact_module._run_exact_equity_kernel_parallel, players, mode, board
-    , rank_lookup)
-
-    np.testing.assert_allclose(
-        parallel, sequential, rtol=0, atol=1e-12
+        exact_module._run_exact_equity_kernel, players, mode, board, rank_lookup
     )
+    parallel = _run_exact_kernel_equity(
+        exact_module._run_exact_equity_kernel_parallel,
+        players,
+        mode,
+        board,
+        rank_lookup,
+    )
+
+    np.testing.assert_allclose(parallel, sequential, rtol=0, atol=1e-12)
     assert sum(parallel) == pytest.approx(1.0)
 
+
 @pytest.mark.parametrize("mode", [4, 5])
-def test_parallel_exact_is_reproducible_across_thread_counts(mode: int, rank_lookup: RankLookup) -> None:
+def test_parallel_exact_is_reproducible_across_thread_counts(
+    mode: int, rank_lookup: RankLookup
+) -> None:
     board = encode_board(RIVER)
     blocked = {int(card) for card in board}
     available = [card for card in range(52) if card not in blocked]
@@ -253,8 +278,7 @@ def test_parallel_exact_is_reproducible_across_thread_counts(mode: int, rank_loo
 
     original_threads = numba.get_num_threads()
     thread_counts = [
-        count for count in (1, 2, 4, 8)
-        if count <= numba.config.NUMBA_NUM_THREADS
+        count for count in (1, 2, 4, 8) if count <= numba.config.NUMBA_NUM_THREADS
     ]
     if len(thread_counts) < 2:
         pytest.skip("At least 2 Numba threads required")
@@ -263,9 +287,14 @@ def test_parallel_exact_is_reproducible_across_thread_counts(mode: int, rank_loo
     try:
         for count in thread_counts:
             numba.set_num_threads(count)
-            first = compute_equity(players, mode=mode, board=board, method="exact", rank_lookup=rank_lookup)
+            first = compute_equity(
+                players, mode=mode, board=board, method="exact", rank_lookup=rank_lookup
+            )
             repeated = compute_equity(
-                players, mode=mode, board=board, method="exact",
+                players,
+                mode=mode,
+                board=board,
+                method="exact",
                 rank_lookup=rank_lookup,
             )
             assert repeated == first

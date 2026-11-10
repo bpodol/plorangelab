@@ -1,4 +1,3 @@
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Annotated
@@ -37,6 +36,7 @@ def get_session(
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
+
 @contextmanager
 def locked_session(session: Session) -> Iterator[None]:
     with session.lock:
@@ -46,6 +46,7 @@ def locked_session(session: Session) -> Iterator[None]:
                 detail="Session not found or expired",
             )
         yield
+
 
 @contextmanager
 def editable_session(session: Session) -> Iterator[None]:

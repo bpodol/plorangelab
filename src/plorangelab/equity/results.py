@@ -1,9 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-StopReason = Literal[
-    "target_reached", "max_simulations", "cancelled", "attempt_limit"
-]
+StopReason = Literal["target_reached", "max_simulations", "cancelled", "attempt_limit"]
 
 
 @dataclass(frozen=True)

@@ -23,5 +23,3 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     with TestClient(api_module.app) as test_client:
         load_resources.assert_called_once_with()
         yield test_client
-
-

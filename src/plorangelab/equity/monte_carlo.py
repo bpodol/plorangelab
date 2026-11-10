@@ -41,7 +41,6 @@ def check_collisions(masks: NDArray[np.uint64]) -> bool:
     return False
 
 
-
 @njit(cache=True)
 def deal_card(deck: np.uint64, rng: np.random.Generator) -> tuple[int, np.uint64]:
     """Draw one uniformly random available card and return the updated deck mask.
@@ -69,7 +68,6 @@ def deal_card(deck: np.uint64, rng: np.random.Generator) -> tuple[int, np.uint64
             return pos, deck
 
 
-
 def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float64]]:
     """Convert each player's hand weights to a probability distribution.
 
@@ -92,14 +90,12 @@ def prepare_probabilities(players: list[EncodedRange]) -> list[NDArray[np.float6
 
         if not np.isfinite(total) or total <= 0:
             raise ValueError(
-                f"Player {i + 1} has no positive-weight hands "
-                "after board filtering"
+                f"Player {i + 1} has no positive-weight hands after board filtering"
             )
 
         probabilities.append(weights / total)
 
     return probabilities
-
 
 
 @njit(parallel=True, cache=True)
@@ -166,7 +162,9 @@ def _run_monte_carlo_batch(
 
         # Independently sample a weighted hand for each player.
         for i, player_hands in enumerate(hands):
-            choice = np.searchsorted(cumulative_probabilities[i], rng.random(), side="right")
+            choice = np.searchsorted(
+                cumulative_probabilities[i], rng.random(), side="right"
+            )
 
             selected_masks[i] = masks[i][choice]
             selected_hands[i] = player_hands[choice]
@@ -192,7 +190,6 @@ def _run_monte_carlo_batch(
     pot_shares = np.zeros((simulations, player_count), dtype=np.float64)
 
     for sim in prange(simulations):
-
         scores = numba_evaluate_hands(
             sampled_hands[sim],
             sampled_boards[sim],
@@ -229,7 +226,6 @@ def _run_monte_carlo_batch(
     return share_sums, squared_share_sums, simulations, attempts
 
 
-
 def _prepare_monte_carlo(
     players: list[EncodedRange],
     board: NDArray[np.uint8] | None,
@@ -254,7 +250,6 @@ def _prepare_monte_carlo(
 
     board_mask = np.uint64(0) if board is None else build_mask(board)
     return hands, masks, cumulative, board_mask, np.random.default_rng(seed)
-
 
 
 @njit(cache=True)
@@ -292,7 +287,6 @@ def _probe_collision_acceptance(
     return accepted
 
 
-
 def _equity_statistics(
     share_sums: NDArray[np.float64],
     squared_share_sums: NDArray[np.float64],
@@ -302,9 +296,7 @@ def _equity_statistics(
     equities: list[float] = []
     margins: list[float | None] = []
 
-    for i, (share_sum, squared_sum) in enumerate(
-        zip(share_sums, squared_share_sums)
-    ):
+    for i, (share_sum, squared_sum) in enumerate(zip(share_sums, squared_share_sums)):
         equity = float(share_sum / simulations)
         if simulations < 2:
             margin = None
@@ -321,7 +313,6 @@ def _equity_statistics(
         margins.append(margin)
 
     return equities, margins
-
 
 
 def _run_batched_monte_carlo(
@@ -341,7 +332,7 @@ def _run_batched_monte_carlo(
     confidence_multiplier: float,
     cancel_event: Event | None = None,
     on_progress: Callable[[MonteCarloResult], None] | None = None,
-    rank_lookup: RankLookup
+    rank_lookup: RankLookup,
 ) -> MonteCarloResult:
     """Coordinate batches and aggregate every completed showdown.
 
@@ -414,12 +405,11 @@ def _run_batched_monte_carlo(
             )
 
         if simulations >= min_samples and all(
-            margin is not None and margin <= target_moe
-            for margin in margins
+            margin is not None and margin <= target_moe for margin in margins
         ):
             stop_reason = "target_reached"
             break
-        
+
         if simulations >= requested_samples:
             stop_reason = "max_simulations"
             break
@@ -445,7 +435,6 @@ def _run_batched_monte_carlo(
                 )
             )
 
-
     else:
         stop_reason = "max_simulations"
 
@@ -468,4 +457,3 @@ def _run_batched_monte_carlo(
         attempts=attempts,
         stop_reason=stop_reason,
     )
-

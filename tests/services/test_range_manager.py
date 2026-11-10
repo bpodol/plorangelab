@@ -173,7 +173,6 @@ def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
     assert kwargs["rank_lookup"] is manager.rank_lookup
 
 
-
 def test_none_board_resets_players(manager):
     manager.add_range("AsAhKdQc", mode=4, player_index=0)
     manager.change_board("2c3d4h")
@@ -206,9 +205,7 @@ def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
     activated = manager.players[0]
     assert activated is not after_save
     assert len(activated.current_range.masks) == 1
-    assert not after_save.preflop.filter_manager.get_node(
-        FilterAddress("aces")
-    ).active
+    assert not after_save.preflop.filter_manager.get_node(FilterAddress("aces")).active
 
     with pytest.raises(ValueError):
         manager.add_filter("A|", player_index=0)
@@ -219,9 +216,11 @@ def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
     assert manager.players[0].current_range is (
         manager.players[0].preflop.filter_manager.base_range
     )
-    assert not manager.players[0].preflop.filter_manager.get_node(
-        FilterAddress("aces")
-    ).active
+    assert (
+        not manager.players[0]
+        .preflop.filter_manager.get_node(FilterAddress("aces"))
+        .active
+    )
 
 
 def test_nested_group_management_via_range_manager(manager: RangeManager) -> None:
@@ -289,9 +288,7 @@ def test_filtered_preflop_range_carries_to_board(
     assert updated_player.flop.filter_manager.base_range is not (
         updated_player.preflop.filter_manager.base_range
     )
-    assert updated_player.preflop.filter_manager.get_node(
-        FilterAddress("AA")
-    ).active
+    assert updated_player.preflop.filter_manager.get_node(FilterAddress("AA")).active
 
 
 def test_filter_retrieval_delegates_to_correct_player(
@@ -314,11 +311,14 @@ def test_filter_retrieval_delegates_to_correct_player(
     tree = manager.get_filters(player_index=2)
 
     assert set(tree) == {"premium"}
-    assert manager.get_filter(
-        "aces",
-        player_index=2,
-        path=("premium",),
-    ) == tree["premium"]["filters"]["aces"]
+    assert (
+        manager.get_filter(
+            "aces",
+            player_index=2,
+            path=("premium",),
+        )
+        == tree["premium"]["filters"]["aces"]
+    )
 
     assert set(manager.get_filters(player_index=4)) == {"kings"}
 

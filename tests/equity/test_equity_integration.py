@@ -11,18 +11,25 @@ from ._helpers import RIVER, TURN, _configured_ranges
 
 # Board blocking and equity conservation
 
-def test_board_blocked_hands_are_removed_before_calculation(rank_lookup: RankLookup) -> None:
+
+def test_board_blocked_hands_are_removed_before_calculation(
+    rank_lookup: RankLookup,
+) -> None:
     players = [
         encode_range("2cAsAhKd,QsQhJdTd", 4),
         encode_range("KsKhJcTc", 4),
     ]
 
     equity = compute_equity(
-        players, mode=4, board=encode_board(RIVER), method="exact",
+        players,
+        mode=4,
+        board=encode_board(RIVER),
+        method="exact",
         rank_lookup=rank_lookup,
     ).equities
 
     assert equity == [0.0, 1.0]
+
 
 @pytest.mark.parametrize("method", ["exact", "monte-carlo"])
 def test_equities_conserve_the_pot(method: str, rank_lookup: RankLookup) -> None:
@@ -45,14 +52,19 @@ def test_equities_conserve_the_pot(method: str, rank_lookup: RankLookup) -> None
 
 # Exact vs sampled equity
 
-def test_exact_and_monte_carlo_equity_agree_within_sampling_tolerance(rank_lookup: RankLookup) -> None:
+
+def test_exact_and_monte_carlo_equity_agree_within_sampling_tolerance(
+    rank_lookup: RankLookup,
+) -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("KsKhJdTd", 4),
     ]
     board = encode_board(TURN)
 
-    exact = compute_equity(players, mode=4, board=board, method="exact", rank_lookup=rank_lookup).equities
+    exact = compute_equity(
+        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+    ).equities
     sampled = compute_equity(
         players,
         mode=4,
@@ -62,23 +74,25 @@ def test_exact_and_monte_carlo_equity_agree_within_sampling_tolerance(rank_looku
         target_moe=0.0,
         seed=31,
         method="monte-carlo",
-    rank_lookup=rank_lookup).equities
+        rank_lookup=rank_lookup,
+    ).equities
 
-    for sampled_equity, exact_equity in zip(
-        sampled, exact, strict=True
-    ):
-        assert sampled_equity == pytest.approx(
-            exact_equity, abs=0.01
-        )
+    for sampled_equity, exact_equity in zip(sampled, exact, strict=True):
+        assert sampled_equity == pytest.approx(exact_equity, abs=0.01)
 
-def test_exact_and_monte_carlo_agree_for_weighted_multi_hand_ranges(rank_lookup: RankLookup) -> None:
+
+def test_exact_and_monte_carlo_agree_for_weighted_multi_hand_ranges(
+    rank_lookup: RankLookup,
+) -> None:
     players = [
         encode_range("AsAhKdQc@65,QsQhJdTd@35", 4),
         encode_range("KsKhJcTc@40,JsJh8d8c@90", 4),
     ]
     board = encode_board(RIVER)
 
-    exact = compute_equity(players, mode=4, board=board, method="exact", rank_lookup=rank_lookup).equities
+    exact = compute_equity(
+        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+    ).equities
     sampled = compute_equity(
         players,
         mode=4,
@@ -88,16 +102,14 @@ def test_exact_and_monte_carlo_agree_for_weighted_multi_hand_ranges(rank_lookup:
         max_samples=20_000,
         seed=47,
         method="monte-carlo",
-    rank_lookup=rank_lookup).equities
+        rank_lookup=rank_lookup,
+    ).equities
 
     assert 0 < exact[0] < 1
     assert 0 < exact[1] < 1
-    for sampled_equity, exact_equity in zip(
-        sampled, exact, strict=True
-    ):
-        assert sampled_equity == pytest.approx(
-            exact_equity, abs=0.015
-        )
+    for sampled_equity, exact_equity in zip(sampled, exact, strict=True):
+        assert sampled_equity == pytest.approx(exact_equity, abs=0.015)
+
 
 def test_monte_carlo_flop_agrees_with_exact_equity(rank_lookup: RankLookup) -> None:
     # Integration check: sampled flop equity agrees with exact enumeration.
@@ -107,7 +119,9 @@ def test_monte_carlo_flop_agrees_with_exact_equity(rank_lookup: RankLookup) -> N
         encode_range("KsKhJdTd", 4),
     ]
     board = encode_board("2c3d5h")
-    exact = compute_equity(players, mode=4, board=board, method="exact", rank_lookup=rank_lookup).equities
+    exact = compute_equity(
+        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+    ).equities
     sampled = compute_equity(
         players,
         mode=4,
@@ -117,20 +131,20 @@ def test_monte_carlo_flop_agrees_with_exact_equity(rank_lookup: RankLookup) -> N
         target_moe=0.0,
         seed=53,
         method="monte-carlo",
-    rank_lookup=rank_lookup).equities
+        rank_lookup=rank_lookup,
+    ).equities
 
-    for sampled_equity, exact_equity in zip(
-        sampled, exact, strict=True
-    ):
-        assert sampled_equity == pytest.approx(
-            exact_equity, abs=0.02
-        )
+    for sampled_equity, exact_equity in zip(sampled, exact, strict=True):
+        assert sampled_equity == pytest.approx(exact_equity, abs=0.02)
 
 
 # Input immutability
 
+
 @pytest.mark.parametrize("method", ["exact", "monte-carlo"])
-def test_calculation_does_not_modify_original_ranges(method: str, rank_lookup: RankLookup) -> None:
+def test_calculation_does_not_modify_original_ranges(
+    method: str, rank_lookup: RankLookup
+) -> None:
     players = [
         encode_range("2cAsAhKd,KsKhJdTd", 4),
         encode_range("QsQhJcTc", 4),

@@ -1,4 +1,3 @@
-
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
@@ -6,7 +5,9 @@ from numpy.typing import NDArray
 from plorangelab.rank_combination import RankLookup, rank_combination_lookup
 
 
-def evaluate_hand(hand: NDArray[np.uint8], board: NDArray[np.uint8], rank_lookup: RankLookup) -> int:
+def evaluate_hand(
+    hand: NDArray[np.uint8], board: NDArray[np.uint8], rank_lookup: RankLookup
+) -> int:
     if hand.ndim != 1 or len(hand) not in (4, 5):
         raise ValueError("hand must be a one-dimensional array of 4 or 5 cards")
     if board.ndim != 1 or len(board) != 5:
@@ -20,12 +21,18 @@ def evaluate_hand(hand: NDArray[np.uint8], board: NDArray[np.uint8], rank_lookup
     if {int(card) for card in hand} & {int(card) for card in board}:
         raise ValueError("hand and board cannot contain the same card")
 
-    return _evaluate_hand_core(hand, board, rank_lookup.rank_table, rank_lookup.binomial_table)
-
+    return _evaluate_hand_core(
+        hand, board, rank_lookup.rank_table, rank_lookup.binomial_table
+    )
 
 
 @njit(cache=True)
-def _evaluate_hand_core(hand: NDArray[np.uint8], board: NDArray[np.uint8], rank_table: NDArray[np.uint32], binomial_table: NDArray[np.uint32]) -> int:
+def _evaluate_hand_core(
+    hand: NDArray[np.uint8],
+    board: NDArray[np.uint8],
+    rank_table: NDArray[np.uint32],
+    binomial_table: NDArray[np.uint32],
+) -> int:
     best_score = -1
     cards = np.empty(5, dtype=np.uint8)
 
@@ -41,11 +48,14 @@ def _evaluate_hand_core(hand: NDArray[np.uint8], board: NDArray[np.uint8], rank_
                         cards[4] = board[c]
 
                         sort5_desc(cards)
-                        score = rank_combination_lookup(cards, rank_table, binomial_table)
+                        score = rank_combination_lookup(
+                            cards, rank_table, binomial_table
+                        )
 
                         best_score = max(best_score, score)
 
-    return best_score 
+    return best_score
+
 
 @njit(inline="always")
 def sort5_desc(cards: NDArray[np.uint8]) -> None:
@@ -77,30 +87,36 @@ def sort5_desc(cards: NDArray[np.uint8]) -> None:
 
     if cards[1] < cards[2]:
         cards[1], cards[2] = cards[2], cards[1]
-        
+
+
 @njit(cache=True)
 def numba_evaluate_hands(
-    hands: NDArray[np.uint8], 
-    board: NDArray[np.uint8], 
-    rank_table: NDArray[np.uint32], 
-    binomial_table: NDArray[np.uint32]
+    hands: NDArray[np.uint8],
+    board: NDArray[np.uint8],
+    rank_table: NDArray[np.uint32],
+    binomial_table: NDArray[np.uint32],
 ) -> NDArray[np.uint32]:
     evaluations = np.empty(hands.shape[0], dtype=np.uint32)
     for i in range(hands.shape[0]):
-        evaluations[i] = _evaluate_hand_core(hands[i], board, rank_table, binomial_table)
+        evaluations[i] = _evaluate_hand_core(
+            hands[i], board, rank_table, binomial_table
+        )
 
     return evaluations
 
+
 @njit(parallel=True, cache=True)
 def numba_evaluate_hands_parallel(
-    hands: NDArray[np.uint8], 
-    board: NDArray[np.uint8], 
-    rank_table: NDArray[np.uint32], 
-    binomial_table: NDArray[np.uint32]
+    hands: NDArray[np.uint8],
+    board: NDArray[np.uint8],
+    rank_table: NDArray[np.uint32],
+    binomial_table: NDArray[np.uint32],
 ) -> NDArray[np.uint32]:
     evaluations = np.empty(hands.shape[0], dtype=np.uint32)
 
     for i in prange(hands.shape[0]):
-        evaluations[i] = _evaluate_hand_core(hands[i], board, rank_table=rank_table, binomial_table=binomial_table)
+        evaluations[i] = _evaluate_hand_core(
+            hands[i], board, rank_table=rank_table, binomial_table=binomial_table
+        )
 
     return evaluations

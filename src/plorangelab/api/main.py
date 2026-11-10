@@ -1,4 +1,3 @@
-
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -39,6 +38,3 @@ app.include_router(sessions_router)
 app.include_router(players_router)
 app.include_router(equity_ws_router)
 app.include_router(filters_router)
-
-
-

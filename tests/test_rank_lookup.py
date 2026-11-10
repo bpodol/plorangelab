@@ -46,7 +46,9 @@ def _exhaustive_lookup_check(rank_table, binomial_table):
                         if seen[index]:
                             return checked, "duplicate_index"
                         seen[index] = 1
-                        if rank_combination_lookup(cards, rank_table, binomial_table) != _numba_rank_combination(cards):
+                        if rank_combination_lookup(
+                            cards, rank_table, binomial_table
+                        ) != _numba_rank_combination(cards):
                             return checked, "incorrect_rank"
                         checked += 1
 
@@ -99,16 +101,16 @@ def test_combinatorial_index_has_known_values(
 @pytest.mark.parametrize(
     "five_cards",
     [
-        "AsKsQsJsTs",   # straight flush
-        "AsAhAcAdKs",   # four of a kind
-        "AsAhAcKsKh",   # full house
-        "AsKs9s7s3s",   # flush
-        "AsKsQcJcTc",   # straight
-        "AsAhAcKd9s",   # three of a kind
-        "AsAhKdKc9s",   # two pair
-        "AsAhKd9c7s",   # pair
-        "AsKdJh9c7s",   # high card
-        "As5h4d3c2s",   # wheel
+        "AsKsQsJsTs",  # straight flush
+        "AsAhAcAdKs",  # four of a kind
+        "AsAhAcKsKh",  # full house
+        "AsKs9s7s3s",  # flush
+        "AsKsQcJcTc",  # straight
+        "AsAhAcKd9s",  # three of a kind
+        "AsAhKdKc9s",  # two pair
+        "AsAhKd9c7s",  # pair
+        "AsKdJh9c7s",  # high card
+        "As5h4d3c2s",  # wheel
     ],
 )
 def test_lookup_matches_original_ranker_for_representative_hands(

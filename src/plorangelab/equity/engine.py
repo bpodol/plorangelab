@@ -36,7 +36,6 @@ def choose_method(
     return "monte-carlo"
 
 
-
 def validate_equity_inputs(
     players: list[EncodedRange],
     mode: Mode,
@@ -48,7 +47,6 @@ def validate_equity_inputs(
     min_samples: int = 10_000,
     max_samples: int = _MAX_SIMULATIONS,
     batch_size: int = 10_000,
-
 ) -> None:
     """Validate the public equity API's parameters and encoded range invariants.
 
@@ -66,7 +64,11 @@ def validate_equity_inputs(
     if not 2 <= len(players) <= 6:
         raise ValueError("Expected 2 to 6 players")
 
-    if isinstance(seed, (bool, np.bool_)) or not isinstance(seed, (int, np.integer)) or seed < 0:
+    if (
+        isinstance(seed, (bool, np.bool_))
+        or not isinstance(seed, (int, np.integer))
+        or seed < 0
+    ):
         raise ValueError("Seed must be a non-negative integer")
 
     if board is not None:
@@ -120,27 +122,25 @@ def validate_equity_inputs(
 
         if np.any(player.hands >= 52):
             raise ValueError(f"Player {i + 1} contains invalid cards")
-        
+
         sorted_hands = np.sort(player.hands, axis=1)
 
         if np.any(sorted_hands[:, 1:] == sorted_hands[:, :-1]):
             raise ValueError(f"Player {i + 1} contains duplicate cards within a hand")
-        
+
         expected_masks = np.zeros(n, dtype=np.uint64)
 
         for j in range(mode):
-            expected_masks |= (
-                np.uint64(1) << player.hands[:, j].astype(np.uint64)
-            )
+            expected_masks |= np.uint64(1) << player.hands[:, j].astype(np.uint64)
 
         if not np.array_equal(player.masks, expected_masks):
             raise ValueError(f"Player {i + 1} contains incorrect masks")
-        
+
         sorted_masks = np.sort(player.masks)
 
         if np.any(sorted_masks[1:] == sorted_masks[:-1]):
             raise ValueError(f"Player {i + 1} contains duplicate hands")
-        
+
         weights = player.weights.astype(np.float64)
         total = weights.sum()
 
@@ -201,8 +201,9 @@ def sanitize_range(player: EncodedRange, board_mask: np.uint64) -> EncodedRange:
     )
 
 
-
-def prepare_ranges(players: list[EncodedRange], board: NDArray[np.uint8] | None) -> list[EncodedRange]:
+def prepare_ranges(
+    players: list[EncodedRange], board: NDArray[np.uint8] | None
+) -> list[EncodedRange]:
     """Filter all player ranges against the known community cards.
 
     Args:
@@ -218,11 +219,7 @@ def prepare_ranges(players: list[EncodedRange], board: NDArray[np.uint8] | None)
 
     board_mask = build_mask(board)
 
-    return [
-        sanitize_range(player, board_mask)
-        for player in players
-    ]
-
+    return [sanitize_range(player, board_mask) for player in players]
 
 
 def _positive_integer(value: object, name: str) -> int:
@@ -233,7 +230,6 @@ def _positive_integer(value: object, name: str) -> int:
     ):
         raise ValueError(f"{name} must be a positive integer")
     return int(value)
-
 
 
 def compute_equity(
@@ -250,7 +246,7 @@ def compute_equity(
     seed: int = 3,
     cancel_event: Event | None = None,
     on_progress: Callable[[MonteCarloResult], None] | None = None,
-    rank_lookup: RankLookup
+    rank_lookup: RankLookup,
 ) -> EquityResult:
     """Calculate equity exactly or with adaptive Monte Carlo.
 
@@ -270,25 +266,24 @@ def compute_equity(
                 "(before validation or preparation)"
             )
 
-    
     validate_equity_inputs(
-        players, 
-        mode, 
-        board, 
-        seed, 
-        method, 
-        target_moe, 
-        confidence_multiplier, 
-        min_samples, 
-        max_samples, 
-        batch_size
+        players,
+        mode,
+        board,
+        seed,
+        method,
+        target_moe,
+        confidence_multiplier,
+        min_samples,
+        max_samples,
+        batch_size,
     )
-    
+
     if cancel_event is not None and cancel_event.is_set():
         raise InterruptedError("Monte Carlo calculation cancelled before preparation")
 
     valid_players = prepare_ranges(players, board)
-    
+
     if method == "auto":
         _, estimated_showdowns = _estimate_exact_showdowns(valid_players, mode, board)
         selected_method = choose_method(
@@ -296,7 +291,7 @@ def compute_equity(
         )
     else:
         selected_method = method
-    
+
     if selected_method == "exact":
         equities = run_exact_equity(
             players=valid_players,
@@ -318,7 +313,7 @@ def compute_equity(
     hands, masks, cumulative, board_mask, rng = _prepare_monte_carlo(
         valid_players, board, seed
     )
-    
+
     # Measure independent hand-selection acceptance only for larger
     # multiway calculations.
     use_importance = False
@@ -335,13 +330,14 @@ def compute_equity(
         )
 
         use_importance = accepted < 10
-  
+
     if use_importance:
-        probabilities = List([
-            player.weights.astype(np.float64)
-            / player.weights.sum(dtype=np.float64)
-            for player in valid_players
-        ])
+        probabilities = List(
+            [
+                player.weights.astype(np.float64) / player.weights.sum(dtype=np.float64)
+                for player in valid_players
+            ]
+        )
 
         result = _run_importance_monte_carlo(
             hands,
@@ -382,7 +378,7 @@ def compute_equity(
             on_progress=on_progress,
             rank_lookup=rank_lookup,
         )
-  
+
     return EquityResult(
         equities=result.equities,
         method="monte-carlo",

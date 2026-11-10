@@ -52,9 +52,7 @@ def _matches_slots(
 
         used[depth + 1] = used[depth] | chosen
         depth += 1
-        available[depth] = (
-            hand_mask & slot_masks[atom_index, depth] & ~used[depth]
-        )
+        available[depth] = hand_mask & slot_masks[atom_index, depth] & ~used[depth]
 
     return False
 
@@ -138,7 +136,11 @@ def evaluate_filter(
     else:
         if mode is None:
             raise ValueError("mode is required for filter strings and ASTs")
-        ast = encode_filter(expression, mode) if isinstance(expression, str) else expression
+        ast = (
+            encode_filter(expression, mode)
+            if isinstance(expression, str)
+            else expression
+        )
         compiled = compile_filter(ast, mode)
 
     return _evaluate_compiled(

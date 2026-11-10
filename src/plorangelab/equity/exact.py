@@ -29,7 +29,12 @@ def _accumulate_exact_showdown(
     binomial_table,
 ):
     """Evaluate one showdown and add its weighted pot shares."""
-    scores = numba_evaluate_hands(selected_hands, current_board, rank_table=rank_table, binomial_table=binomial_table)
+    scores = numba_evaluate_hands(
+        selected_hands,
+        current_board,
+        rank_table=rank_table,
+        binomial_table=binomial_table,
+    )
 
     highest_score = scores[0]
     for p in range(1, player_count):
@@ -46,7 +51,6 @@ def _accumulate_exact_showdown(
             pot_shares[p] += share
 
     return total_weight + matchup_weight
-
 
 
 @njit(cache=True)
@@ -79,9 +83,7 @@ def _run_exact_equity_kernel(
     board_len = 0 if board is None else len(board)
     missing_board = 5 - board_len
 
-    selected_hands = np.empty(
-        (player_count, mode), dtype=np.uint8
-    )
+    selected_hands = np.empty((player_count, mode), dtype=np.uint8)
     current_board = np.empty(5, dtype=np.uint8)
 
     if board is not None:
@@ -130,7 +132,7 @@ def _run_exact_equity_kernel(
                     pot_shares,
                     total_weight,
                     rank_table=rank_table,
-                    binomial_table=binomial_table
+                    binomial_table=binomial_table,
                 )
             else:
                 # Build the deck remaining after blockers.
@@ -150,9 +152,7 @@ def _run_exact_equity_kernel(
                 # Enumerate every possible board completion.
                 while True:
                     for j in range(missing_board):
-                        current_board[board_len + j] = (
-                            available[runout_indices[j]]
-                        )
+                        current_board[board_len + j] = available[runout_indices[j]]
 
                     total_weight = _accumulate_exact_showdown(
                         selected_hands,
@@ -170,8 +170,7 @@ def _run_exact_equity_kernel(
 
                     while (
                         j >= 0
-                        and runout_indices[j]
-                        == available_count - missing_board + j
+                        and runout_indices[j] == available_count - missing_board + j
                     ):
                         j -= 1
 
@@ -181,9 +180,7 @@ def _run_exact_equity_kernel(
                     runout_indices[j] += 1
 
                     for k in range(j + 1, missing_board):
-                        runout_indices[k] = (
-                            runout_indices[k - 1] + 1
-                        )
+                        runout_indices[k] = runout_indices[k - 1] + 1
 
         # Advance to the next combination of player hands.
         p = player_count - 1
@@ -203,7 +200,6 @@ def _run_exact_equity_kernel(
     return pot_shares, total_weight
 
 
-
 @njit(parallel=True, cache=True)
 def _run_exact_equity_kernel_parallel(
     hands,
@@ -214,7 +210,7 @@ def _run_exact_equity_kernel_parallel(
     mode,
     requested_workers,
     rank_table,
-    binomial_table
+    binomial_table,
 ):
     """Enumerate exact equity in balanced, thread-local Cartesian partitions."""
     player_count = len(hands)
@@ -343,7 +339,6 @@ def _run_exact_equity_kernel_parallel(
     return pot_shares, total_weight
 
 
-
 def _estimate_exact_showdowns(
     players: list[EncodedRange],
     mode: Mode,
@@ -357,7 +352,6 @@ def _estimate_exact_showdowns(
     candidate_matchups = prod(len(player.hands) for player in players)
     estimated_showdowns = candidate_matchups * comb(remaining_cards, missing_board)
     return candidate_matchups, estimated_showdowns
-
 
 
 def run_exact_equity(
@@ -389,21 +383,14 @@ def run_exact_equity(
     """
     player_count = len(players)
 
-    board_mask = (
-        np.uint64(0)
-        if board is None
-        else build_mask(board)
-    )
+    board_mask = np.uint64(0) if board is None else build_mask(board)
 
     # Conservative upper bound that ignores collisions.
     candidate_matchups, estimated_showdowns = _estimate_exact_showdowns(
         players, mode, board
     )
 
-    if (
-        max_showdowns is not None
-        and estimated_showdowns > max_showdowns
-    ):
+    if max_showdowns is not None and estimated_showdowns > max_showdowns:
         raise RuntimeError(
             "Exact calculation exceeds the workload limit: "
             f"{estimated_showdowns:,} estimated showdowns"
@@ -454,13 +441,6 @@ def run_exact_equity(
         )
 
     if total_weight == 0:
-        raise ValueError(
-            "No compatible positive-weight hand combinations exist"
-        )
+        raise ValueError("No compatible positive-weight hand combinations exist")
 
-    return [
-        float(
-            pot_shares[i] / total_weight
-        )
-        for i in range(player_count)
-    ]
+    return [float(pot_shares[i] / total_weight) for i in range(player_count)]

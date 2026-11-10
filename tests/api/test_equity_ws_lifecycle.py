@@ -43,13 +43,20 @@ def test_http_mutations_rejected_while_calculating(
 
             # An active job prevents idle expiration even with an old timestamp.
             with session.lock:
-                session.last_activity = monotonic() - session_manager_module.SESSION_TTL - 1
+                session.last_activity = (
+                    monotonic() - session_manager_module.SESSION_TTL - 1
+                )
 
-            assert client.put(f"{base}/board", json={"board": "2c3d4h"}).status_code == 409
-            assert client.put(
-                f"{base}/players/1",
-                json={"hands": "QcQhJcTc", "mode": 4},
-            ).status_code == 409
+            assert (
+                client.put(f"{base}/board", json={"board": "2c3d4h"}).status_code == 409
+            )
+            assert (
+                client.put(
+                    f"{base}/players/1",
+                    json={"hands": "QcQhJcTc", "mode": 4},
+                ).status_code
+                == 409
+            )
             assert client.delete(f"{base}/players/0").status_code == 409
 
             assert session.manager.board is None

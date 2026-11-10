@@ -1,4 +1,3 @@
-
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -36,7 +35,6 @@ class EquityJob:
         repr=False,
     )
 
-
     def get_status(self) -> JobStatus:
         future = self.future
 
@@ -62,10 +60,8 @@ class EquityJob:
 
         return "completed"
 
-
     def cancel(self) -> None:
         self.cancel_event.set()
-
 
     def subscribe(self, callback: Subscriber) -> None:
         with self.lock:
@@ -76,17 +72,14 @@ class EquityJob:
         if previous is not None and previous is not callback:
             previous()
 
-
     def unsubscribe(self, callback: Subscriber) -> None:
         with self.lock:
             if self._subscriber is callback:
                 self._subscriber = None
 
-
     def is_subscriber(self, callback: Subscriber) -> bool:
         with self.lock:
             return self._subscriber is callback
-
 
     def notify_subscriber(self) -> None:
         with self.lock:
@@ -95,13 +88,11 @@ class EquityJob:
         if callback is not None:
             callback()
 
-
     def update_progress(self, update: MonteCarloResult) -> None:
         with self.lock:
             self.progress = update
         self.notify_subscriber()
 
-        
     def get_progress(self) -> MonteCarloResult | None:
         with self.lock:
             return self.progress
@@ -134,4 +125,3 @@ def start_equity_job(
     job.future = executor.submit(run)
     job.future.add_done_callback(lambda _: job.notify_subscriber())
     return job
-

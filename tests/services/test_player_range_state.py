@@ -49,7 +49,8 @@ def test_board_changes_select_street_and_remove_blocked_hands(
 
 
 @pytest.mark.parametrize(
-    "board_text", ["2c3d5hAs", "2c3d5hAsKs"],
+    "board_text",
+    ["2c3d5hAs", "2c3d5hAsKs"],
 )
 def test_direct_board_jumps_from_preflop(
     player: PlayerRangeState,
@@ -61,9 +62,7 @@ def test_direct_board_jumps_from_preflop(
 
     assert player.active_street.board is board
     assert _masks(player.active_street.current_range) == {
-        int(mask)
-        for mask in base_range.masks
-        if not (mask & board.mask)
+        int(mask) for mask in base_range.masks if not (mask & board.mask)
     }
 
 
@@ -200,7 +199,9 @@ def test_clone_has_independent_street_containers_without_copying_ranges(
         else:
             assert copied is not original
             assert copied.filter_manager is not original.filter_manager
-            assert copied.filter_manager.base_range is original.filter_manager.base_range
+            assert (
+                copied.filter_manager.base_range is original.filter_manager.base_range
+            )
             assert copied.board is original.board
             if player.active_street is original:
                 assert cloned.active_street is copied
@@ -240,9 +241,7 @@ def test_filter_actions_apply_only_to_active_street(player: PlayerRangeState) ->
     assert _masks(player.current_range) == _masks(encode_range("AsAhKdQc", 4))
     player.clear_filters()
     assert player.current_range is player.flop.filter_manager.base_range
-    assert player.preflop.filter_manager.get_node(
-        FilterAddress("premium")
-    ).active
+    assert player.preflop.filter_manager.get_node(FilterAddress("premium")).active
 
 
 def test_invalid_filter_does_not_mutate_existing_player_state(
@@ -274,9 +273,7 @@ def test_same_board_keeps_nested_filter_configuration(
 
     assert player.flop is prior_street
     assert player.current_range is prior_range
-    assert player.flop.filter_manager.get_node(
-        FilterAddress("QQ", ("premium",))
-    ).active
+    assert player.flop.filter_manager.get_node(FilterAddress("QQ", ("premium",))).active
 
 
 def test_failed_street_change_preserves_current_filters() -> None:
@@ -316,9 +313,7 @@ def test_filter_operations_return_coverage(
     # Clearing restores the full range but retains the filter.
     player.set_filter_active("AA", True)
     assert player.clear_filters() == 1.0
-    assert not player.active_street.filter_manager.get_node(
-        FilterAddress("AA")
-    ).active
+    assert not player.active_street.filter_manager.get_node(FilterAddress("AA")).active
 
     # Deleting the last active filter restores full coverage.
     player.set_filter_active("AA", True)
@@ -331,8 +326,9 @@ def test_filter_retrieval_uses_active_street(player: PlayerRangeState) -> None:
 
     preflop_tree = player.get_filters()
 
-    assert player.get_filter("aces", ("premium",)) == (
-        preflop_tree["premium"]["filters"]["aces"]
+    assert (
+        player.get_filter("aces", ("premium",))
+        == (preflop_tree["premium"]["filters"]["aces"])
     )
 
     player.apply_board_change(Board.from_string("2c3d5h"))

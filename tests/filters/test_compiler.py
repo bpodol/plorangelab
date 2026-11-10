@@ -231,9 +231,7 @@ def test_postfix_program_preserves_ast_boolean_semantics(expression: str) -> Non
 
     def eval_program(flags: tuple[bool, ...]) -> bool:
         stack: list[bool] = []
-        for opcode, operand in zip(
-            compiled.operations, compiled.operands, strict=True
-        ):
+        for opcode, operand in zip(compiled.operations, compiled.operands, strict=True):
             if opcode == MATCH:
                 stack.append(flags[int(operand)])
             elif opcode == NOT:

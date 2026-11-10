@@ -16,8 +16,8 @@ from ._helpers import _guaranteed_split_players
 
 
 def test_rejection_progress_callback(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
     updates: list[MonteCarloResult] = []
 
@@ -30,9 +30,7 @@ rank_lookup: RankLookup) -> None:
 
         return shares, shares.copy(), count, count
 
-    monkeypatch.setattr(
-        mc_module, "_run_monte_carlo_batch", balanced_batch
-    )
+    monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", balanced_batch)
 
     result = equity_module.compute_equity(
         players,
@@ -44,7 +42,8 @@ rank_lookup: RankLookup) -> None:
         batch_size=2,
         target_moe=0.0,
         on_progress=updates.append,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert len(updates) == 2
     assert [u.simulations for u in updates] == [2, 4]
@@ -56,20 +55,16 @@ rank_lookup: RankLookup) -> None:
         assert update.equities == [0.5, 0.5]
 
     # Verify the MOE uses cumulative statistics.
-    assert updates[0].margins_of_error[0] == pytest.approx(
-        1.96 * np.sqrt(0.5 / 2)
-    )
-    assert updates[1].margins_of_error[0] == pytest.approx(
-        1.96 * np.sqrt((1 / 3) / 4)
-    )
+    assert updates[0].margins_of_error[0] == pytest.approx(1.96 * np.sqrt(0.5 / 2))
+    assert updates[1].margins_of_error[0] == pytest.approx(1.96 * np.sqrt((1 / 3) / 4))
 
     assert result.simulations == 6
     assert result.stop_reason == "max_simulations"
 
 
 def test_importance_progress_callback(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players = [
         encode_range("AsKsQsJs", 4),
         encode_range("AhKhQhJh", 4),
@@ -100,13 +95,13 @@ rank_lookup: RankLookup) -> None:
         shares = np.array([1.0, 1.0, 0.0])
 
         return (
-            2.0,            # Sum of weights
-            2.0,            # Sum of squared weights
+            2.0,  # Sum of weights
+            2.0,  # Sum of squared weights
             shares,
             shares.copy(),
             shares.copy(),
-            2,              # Simulations
-            2,              # Attempts
+            2,  # Simulations
+            2,  # Attempts
         )
 
     monkeypatch.setattr(
@@ -124,7 +119,8 @@ rank_lookup: RankLookup) -> None:
         batch_size=2,
         target_moe=0.5,
         on_progress=updates.append,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert len(updates) == 2
     assert [u.simulations for u in updates] == [2, 4]
@@ -133,9 +129,7 @@ rank_lookup: RankLookup) -> None:
     for update in updates:
         assert update.sampler == "importance"
         assert update.stop_reason is None
-        assert update.effective_samples == pytest.approx(
-            update.simulations
-        )
+        assert update.effective_samples == pytest.approx(update.simulations)
 
         assert update.equities == [0.5, 0.5, 0]
 
@@ -148,8 +142,8 @@ rank_lookup: RankLookup) -> None:
 
 
 def test_cancellation_from_callback_rejection(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
 
     cancelled = Event()
@@ -171,9 +165,7 @@ rank_lookup: RankLookup) -> None:
         updates.append(progress)
         cancelled.set()
 
-    monkeypatch.setattr(
-        mc_module, "_run_monte_carlo_batch", balanced_batch
-    )
+    monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", balanced_batch)
 
     result = equity_module.compute_equity(
         players,
@@ -186,7 +178,8 @@ rank_lookup: RankLookup) -> None:
         target_moe=0.0,
         cancel_event=cancelled,
         on_progress=on_progress,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert cancelled.is_set()
     assert batch_calls == 1
@@ -200,8 +193,8 @@ rank_lookup: RankLookup) -> None:
 
 
 def test_cancellation_from_callback_importance(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players = [
         encode_range("AsKsQsJs", 4),
         encode_range("AhKhQhJh", 4),
@@ -261,7 +254,8 @@ rank_lookup: RankLookup) -> None:
         target_moe=0.0,
         cancel_event=cancelled,
         on_progress=on_progress,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert cancelled.is_set()
     assert batch_calls == 1
@@ -278,17 +272,15 @@ rank_lookup: RankLookup) -> None:
 
 
 def test_no_progress_for_exact_equity(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
     updates: list[MonteCarloResult] = []
 
     def fake_exact_equity(**kwargs):
         return [0.5, 0.5]
 
-    monkeypatch.setattr(
-        equity_module, "run_exact_equity", fake_exact_equity
-    )
+    monkeypatch.setattr(equity_module, "run_exact_equity", fake_exact_equity)
 
     result = equity_module.compute_equity(
         players,
@@ -296,7 +288,8 @@ rank_lookup: RankLookup) -> None:
         board=board,
         method="exact",
         on_progress=updates.append,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert updates == []
     assert result.method == "exact"

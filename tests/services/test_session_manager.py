@@ -141,7 +141,9 @@ def test_delete_and_clear_sessions(resources: SimpleNamespace) -> None:
     assert manager.sessions == {}
 
 
-def test_delete_running_session_requests_cancellation(resources: SimpleNamespace) -> None:
+def test_delete_running_session_requests_cancellation(
+    resources: SimpleNamespace,
+) -> None:
     manager = SessionManager(resources)
     session_id = manager.create_session()
     session = manager.sessions[session_id]

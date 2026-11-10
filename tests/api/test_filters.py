@@ -1,4 +1,3 @@
-
 from unittest.mock import Mock
 
 import pytest
@@ -162,7 +161,10 @@ def test_manager_value_error_returns_422(
 ):
     base_url, session = filter_context
     operation = mock_operation(
-        monkeypatch, session, operation_name, error=ValueError("Invalid filter operation")
+        monkeypatch,
+        session,
+        operation_name,
+        error=ValueError("Invalid filter operation"),
     )
 
     response = client.request(method, f"{base_url}/{suffix}", json=body)
@@ -170,6 +172,7 @@ def test_manager_value_error_returns_422(
     assert response.status_code == 422, response.text
     assert response.json() == {"detail": "Invalid filter operation"}
     operation.assert_called_once()
+
 
 def test_get_filters(client, filter_context, monkeypatch):
     base_url, session = filter_context
@@ -200,6 +203,7 @@ def test_get_filters(client, filter_context, monkeypatch):
     assert response.json() == tree
     get_filters.assert_called_once_with(2)
 
+
 @pytest.mark.parametrize(
     ("resource", "name", "path", "result"),
     [
@@ -229,8 +233,9 @@ def test_get_filters(client, filter_context, monkeypatch):
         ),
     ],
 )
-
-def test_get_filter_or_group(client, filter_context, monkeypatch, resource, name, path, result):
+def test_get_filter_or_group(
+    client, filter_context, monkeypatch, resource, name, path, result
+):
     base_url, session = filter_context
 
     get_filter = mock_operation(monkeypatch, session, "get_filter", result=result)
@@ -243,6 +248,7 @@ def test_get_filter_or_group(client, filter_context, monkeypatch, resource, name
     assert response.status_code == 200, response.text
     assert response.json() == result
     get_filter.assert_called_once_with(name=name, player_index=2, path=path)
+
 
 def test_get_missing_filter_returns_404(client, filter_context, monkeypatch):
     base_url, session = filter_context
@@ -258,6 +264,7 @@ def test_get_missing_filter_returns_404(client, filter_context, monkeypatch):
 
     assert response.status_code == 404, response.text
     get_filter.assert_called_once()
+
 
 def test_get_filters_allowed_during_running_job(client, filter_context, monkeypatch):
     base_url, session = filter_context

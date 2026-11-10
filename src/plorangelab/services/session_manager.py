@@ -10,6 +10,7 @@ from .range_manager import RangeManager
 
 SESSION_TTL = 30 * 60
 
+
 @dataclass
 class Session:
     manager: RangeManager
@@ -26,9 +27,8 @@ class Session:
     def is_job_running(self) -> bool:
         job = self.equity_job
 
-        return job is not None and (
-            job.future is None or not job.future.done()
-        )
+        return job is not None and (job.future is None or not job.future.done())
+
 
 class SessionManager:
     def __init__(self, resources: EngineResources):
@@ -36,8 +36,9 @@ class SessionManager:
         self.resources = resources
         self.lock = Lock()
 
-
-    def create_session(self,) -> str:
+    def create_session(
+        self,
+    ) -> str:
         with self.lock:
             session_id = token_urlsafe(32)
             manager = RangeManager(self.resources)
@@ -98,6 +99,3 @@ class SessionManager:
 
         for session_id in ids:
             self.delete_session(session_id)
-
-
-

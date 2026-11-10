@@ -8,6 +8,7 @@ from plorangelab.types import Mode
 
 ratings_dir = files("plorangelab").joinpath("resources", "rating")
 
+
 @dataclass
 class HandRating:
     hands: NDArray[np.uint8]

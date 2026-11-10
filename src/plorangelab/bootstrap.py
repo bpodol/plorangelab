@@ -12,7 +12,4 @@ class EngineResources:
 
 
 def load_resources():
-    return EngineResources(
-        ratings=load_rating(),
-        rank_lookup=build_lookup_tables()
-    )
+    return EngineResources(ratings=load_rating(), rank_lookup=build_lookup_tables())
