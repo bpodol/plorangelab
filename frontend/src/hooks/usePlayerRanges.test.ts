@@ -1,9 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
-import { addRange, deleteRange } from '../api/sessions';
+import { addRange, deleteRange } from '../api/players';
 import { usePlayerRanges } from './usePlayerRanges';
 
-vi.mock('../api/sessions', () => ({
+vi.mock('../api/players', () => ({
   addRange: vi.fn(),
   deleteRange: vi.fn(),
 }));
@@ -70,7 +70,7 @@ test('adds a range and updates player state', async () => {
     await result.current.handleAddRange(2);
   });
 
-  expect(addRange).toHaveBeenCalledWith(2, 'AsAhQcJd', 4, 'session-123');
+  expect(addRange).toHaveBeenCalledWith('session-123', 2, 'AsAhQcJd', 4);
 
   expect(result.current.players[2]).toMatchObject({
     range: 'AsAhQcJd',

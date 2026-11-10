@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { EquityMessage } from '../api/equity';
-import type { Mode } from '../api/sessions';
+import type { Mode } from '../types';
 import type { EquityStatus } from '../hooks/useEquitySocket';
 
 interface EquityPanelProps {

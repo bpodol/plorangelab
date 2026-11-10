@@ -3,12 +3,16 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
 import App from './App';
-import { createSession, changeBoard, addRange, deleteRange } from './api/sessions';
+import { createSession, changeBoard } from './api/sessions';
+import { addRange, deleteRange } from './api/players';
 import { connectEquityWebSocket } from './api/equity';
 
 vi.mock('./api/sessions', () => ({
   createSession: vi.fn(),
   changeBoard: vi.fn(),
+}));
+
+vi.mock('./api/players', () => ({
   addRange: vi.fn(),
   deleteRange: vi.fn(),
 }));
@@ -140,7 +144,7 @@ test('adds and deletes a player range through the UI', async () => {
 
   await user.click(screen.getAllByRole('button', { name: /add range/i })[0]);
 
-  expect(addRange).toHaveBeenCalledWith(0, 'AsAhQcJd', 4, 'session-123');
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'AsAhQcJd', 4);
 
   expect(await screen.findByText('Hands: 1')).toBeInTheDocument();
   expect(modeSelector).toBeDisabled();
@@ -280,7 +284,7 @@ test('submits the complete large range instead of its preview', async () => {
 
   await user.click(screen.getAllByRole('button', { name: /add range/i })[0]);
 
-  expect(addRange).toHaveBeenCalledWith(0, fullRange, 4, 'session-123');
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, fullRange, 4);
 
   await waitFor(() => {
     expect(screen.queryByRole('button', { name: /clear input/i })).not.toBeInTheDocument();
