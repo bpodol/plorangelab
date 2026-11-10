@@ -50,5 +50,3 @@ def ws_url(session_id: str) -> str:
 
 def start_message(mode: int = 4, target_moe: float = 0.002) -> dict:
     return {"type": "start", "mode": mode, "target_moe": target_moe}
-
-

@@ -66,8 +66,11 @@ COMBINATIONS = {
 
 # Category and tie-breaking behavior
 
+
 @pytest.mark.parametrize("category", COMBINATIONS)
-def test_rank_combination_compares_hands_within_category(category: str, rank_lookup: RankLookup) -> None:
+def test_rank_combination_compares_hands_within_category(
+    category: str, rank_lookup: RankLookup
+) -> None:
     combinations = COMBINATIONS[category]
     stronger = _rank(encode_board(combinations[0]), rank_lookup)
     weaker = _rank(encode_board(combinations[1]), rank_lookup)
@@ -77,6 +80,7 @@ def test_rank_combination_compares_hands_within_category(category: str, rank_loo
     if len(combinations) == 3 and category != "straight":
         lower_kicker = _rank(encode_board(combinations[2]), rank_lookup)
         assert stronger > lower_kicker
+
 
 @pytest.mark.parametrize(
     ("stronger_category", "weaker_category"),
@@ -92,7 +96,8 @@ def test_rank_combination_compares_hands_within_category(category: str, rank_loo
     ],
 )
 def test_rank_combination_compares_category_strength(
-    stronger_category: str, weaker_category: str,
+    stronger_category: str,
+    weaker_category: str,
     rank_lookup: RankLookup,
 ) -> None:
     stronger = _rank(encode_board(COMBINATIONS[stronger_category][0]), rank_lookup)
@@ -100,17 +105,20 @@ def test_rank_combination_compares_category_strength(
 
     assert stronger > weaker
 
+
 def test_wheel_is_lower_than_six_high_straight(rank_lookup: RankLookup):
     wheel = encode_board("As5h4d3c2s")
     six_high = encode_board("6s5h4d3c2s")
 
     assert _rank(wheel, rank_lookup) < _rank(six_high, rank_lookup)
 
+
 def test_wheel_strflush_is_lower_than_six_high_straight(rank_lookup: RankLookup):
     wheel = encode_board("As5s4s3s2s")
     six_high = encode_board("6s5s4s3s2s")
 
     assert _rank(wheel, rank_lookup) < _rank(six_high, rank_lookup)
+
 
 @pytest.mark.parametrize(
     ("first", "same_rank_different_suits"),
@@ -122,7 +130,10 @@ def test_wheel_strflush_is_lower_than_six_high_straight(rank_lookup: RankLookup)
     ],
 )
 def test_rank_combination_equal_for_same_ranks_different_suits(
-    first: str, same_rank_different_suits: str,
+    first: str,
+    same_rank_different_suits: str,
     rank_lookup: RankLookup,
 ) -> None:
-    assert _rank(encode_board(first), rank_lookup) == _rank(encode_board(same_rank_different_suits), rank_lookup)
+    assert _rank(encode_board(first), rank_lookup) == _rank(
+        encode_board(same_rank_different_suits), rank_lookup
+    )

@@ -13,11 +13,8 @@ def rating() -> HandRating:
     )
 
 
-
 def test_valid_input_range() -> None:
-    encoded = encode_range(
-        "AsKsQhJhTs@100,AdKdQcJcTs@43,2c3c4c5c6c", 5
-    )
+    encoded = encode_range("AsKsQhJhTs@100,AdKdQcJcTs@43,2c3c4c5c6c", 5)
     assert encoded.hands.dtype == np.uint8
     assert encoded.hands.shape == (3, 5)
     assert encoded.hands.tolist() == [
@@ -40,7 +37,6 @@ def test_valid_plo4_single_hand() -> None:
     assert encoded.hands.shape == (1, 4)
     assert encoded.hands.tolist() == [[51, 47, 42, 38]]
     np.testing.assert_array_equal(encoded.weights, [1.0])
-
 
 
 @pytest.mark.parametrize(
@@ -81,9 +77,7 @@ def test_duplicate_hands_with_different_weights_are_rejected() -> None:
 
 
 def test_multiple_hands_keep_weights_aligned_with_rows() -> None:
-    encoded = encode_range(
-        "AsKsQhJh@25,AdKdQcJc@100,2c3c4c5c@50", 4
-    )
+    encoded = encode_range("AsKsQhJh@25,AdKdQcJc@100,2c3c4c5c@50", 4)
 
     assert encoded.hands.tolist() == [
         [51, 47, 42, 38],
@@ -124,9 +118,7 @@ def test_encoded_hand_and_mask():
         np.array([51, 45, 40, 38, 35], dtype=np.uint8),
     )
 
-    assert result.masks[0] == sum(
-        1 << int(card) for card in result.hands[0]
-    )
+    assert result.masks[0] == sum(1 << int(card) for card in result.hands[0])
     assert result.weights[0] == pytest.approx(0.75)
 
 
@@ -167,7 +159,6 @@ def test_valid_percentage_input(
     assert encoded.weights.dtype == np.float32
 
 
-
 @pytest.mark.parametrize(
     "notation",
     [
@@ -190,7 +181,6 @@ def test_invalid_percentage_input(
         encode_input(notation, mode=4, rating=rating)
 
 
-
 def test_encode_input_with_literal_hands(
     rating: HandRating,
 ) -> None:
@@ -204,7 +194,6 @@ def test_encode_input_with_literal_hands(
     np.testing.assert_array_equal(result.weights, expected.weights)
 
 
-
 def test_percentage_input_shares_ranking_memory(
     rating: HandRating,
 ) -> None:
@@ -212,7 +201,6 @@ def test_percentage_input_shares_ranking_memory(
 
     assert np.shares_memory(encoded.hands, rating.hands)
     assert np.shares_memory(encoded.masks, rating.masks)
-
 
 
 def test_percentage_input_does_not_modify_rating(

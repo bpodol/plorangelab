@@ -18,16 +18,15 @@ from ._helpers import RIVER, _weighted_players
 
 # Exact/rejection agreement and statistical properties
 
+
 @pytest.mark.parametrize("mode", [4, 5])
 @pytest.mark.parametrize(
     "board_text",
     ["2c3d5h7s9c", "2c3d5h7s"],
 )
 def test_indexed_importance_matches_exact_over_multiple_seeds(
-    monkeypatch: pytest.MonkeyPatch,
-    mode: int,
-    board_text: str,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, mode: int, board_text: str, rank_lookup: RankLookup
+) -> None:
     monkeypatch.setattr(
         api_module,
         "_probe_collision_acceptance",
@@ -38,7 +37,10 @@ rank_lookup: RankLookup) -> None:
     board = encode_board(board_text)
 
     exact = compute_equity(
-        players, mode=mode, board=board, method="exact",
+        players,
+        mode=mode,
+        board=board,
+        method="exact",
         rank_lookup=rank_lookup,
     )
 
@@ -55,20 +57,16 @@ rank_lookup: RankLookup) -> None:
             batch_size=1_000,
             target_moe=0.0,
             seed=seed,
-        rank_lookup=rank_lookup)
+            rank_lookup=rank_lookup,
+        )
 
         assert result.sampler == "importance"
         assert result.simulations == 4_000
         assert result.effective_samples is not None
 
-        assert (
-            0 < result.effective_samples
-            <= result.simulations + 1e-7
-        )
+        assert 0 < result.effective_samples <= result.simulations + 1e-7
 
-        assert sum(result.equities) == pytest.approx(
-            1.0, abs=1e-10
-        )
+        assert sum(result.equities) == pytest.approx(1.0, abs=1e-10)
 
         estimates.append(list(result.equities))
 
@@ -81,9 +79,10 @@ rank_lookup: RankLookup) -> None:
         rtol=0,
     )
 
+
 def test_indexed_and_rejection_samplers_agree_statistically(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players = _weighted_players(4)
     board = encode_board("2c3d5h7s9c")
 
@@ -126,6 +125,7 @@ rank_lookup: RankLookup) -> None:
 
 # PLO modes, streets, and incompatible selections
 
+
 @pytest.mark.parametrize("mode", [4, 5])
 @pytest.mark.parametrize(
     "board_text",
@@ -135,7 +135,8 @@ def test_indexed_importance_supports_modes_and_streets(
     monkeypatch: pytest.MonkeyPatch,
     mode: int,
     board_text: str | None,
-rank_lookup: RankLookup) -> None:
+    rank_lookup: RankLookup,
+) -> None:
     monkeypatch.setattr(
         api_module,
         "_probe_collision_acceptance",
@@ -154,28 +155,24 @@ rank_lookup: RankLookup) -> None:
         batch_size=250,
         seed=5,
         target_moe=0.0,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert result.sampler == "importance"
     assert result.simulations == 1_000
     assert result.attempts >= result.simulations
     assert result.effective_samples is not None
 
-    assert (
-        0 < result.effective_samples
-        <= result.simulations + 1e-7
-    )
+    assert 0 < result.effective_samples <= result.simulations + 1e-7
 
-    assert all(
-        np.isfinite(value) and 0 <= value <= 1
-        for value in result.equities
-    )
+    assert all(np.isfinite(value) and 0 <= value <= 1 for value in result.equities)
 
-    assert sum(result.equities) == pytest.approx(
-        1.0, abs=1e-10
-    )
+    assert sum(result.equities) == pytest.approx(1.0, abs=1e-10)
 
-def test_importance_batch_handles_dead_end_without_invalid_selection(rank_lookup: RankLookup) -> None:
+
+def test_importance_batch_handles_dead_end_without_invalid_selection(
+    rank_lookup: RankLookup,
+) -> None:
     players = [
         encode_range("AsAhKdQc", 4),
         encode_range("AsQsJcTc", 4),  # Always collides with player 1.
@@ -186,15 +183,12 @@ def test_importance_batch_handles_dead_end_without_invalid_selection(rank_lookup
     hands = List([p.hands for p in players])
     masks = List([p.masks for p in players])
 
-    probabilities = List([
-        p.weights.astype(np.float64) / p.weights.sum()
-        for p in players
-    ])
+    probabilities = List(
+        [p.weights.astype(np.float64) / p.weights.sum() for p in players]
+    )
     cumulative = List([np.cumsum(p) for p in probabilities])
 
-    membership, lookup, enabled = _build_compatibility_index(
-        masks, probabilities
-    )
+    membership, lookup, enabled = _build_compatibility_index(masks, probabilities)
     assert enabled
 
     result = _run_importance_batch(
@@ -211,7 +205,9 @@ def test_importance_batch_handles_dead_end_without_invalid_selection(rank_lookup
         membership,
         lookup,
         True,
-    rank_lookup.rank_table, rank_lookup.binomial_table)
+        rank_lookup.rank_table,
+        rank_lookup.binomial_table,
+    )
 
     assert result[-2:] == (0, 25)
     assert result[0] == 0.0
@@ -223,9 +219,10 @@ def test_importance_batch_handles_dead_end_without_invalid_selection(rank_lookup
 
 # Importance-weighted equity and uncertainty
 
+
 def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     from plorangelab.equity import engine as api_module
 
     board = encode_board(RIVER)
@@ -237,11 +234,8 @@ rank_lookup: RankLookup) -> None:
     ]
 
     exact = compute_equity(
-        players,
-        mode=4,
-        board=board,
-        method="exact",
-    rank_lookup=rank_lookup)
+        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+    )
 
     # Force the importance-sampling path.
     monkeypatch.setattr(
@@ -260,7 +254,8 @@ rank_lookup: RankLookup) -> None:
         batch_size=2_000,
         seed=103,
         target_moe=0.0,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert sampled.sampler == "importance"
     assert sampled.simulations == 20_000
@@ -272,6 +267,7 @@ rank_lookup: RankLookup) -> None:
         sampled.equities, exact.equities, strict=True
     ):
         assert sampled_equity == pytest.approx(exact_equity, abs=0.02)
+
 
 def test_importance_statistics_account_for_unequal_sample_weights() -> None:
 

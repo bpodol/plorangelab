@@ -19,7 +19,9 @@ def convert_ordering(csv_path: Path, mode: int, output_dir: Path) -> None:
 
     # Each nonempty CSV cell contains one hand, in descending strength order.
     with csv_path.open(newline="", encoding="utf-8-sig") as file:
-        hands = [cell.strip() for row in csv.reader(file) for cell in row if cell.strip()]
+        hands = [
+            cell.strip() for row in csv.reader(file) for cell in row if cell.strip()
+        ]
 
     if not hands:
         raise ValueError("CSV contains no hands")
@@ -41,7 +43,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv_path", type=Path)
     parser.add_argument("--mode", type=int, choices=(4, 5), required=True)
-    parser.add_argument("--output-dir", type=Path, default=Path("src/plorangelab/resources/rating"))
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("src/plorangelab/resources/rating")
+    )
     args = parser.parse_args()
 
     convert_ordering(args.csv_path, args.mode, args.output_dir)

@@ -16,7 +16,9 @@ def expected_mask(*cards: str) -> int:
 
 
 def requirements(atom: str) -> list[tuple[int, int]]:
-    return [(int(req.mask), req.count) for req in encode_atomic_filter(atom, 5).requirements]
+    return [
+        (int(req.mask), req.count) for req in encode_atomic_filter(atom, 5).requirements
+    ]
 
 
 @pytest.mark.parametrize(
@@ -26,13 +28,36 @@ def requirements(atom: str) -> list[tuple[int, int]]:
         ("AA", [(expected_mask("Ac", "Ad", "Ah", "As"), 2)]),
         ("As", [(expected_mask("As"), 1)]),
         ("AsKs", [(expected_mask("As"), 1), (expected_mask("Ks"), 1)]),
-        ("AsKK", [(expected_mask("As"), 1), (expected_mask("Kc", "Kd", "Kh", "Ks"), 2)]),
+        (
+            "AsKK",
+            [(expected_mask("As"), 1), (expected_mask("Kc", "Kd", "Kh", "Ks"), 2)],
+        ),
         ("s", [(expected_mask(*(r + "s" for r in "23456789TJQKA")), 1)]),
         ("ss", [(expected_mask(*(r + "s" for r in "23456789TJQKA")), 2)]),
-        ("Ass", [(expected_mask("As"), 1), (expected_mask(*(r + "s" for r in "23456789TJQKA")), 1)]),
-        ("Asss", [(expected_mask("As"), 1), (expected_mask(*(r + "s" for r in "23456789TJQKA")), 2)]),
+        (
+            "Ass",
+            [
+                (expected_mask("As"), 1),
+                (expected_mask(*(r + "s" for r in "23456789TJQKA")), 1),
+            ],
+        ),
+        (
+            "Asss",
+            [
+                (expected_mask("As"), 1),
+                (expected_mask(*(r + "s" for r in "23456789TJQKA")), 2),
+            ],
+        ),
         ("KKK", [(expected_mask("Kc", "Kd", "Kh", "Ks"), 3)]),
-        ("AcAdAhAs", [(expected_mask("Ac"), 1), (expected_mask("Ad"), 1), (expected_mask("Ah"), 1), (expected_mask("As"), 1)]),
+        (
+            "AcAdAhAs",
+            [
+                (expected_mask("Ac"), 1),
+                (expected_mask("Ad"), 1),
+                (expected_mask("Ah"), 1),
+                (expected_mask("As"), 1),
+            ],
+        ),
     ],
 )
 def test_atomic_requirements(atom: str, expected: list[tuple[int, int]]) -> None:
@@ -40,7 +65,10 @@ def test_atomic_requirements(atom: str, expected: list[tuple[int, int]]) -> None
 
 
 def test_atomic_uses_uint64_masks() -> None:
-    assert all(isinstance(req.mask, np.uint64) for req in encode_atomic_filter("AsKK", 5).requirements)
+    assert all(
+        isinstance(req.mask, np.uint64)
+        for req in encode_atomic_filter("AsKK", 5).requirements
+    )
 
 
 def test_atomic_repeated_rank_merges_counts_in_first_appearance_order() -> None:
@@ -56,7 +84,9 @@ def test_atomic_allows_cross_requirement_overlap_for_later_evaluator() -> None:
     assert len(tree.requirements) == 2
 
 
-@pytest.mark.parametrize("atom", ["", "AsAs", "AAAAA", "AKQJT9", "A?", "a", "Xs", "AsAsK"])
+@pytest.mark.parametrize(
+    "atom", ["", "AsAs", "AAAAA", "AKQJT9", "A?", "a", "Xs", "AsAsK"]
+)
 def test_invalid_atomic_expressions(atom: str) -> None:
     with pytest.raises(ValueError):
         encode_atomic_filter(atom, 5)
@@ -67,7 +97,9 @@ def test_single_atom_returns_atomic_filter() -> None:
 
 
 def test_binary_not_is_and_not() -> None:
-    assert encode_filter("8!88", 5) == And(encode_atomic_filter("8", 5), Not(encode_atomic_filter("88", 5)))
+    assert encode_filter("8!88", 5) == And(
+        encode_atomic_filter("8", 5), Not(encode_atomic_filter("88", 5))
+    )
 
 
 def test_unary_not() -> None:
@@ -133,9 +165,25 @@ def test_binary_not_and_colon_same_precedence() -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "", "   ", "A|", ":A", "A:", "A!", "A||K", "A::K",
-        "(A|K", "A|K)", "()", "A:()", "A||", "A K", "A&K",
-        "A,B", "A:B #", "A:(K|)", "!(A",
+        "",
+        "   ",
+        "A|",
+        ":A",
+        "A:",
+        "A!",
+        "A||K",
+        "A::K",
+        "(A|K",
+        "A|K)",
+        "()",
+        "A:()",
+        "A||",
+        "A K",
+        "A&K",
+        "A,B",
+        "A:B #",
+        "A:(K|)",
+        "!(A",
     ],
 )
 def test_invalid_expressions(text: str) -> None:
@@ -171,9 +219,15 @@ def test_six_card_atoms_invalid_in_both_modes(mode: int) -> None:
         encode_atomic_filter("AKQJT9", mode)
 
 
-@pytest.mark.parametrize("expression", [
-    "AKQJT", "!AKQJT", "(A|AKQJT)", "A:(AKQJT|K)",
-])
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "AKQJT",
+        "!AKQJT",
+        "(A|AKQJT)",
+        "A:(AKQJT|K)",
+    ],
+)
 def test_parser_enforces_mode_inside_nested_expressions(expression: str) -> None:
     with pytest.raises(ValueError, match=r"PLO4 allows at most 4"):
         encode_filter(expression, 4)

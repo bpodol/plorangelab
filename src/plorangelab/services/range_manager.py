@@ -17,9 +17,9 @@ from .player_range_state import Board, PlayerRangeState
 
 class RangeManager:
     def __init__(
-            self, 
-            resources: EngineResources,
-        ) -> None:
+        self,
+        resources: EngineResources,
+    ) -> None:
         self.ratings = resources.ratings
         self.rank_lookup = resources.rank_lookup
         self.players: list[PlayerRangeState | None] = [None] * 6
@@ -62,7 +62,7 @@ class RangeManager:
             return
         new_board = Board.from_string(input_board)
         updated_players = self.players.copy()
-        
+
         for i, player in enumerate(self.players):
             if player is not None:
                 updated_player = player.clone()
@@ -134,27 +134,26 @@ class RangeManager:
         return self._get_player(player_index).get_filter(name, path)
 
     def calculate_equity(
-            self, 
-            mode: Mode, 
-            on_progress: Callable[[MonteCarloResult], None] | None = None, 
-            cancel_event: Event | None = None, 
-            target_moe: float = 0.001
-        ) -> tuple[list[int], EquityResult]:
-   
+        self,
+        mode: Mode,
+        on_progress: Callable[[MonteCarloResult], None] | None = None,
+        cancel_event: Event | None = None,
+        target_moe: float = 0.001,
+    ) -> tuple[list[int], EquityResult]:
+
         active_players = [player for player in self.players if player is not None]
         ranges = [player.current_range for player in active_players]
-       
-        equity_result = compute_equity(
-            players=ranges, 
-            mode=mode, 
-            board=self.board.cards if self.board is not None else None,
-            on_progress=on_progress, 
-            cancel_event=cancel_event, 
-            target_moe=target_moe,
-            rank_lookup=self.rank_lookup
-        )
-    
-        ids = [player.id for player in active_players]
-     
-        return ids, equity_result
 
+        equity_result = compute_equity(
+            players=ranges,
+            mode=mode,
+            board=self.board.cards if self.board is not None else None,
+            on_progress=on_progress,
+            cancel_event=cancel_event,
+            target_moe=target_moe,
+            rank_lookup=self.rank_lookup,
+        )
+
+        ids = [player.id for player in active_players]
+
+        return ids, equity_result

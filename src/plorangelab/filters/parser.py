@@ -152,12 +152,8 @@ class _Parser:
 
         self._skip_spaces()
         start = self.pos
-        while (
-            self.pos < len(self.text)
-            and (
-                self.text[self.pos] in RANKS_ENCODE
-                or self.text[self.pos] in SUITS_ENCODE
-            )
+        while self.pos < len(self.text) and (
+            self.text[self.pos] in RANKS_ENCODE or self.text[self.pos] in SUITS_ENCODE
         ):
             self.pos += 1
 

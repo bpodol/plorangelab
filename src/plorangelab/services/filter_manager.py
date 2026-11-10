@@ -104,7 +104,9 @@ class FilterManager:
         children, ancestors = self._parent(path)
         self._check_new_name(children, key)
 
-        selection = evaluate_filter(filter_expression, self.base_range.masks, mode=self.mode)
+        selection = evaluate_filter(
+            filter_expression, self.base_range.masks, mode=self.mode
+        )
         selection.setflags(write=False)
 
         # A zero-match filter can be saved, but cannot become active.
@@ -179,9 +181,7 @@ class FilterManager:
         if not active_only:
             return self.get_node(address).coverage
 
-        return self._coverage(
-            self.get_selection(address, active_only=True)
-        )
+        return self._coverage(self.get_selection(address, active_only=True))
 
     def _serialize_node(
         self,
@@ -208,18 +208,15 @@ class FilterManager:
             },
         }
 
-
     def get_tree(self) -> dict[str, dict[str, object]]:
         return {
             name: self._serialize_node(name, node)
             for name, node in self._filters.items()
         }
 
-
     def get_node_info(self, address: FilterAddress) -> dict[str, object]:
         node = self.get_node(address)
         return self._serialize_node(address.name, node)
-
 
     def clone(self) -> FilterManager:
         """Copy mutable configuration, share immutable masks and range arrays.
@@ -237,9 +234,7 @@ class FilterManager:
             raise ValueError("Filter and group names must be non-empty strings")
 
     @staticmethod
-    def _check_new_name(
-        children: dict[str, Filter | FilterGroup], name: str
-    ) -> None:
+    def _check_new_name(children: dict[str, Filter | FilterGroup], name: str) -> None:
         if name in children:
             raise ValueError(f"Filter or group {name!r} already exists")
 
@@ -252,7 +247,7 @@ class FilterManager:
             node = children.get(name)
             if not isinstance(node, FilterGroup):
                 # Invalid path, not an invalid argument type.
-                raise ValueError(f"Unknown group in path: {name!r}") # noqa: TRY004
+                raise ValueError(f"Unknown group in path: {name!r}")  # noqa: TRY004
             ancestors.append(node)
             children = node.filters
         return children, ancestors

@@ -260,7 +260,6 @@ def _encode_hands(
     )
 
 
-
 def _encode_percentage(notation: str, hands_rating: HandRating):
     pattern = r"(\d+(?:\.\d+)?)%(?:-(\d+(?:\.\d+)?)%)?"
 
@@ -273,7 +272,7 @@ def _encode_percentage(notation: str, hands_rating: HandRating):
     lower = float(match.group(2)) if match.group(2) else 0.0
 
     if not 0 <= lower < upper <= 100:
-        raise ValueError("Percentages must satisfy 0 <= lower < upper <= 100")    
+        raise ValueError("Percentages must satisfy 0 <= lower < upper <= 100")
 
     start = int(len(hands_rating.hands) * lower / 100)
     end = int(len(hands_rating.hands) * upper / 100)
@@ -329,12 +328,7 @@ def encode_range(hands: str, mode: Mode) -> EncodedRange:
     return encoded_range
 
 
-
-def encode_input(
-    input_str: str,
-    mode: Mode,
-    rating: HandRating
-) -> EncodedRange:
+def encode_input(input_str: str, mode: Mode, rating: HandRating) -> EncodedRange:
     input_str = input_str.strip()
 
     if "%" in input_str:

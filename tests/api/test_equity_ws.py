@@ -49,9 +49,12 @@ def test_websocket_progress_and_sparse_slot_results(
     session_id = create_session(client)
     add_player(client, session_id, 4, "KsKhTd9c")
     add_player(client, session_id, 0, "AsAhQcJd")
-    assert client.put(
-        f"/api/sessions/{session_id}/board", json={"board": "2c3d4h"}
-    ).status_code == 200
+    assert (
+        client.put(
+            f"/api/sessions/{session_id}/board", json={"board": "2c3d4h"}
+        ).status_code
+        == 200
+    )
 
     # Hold the worker after progress so the publisher cannot skip directly to
     # the terminal state. Progress events are intentionally coalesced.
@@ -99,14 +102,19 @@ def test_websocket_progress_and_sparse_slot_results(
     session = client.app.state.session_manager.sessions[session_id]
     assert kwargs["players"][0] is session.manager.players[0].current_range
     assert kwargs["players"][1] is session.manager.players[4].current_range
-    assert kwargs["rank_lookup"] is client.app.state.session_manager.resources.rank_lookup
+    assert (
+        kwargs["rank_lookup"] is client.app.state.session_manager.resources.rank_lookup
+    )
     assert kwargs["cancel_event"] is session.equity_job.cancel_event
 
 
 @pytest.mark.parametrize(
     ("failure", "expected_detail"),
     [
-        (SamplingExhaustedError("Sampling attempts exhausted"), "Sampling attempts exhausted"),
+        (
+            SamplingExhaustedError("Sampling attempts exhausted"),
+            "Sampling attempts exhausted",
+        ),
         (RuntimeError("internal failure"), "Internal calculation error"),
     ],
 )

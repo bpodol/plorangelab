@@ -14,7 +14,10 @@ from ._helpers import _configured_ranges, _guaranteed_split_players
 
 # Precision stopping and unweighted uncertainty
 
-def test_adaptive_monte_carlo_stops_when_target_is_reached(rank_lookup: RankLookup) -> None:
+
+def test_adaptive_monte_carlo_stops_when_target_is_reached(
+    rank_lookup: RankLookup,
+) -> None:
     players, board = _guaranteed_split_players()
 
     result = equity_module.compute_equity(
@@ -27,7 +30,8 @@ def test_adaptive_monte_carlo_stops_when_target_is_reached(rank_lookup: RankLook
         max_samples=12,
         batch_size=4,
         seed=13,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert result.method == "monte-carlo"
     assert result.stop_reason == "target_reached"
@@ -36,9 +40,10 @@ def test_adaptive_monte_carlo_stops_when_target_is_reached(rank_lookup: RankLook
     assert result.equities == [0.5, 0.5]
     assert result.margins_of_error == [0.0, 0.0]
 
+
 def test_adaptive_stops_at_max_samples_when_precision_is_not_reached(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
     sample_index = 0
 
@@ -46,16 +51,17 @@ rank_lookup: RankLookup) -> None:
         nonlocal sample_index
         count = int(kwargs["batch_size"])
         first_player_shares = np.asarray(
-            [1.0 if (sample_index + offset) % 2 == 0 else 0.0 for offset in range(count)]
+            [
+                1.0 if (sample_index + offset) % 2 == 0 else 0.0
+                for offset in range(count)
+            ]
         )
         sample_index += count
         first_sum = float(first_player_shares.sum())
         second_sum = float(count - first_sum)
         return (
             np.asarray([first_sum, second_sum]),
-            np.asarray(
-                [float(np.square(first_player_shares).sum()), second_sum]
-            ),
+            np.asarray([float(np.square(first_player_shares).sum()), second_sum]),
             count,
             count,
         )
@@ -71,13 +77,15 @@ rank_lookup: RankLookup) -> None:
         max_samples=5,
         batch_size=2,
         seed=13,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert result.stop_reason == "max_simulations"
     assert result.simulations == 5
     assert result.attempts == 5
     assert result.margins_of_error[0] > 0
     assert result.margins_of_error[1] > 0
+
 
 def test_equity_statistics_include_split_pots_and_sample_variance() -> None:
     # Observations are (1, 0), (0.5, 0.5), and (0, 1): one split pot.
@@ -96,9 +104,10 @@ def test_equity_statistics_include_split_pots_and_sample_variance() -> None:
 
 # Cancellation and partial estimates
 
+
 def test_adaptive_cancellation_before_execution_raises(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
     cancelled = Event()
     cancelled.set()
@@ -117,11 +126,13 @@ rank_lookup: RankLookup) -> None:
             max_samples=4,
             batch_size=2,
             cancel_event=cancelled,
-        rank_lookup=rank_lookup)
+            rank_lookup=rank_lookup,
+        )
+
 
 def test_adaptive_cancellation_between_batches_returns_partial_estimate(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
     cancelled = Event()
     calls = 0
@@ -148,7 +159,8 @@ rank_lookup: RankLookup) -> None:
         max_samples=8,
         batch_size=2,
         cancel_event=cancelled,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert calls == 1
     assert result.stop_reason == "cancelled"
@@ -158,9 +170,10 @@ rank_lookup: RankLookup) -> None:
 
 # Attempt and memory budgets
 
+
 def test_attempt_limit_returns_partial_adaptive_batch_without_losing_successes(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
     calls = 0
 
@@ -191,16 +204,18 @@ rank_lookup: RankLookup) -> None:
         min_samples=1,
         max_samples=4,
         batch_size=2,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert result.stop_reason == "attempt_limit"
     assert result.simulations == 1
     assert result.attempts == 10_000
     assert result.equities == [1.0, 0.0]
 
+
 def test_fixed_budget_memory_is_bounded_by_batch_size(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _configured_ranges(2, mode=4, multi_hand=False)
     original_batch = mc_module._run_monte_carlo_batch
     allocated_batch_sizes: list[int] = []
@@ -220,16 +235,18 @@ rank_lookup: RankLookup) -> None:
         seed=17,
         method="monte-carlo",
         batch_size=4,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert sum(allocated_batch_sizes) == 11
     assert allocated_batch_sizes == [4, 4, 3]
     assert max(allocated_batch_sizes) <= 4
     assert sum(result.equities) == pytest.approx(1.0)
 
+
 def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     players, board = _guaranteed_split_players()
     cancelled = Event()
     calls = 0
@@ -264,7 +281,8 @@ rank_lookup: RankLookup) -> None:
         max_samples=20_000,
         batch_size=10_000,
         cancel_event=cancelled,
-    rank_lookup=rank_lookup)
+        rank_lookup=rank_lookup,
+    )
 
     assert calls == 2
     assert result.stop_reason == "cancelled"

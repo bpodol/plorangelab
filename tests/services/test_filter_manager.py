@@ -10,14 +10,7 @@ from plorangelab.services.filter_manager import (
     FilterManager,
 )
 
-HANDS = (
-    "AsKsQhJc@100,"
-    "AdKhQcJd@50,"
-    "AcAhQhJc@25,"
-    "KsKhQhJh@80,"
-    "9s8s7s6s@90,"
-    "2c3d4h5s@60"
-)
+HANDS = "AsKsQhJc@100,AdKhQcJd@50,AcAhQhJc@25,KsKhQhJh@80,9s8s7s6s@90,2c3d4h5s@60"
 
 
 @pytest.fixture
@@ -126,9 +119,7 @@ def test_add_to_active_group_auto_activates_leaf(manager, base):
     manager.set_active(FilterAddress("g"), True)
     coverage = manager.create_filter("K", path=("g",))
 
-    assert coverage == pytest.approx(
-        manager.get_coverage(FilterAddress("K", ("g",)))
-    )
+    assert coverage == pytest.approx(manager.get_coverage(FilterAddress("K", ("g",))))
     assert manager.filtered_coverage > coverage
     assert manager.get_node(FilterAddress("K", ("g",))).active
     assert indices(base, manager.current_range) == {0, 1, 2, 3}
@@ -240,14 +231,10 @@ def test_group_coverage_excludes_overlap(manager, base):
     group = FilterAddress("g")
     assert manager.get_node(group).coverage == 0.0
     manager.create_filter("A", path=("g",))
-    expected_a = sum(map(float, base.weights[:3])) / sum(
-        map(float, base.weights)
-    )
+    expected_a = sum(map(float, base.weights[:3])) / sum(map(float, base.weights))
     assert manager.get_node(group).coverage == pytest.approx(expected_a)
     manager.create_filter("K", path=("g",))
-    expected_union = sum(map(float, base.weights[:4])) / sum(
-        map(float, base.weights)
-    )
+    expected_union = sum(map(float, base.weights[:4])) / sum(map(float, base.weights))
     assert manager.get_node(group).coverage == pytest.approx(expected_union)
     assert manager.get_coverage(group) == pytest.approx(expected_union)
 
@@ -312,10 +299,14 @@ def test_active_only_group_coverage_and_membership(manager: FilterManager) -> No
     manager.set_active(FilterAddress("K", ("premium",)), False)
     assert manager.get_node(address).coverage == pytest.approx(original_coverage)
     assert mask_indices(manager.get_selection(address, active_only=True)) == {0, 1, 2}
-    assert manager.get_coverage(address, active_only=True) < manager.get_coverage(address)
+    assert manager.get_coverage(address, active_only=True) < manager.get_coverage(
+        address
+    )
 
 
-def test_delete_active_root_restores_base(manager: FilterManager, base: EncodedRange) -> None:
+def test_delete_active_root_restores_base(
+    manager: FilterManager, base: EncodedRange
+) -> None:
     manager.create_filter("A")
     manager.set_active(FilterAddress("A"), True)
     manager.delete(FilterAddress("A"))
@@ -352,41 +343,25 @@ def test_nested_group_coverage_updates_on_add_and_delete(manager, base):
 
     # Add a filter two levels deep.
     manager.create_filter("A", path=("outer", "inner"))
-    assert manager.get_node(inner).coverage == pytest.approx(
-        expected(0, 1, 2)
-    )
-    assert manager.get_node(outer).coverage == pytest.approx(
-        expected(0, 1, 2)
-    )
+    assert manager.get_node(inner).coverage == pytest.approx(expected(0, 1, 2))
+    assert manager.get_node(outer).coverage == pytest.approx(expected(0, 1, 2))
 
     # Add an overlapping sibling filter.
     manager.create_filter("K", path=("outer",))
-    assert manager.get_node(inner).coverage == pytest.approx(
-        expected(0, 1, 2)
-    )
-    assert manager.get_node(outer).coverage == pytest.approx(
-        expected(0, 1, 2, 3)
-    )
+    assert manager.get_node(inner).coverage == pytest.approx(expected(0, 1, 2))
+    assert manager.get_node(outer).coverage == pytest.approx(expected(0, 1, 2, 3))
 
     # Remove the nested filter.
     manager.delete(FilterAddress("A", ("outer", "inner")))
     assert manager.get_node(inner).coverage == 0.0
-    assert manager.get_node(outer).coverage == pytest.approx(
-        expected(0, 1, 3)
-    )
+    assert manager.get_node(outer).coverage == pytest.approx(expected(0, 1, 3))
 
     # Add another nested filter and delete its entire group.
     manager.create_filter("ss", path=("outer", "inner"))
-    assert manager.get_node(inner).coverage == pytest.approx(
-        expected(0, 4)
-    )
-    assert manager.get_node(outer).coverage == pytest.approx(
-        expected(0, 1, 3, 4)
-    )
+    assert manager.get_node(inner).coverage == pytest.approx(expected(0, 4))
+    assert manager.get_node(outer).coverage == pytest.approx(expected(0, 1, 3, 4))
     manager.delete(inner)
-    assert manager.get_node(outer).coverage == pytest.approx(
-        expected(0, 1, 3)
-    )
+    assert manager.get_node(outer).coverage == pytest.approx(expected(0, 1, 3))
 
 
 def test_filter_tree_serialization(manager):
@@ -421,7 +396,5 @@ def test_filter_tree_serialization(manager):
     leaf["active"] = True
     group["filters"].clear()
 
-    assert not manager.get_node(
-        FilterAddress("aces", ("g",))
-    ).active
+    assert not manager.get_node(FilterAddress("aces", ("g",))).active
     assert "aces" in manager.get_tree()["g"]["filters"]

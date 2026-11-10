@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, HTTPException
 
 from ..dependencies import (
@@ -26,7 +25,7 @@ def add_range(player_id: PlayerId, request: RangeRequest, session: SessionDep):
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        added_hands = (session.manager.players[player_id].current_range.hands)
+        added_hands = session.manager.players[player_id].current_range.hands
 
         return RangeResponse(hands=len(added_hands))
 

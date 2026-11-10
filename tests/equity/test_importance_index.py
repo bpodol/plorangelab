@@ -21,6 +21,7 @@ from ._helpers import _weighted_players
 
 # Deterministic index test data
 
+
 def _candidate_masks(count: int, mode: int = 5) -> np.ndarray:
     """Generate distinct, reproducible hands spanning different card masks."""
     rng = random.Random(2026 + mode)
@@ -30,12 +31,10 @@ def _candidate_masks(count: int, mode: int = 5) -> np.ndarray:
         seen.add(tuple(sorted(rng.sample(range(52), mode))))
 
     return np.asarray(
-        [
-            build_mask(np.asarray(hand, dtype=np.uint8))
-            for hand in sorted(seen)
-        ],
+        [build_mask(np.asarray(hand, dtype=np.uint8)) for hand in sorted(seen)],
         dtype=np.uint64,
     )
+
 
 def _indexed_selector(
     masks: np.ndarray,
@@ -61,6 +60,7 @@ def _indexed_selector(
 
 # Lookup table boundary cases
 
+
 @pytest.mark.parametrize("count", [1, 7, 8, 9, 63, 64, 65, 129])
 def test_indexed_mass_and_selection_at_bit_boundaries(count: int) -> None:
     masks = _candidate_masks(count)
@@ -75,20 +75,17 @@ def test_indexed_mass_and_selection_at_bit_boundaries(count: int) -> None:
     )
 
     for occupied in occupied_masks:
-        index, mass = _indexed_selector(
-            masks, probabilities, occupied
-        )
+        index, mass = _indexed_selector(masks, probabilities, occupied)
         legal = (masks & occupied) == 0
 
-        assert mass == pytest.approx(
-            probabilities[legal].sum(), abs=1e-13
-        )
+        assert mass == pytest.approx(probabilities[legal].sum(), abs=1e-13)
 
         if legal.any():
             assert 0 <= index < count
             assert legal[index]
         else:
             assert (index, mass) == (-1, 0.0)
+
 
 def test_indexed_selector_matches_conditional_weighted_frequencies() -> None:
     masks = _candidate_masks(17)
@@ -101,9 +98,7 @@ def test_indexed_selector_matches_conditional_weighted_frequencies() -> None:
 
     assert legal.sum() >= 2
 
-    membership, lookup = _index_one_range(
-        masks, probabilities
-    )
+    membership, lookup = _index_one_range(masks, probabilities)
     blocked = np.empty(membership.shape[1], dtype=np.uint64)
     legal_blocks = np.empty(lookup.shape[0], dtype=np.uint8)
 
@@ -130,9 +125,8 @@ def test_indexed_selector_matches_conditional_weighted_frequencies() -> None:
     observed = counts[legal] / trials
     expected = probabilities[legal] / expected_mass
 
-    np.testing.assert_allclose(
-        observed, expected, atol=0.015, rtol=0
-    )
+    np.testing.assert_allclose(observed, expected, atol=0.015, rtol=0)
+
 
 def test_indexed_selector_handles_no_compatible_hands() -> None:
     masks = _candidate_masks(9)
@@ -140,35 +134,29 @@ def test_indexed_selector_handles_no_compatible_hands() -> None:
     occupied = np.uint64((1 << 52) - 1)
 
     for seed in (0, 7, 29):
-        assert _indexed_selector(
-            masks, probabilities, occupied, seed=seed
-        ) == (-1, 0.0)
+        assert _indexed_selector(masks, probabilities, occupied, seed=seed) == (-1, 0.0)
 
 
 # Index parity and fallback
 
+
 @pytest.mark.parametrize("mode", [4, 5])
 def test_indexed_batch_matches_original_scan_with_same_seed(
-    mode: int,
-rank_lookup: RankLookup) -> None:
+    mode: int, rank_lookup: RankLookup
+) -> None:
     players = _weighted_players(mode)
     board = encode_board("2c3d5h7s9c")
 
     hands = List([player.hands for player in players])
     masks = List([player.masks for player in players])
 
-    probabilities = List([
-        p.weights.astype(np.float64) / p.weights.sum()
-        for p in players
-    ])
-
-    cumulative = List([
-        np.cumsum(p) for p in probabilities
-    ])
-
-    membership, lookup, enabled = _build_compatibility_index(
-        masks, probabilities
+    probabilities = List(
+        [p.weights.astype(np.float64) / p.weights.sum() for p in players]
     )
+
+    cumulative = List([np.cumsum(p) for p in probabilities])
+
+    membership, lookup, enabled = _build_compatibility_index(masks, probabilities)
     assert enabled
 
     args = (
@@ -206,28 +194,29 @@ rank_lookup: RankLookup) -> None:
     assert indexed[-2:] == scan[-2:]
 
     for actual, expected in zip(indexed[:-2], scan[:-2]):
-        np.testing.assert_allclose(
-            actual, expected, rtol=1e-10, atol=1e-10
-        )
+        np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-10)
+
 
 def test_index_guard_falls_back_above_threshold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(importance_sampling, "_INDEX_MAX_HANDS", 8)
 
-    probabilities = List([
-        np.full(8, 1 / 8, dtype=np.float64),
-        np.full(9, 1 / 9, dtype=np.float64),
-    ])
-
-    masks = List([
-        _candidate_masks(8),
-        _candidate_masks(9),
-    ])
-
-    membership, lookup, enabled = _build_compatibility_index(
-        masks, probabilities
+    probabilities = List(
+        [
+            np.full(8, 1 / 8, dtype=np.float64),
+            np.full(9, 1 / 9, dtype=np.float64),
+        ]
     )
+
+    masks = List(
+        [
+            _candidate_masks(8),
+            _candidate_masks(9),
+        ]
+    )
+
+    membership, lookup, enabled = _build_compatibility_index(masks, probabilities)
 
     assert not enabled
 
@@ -237,9 +226,10 @@ def test_index_guard_falls_back_above_threshold(
     for arr in lookup:
         assert arr.shape == (0, 0)
 
+
 def test_scan_fallback_matches_indexed_public_results(
-    monkeypatch: pytest.MonkeyPatch,
-rank_lookup: RankLookup) -> None:
+    monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
+) -> None:
     monkeypatch.setattr(
         api_module,
         "_probe_collision_acceptance",
@@ -266,11 +256,7 @@ rank_lookup: RankLookup) -> None:
     assert indexed_result.sampler == "importance"
     assert fallback_result.sampler == "importance"
 
-    assert (
-        indexed_result.simulations
-        == fallback_result.simulations
-        == 2_000
-    )
+    assert indexed_result.simulations == fallback_result.simulations == 2_000
 
     for indexed_equity, fallback_equity in zip(
         indexed_result.equities,

@@ -6,21 +6,23 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-#0-high card
-#1-one pair
-#2-two pair
-#3-three of a kind
-#4-straight
-#5-flush
-#6-full house
-#7-four of a kind
-#8-straight flush
+# 0-high card
+# 1-one pair
+# 2-two pair
+# 3-three of a kind
+# 4-straight
+# 5-flush
+# 6-full house
+# 7-four of a kind
+# 8-straight flush
 CombinationStrength = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
+
 
 @dataclass
 class RankLookup:
     rank_table: NDArray[np.uint32]
     binomial_table: NDArray[np.uint32]
+
 
 @njit(cache=True)
 def _numba_calculate_rank(
@@ -32,7 +34,10 @@ def _numba_calculate_rank(
     r5: int = 0,
 ) -> int:
     """Encode a category and five rank values as a base-13 integer."""
-    return (((((c * 13 + int(r1)) * 13 + int(r2)) * 13 + int(r3)) * 13 + int(r4)) * 13 + int(r5))
+    return (
+        (((c * 13 + int(r1)) * 13 + int(r2)) * 13 + int(r3)) * 13 + int(r4)
+    ) * 13 + int(r5)
+
 
 @njit(cache=True)
 def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
@@ -49,7 +54,7 @@ def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
     # card >> 2 -> extracts the rank by shifting right 2 bits (equivalent to card // 4).
     #
     # These bitwise operations avoid division and modulo
- 
+
     r0 = int(cards[0]) >> 2
     r1 = int(cards[1]) >> 2
     r2 = int(cards[2]) >> 2
@@ -65,7 +70,7 @@ def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
         | (int(r1 == r2) << 1)
         | (int(r2 == r3) << 2)
         | (int(r3 == r4) << 3)
-        )
+    )
 
     if pattern == 0b0000:
         suit = cards[0] & 3
@@ -76,15 +81,8 @@ def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
             and (cards[4] & 3) == suit
         )
 
-        is_straight = (
-            r0 == r1 + 1
-            and r1 == r2 + 1
-            and r2 == r3 + 1
-            and r3 == r4 + 1
-        )
-        is_wheel = (
-            r0 == 12 and r1 == 3 and r2 == 2 and r3 == 1 and r4 == 0
-        )
+        is_straight = r0 == r1 + 1 and r1 == r2 + 1 and r2 == r3 + 1 and r3 == r4 + 1
+        is_wheel = r0 == 12 and r1 == 3 and r2 == 2 and r3 == 1 and r4 == 0
         if is_wheel:
             is_straight = True
 
@@ -93,36 +91,29 @@ def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
             return _numba_calculate_rank(c=8, r1=straight_high)
 
         if is_flush:
-                return _numba_calculate_rank(
-                    c=5, 
-                    r1=r0, 
-                    r2=r1, 
-                    r3=r2,
-                    r4=r3,
-                    r5=r4
-                )
+            return _numba_calculate_rank(c=5, r1=r0, r2=r1, r3=r2, r4=r3, r5=r4)
 
         if is_straight:
             straight_high = 3 if r0 == 12 and r1 == 3 else r0
             return _numba_calculate_rank(c=4, r1=straight_high)
-        
+
         # HIGH CARD
         return _numba_calculate_rank(c=0, r1=r0, r2=r1, r3=r2, r4=r3, r5=r4)
-    
+
     # FOUR OF A KIND
     if pattern == 0b0111:  # AAAAK
         return _numba_calculate_rank(7, r0, r4)
 
     if pattern == 0b1110:  # AKKKK
         return _numba_calculate_rank(7, r1, r0)
-    
+
     # FULL HOUSE
     if pattern == 0b1011:  # AAAKK
         return _numba_calculate_rank(6, r0, r3)
 
     if pattern == 0b1101:  # AAKKK
         return _numba_calculate_rank(6, r2, r0)
- 
+
     # THREE OF A KIND
     if pattern == 0b0011:  # AAAKQ
         return _numba_calculate_rank(3, r0, r3, r4)
@@ -157,7 +148,6 @@ def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
         return _numba_calculate_rank(1, r3, r0, r1, r2)
 
     raise ValueError("Invalid five-card rank pattern")
-    
 
 
 @njit(cache=True)
@@ -216,12 +206,11 @@ def build_lookup_tables() -> RankLookup:
     return RankLookup(rank_table=rank_table, binomial_table=binomial)
 
 
-
 @njit(inline="always")
 def rank_combination_lookup(
     cards: NDArray[np.uint8],
     rank_table: NDArray[np.uint32],
-    binomial_table: NDArray[np.uint32]
+    binomial_table: NDArray[np.uint32],
 ) -> np.uint32:
     """Retrieve the precomputed strength of a five-card combination.
 

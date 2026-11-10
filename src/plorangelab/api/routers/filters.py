@@ -44,7 +44,8 @@ def create_filter(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         return FilterCoverageResponse(coverage=coverage)
-    
+
+
 @router.post("/groups", status_code=201, response_model=GroupResponse)
 def create_group(
     player_id: PlayerId,
@@ -63,7 +64,7 @@ def create_group(
 
         return GroupResponse(name=request.name, path=request.path)
 
-    
+
 @router.patch("/groups/{name}", response_model=FilterCoverageResponse)
 @router.patch("/filters/{name}", response_model=FilterCoverageResponse)
 def set_filter_active(
@@ -87,7 +88,7 @@ def set_filter_active(
         return FilterCoverageResponse(coverage=coverage)
 
 
-@router.post("/filters/clear",  response_model=FilterCoverageResponse)
+@router.post("/filters/clear", response_model=FilterCoverageResponse)
 def clear_filters(player_id: PlayerId, session: SessionDep):
     with editable_session(session):
         try:
@@ -115,7 +116,9 @@ def delete_filter_or_group(
         return FilterCoverageResponse(coverage=coverage)
 
 
-@router.get("/filters", response_model=dict[str, FilterInfoResponse | FilterGroupInfoResponse])
+@router.get(
+    "/filters", response_model=dict[str, FilterInfoResponse | FilterGroupInfoResponse]
+)
 def get_filters(player_id: PlayerId, session: SessionDep):
     with locked_session(session):
         try:
@@ -124,8 +127,12 @@ def get_filters(player_id: PlayerId, session: SessionDep):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/filters/{name}", response_model=FilterInfoResponse | FilterGroupInfoResponse)
-@router.get("/groups/{name}", response_model=FilterInfoResponse | FilterGroupInfoResponse)
+@router.get(
+    "/filters/{name}", response_model=FilterInfoResponse | FilterGroupInfoResponse
+)
+@router.get(
+    "/groups/{name}", response_model=FilterInfoResponse | FilterGroupInfoResponse
+)
 def get_filter(
     player_id: PlayerId,
     name: str,

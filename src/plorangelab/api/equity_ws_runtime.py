@@ -33,8 +33,12 @@ async def submit_equity_calculation(
             if session.is_job_running():
                 return None, "Calculation already running"
 
-            players = [player for player in session.manager.players if player is not None]
-            if len(players) < 2 or any(player.mode != request.mode for player in players):
+            players = [
+                player for player in session.manager.players if player is not None
+            ]
+            if len(players) < 2 or any(
+                player.mode != request.mode for player in players
+            ):
                 return None, "Invalid player count or equity mode"
 
             job = start_equity_job(
@@ -48,6 +52,7 @@ async def submit_equity_calculation(
             return job, None
 
     return await asyncio.to_thread(submit)
+
 
 def get_equity_job(session: Session) -> EquityJob | None:
     with session.lock:
@@ -89,12 +94,12 @@ def build_final_message(job: EquityJob) -> dict:
         return {
             "type": "cancelled",
             "job_id": job.job_id,
-        } 
+        }
 
     except Exception:
         logger.exception("Equity calculation failed")
         message = {
-            "type": "error", 
+            "type": "error",
             "job_id": job.job_id,
             "detail": "Internal calculation error",
         }
@@ -144,21 +149,22 @@ async def publish_equity_updates(
 
                 last_progress = progress
 
-                await send({
-                    "type": "progress",
-                    "job_id": job.job_id,
-                    "simulations": progress.simulations,
-                    "margins_of_error": progress.margins_of_error,
-                })
+                await send(
+                    {
+                        "type": "progress",
+                        "job_id": job.job_id,
+                        "simulations": progress.simulations,
+                        "margins_of_error": progress.margins_of_error,
+                    }
+                )
 
             await changed.wait()
 
-    except (WebSocketDisconnect, OSError):
+    except WebSocketDisconnect, OSError:
         pass
 
     finally:
         job.unsubscribe(wake)
-
 
 
 def cancel_equity_calculation(session: Session) -> str | None:

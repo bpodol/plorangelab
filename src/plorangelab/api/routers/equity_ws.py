@@ -1,4 +1,3 @@
-
 """WebSocket endpoint for live equity calculations."""
 
 import asyncio
@@ -24,7 +23,9 @@ router = APIRouter()
 @router.websocket("/api/sessions/{session_id}/equity/ws")
 async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
     session_manager: SessionManager = websocket.app.state.session_manager
-    session: Session | None = await asyncio.to_thread(session_manager.get_session, session_id)
+    session: Session | None = await asyncio.to_thread(
+        session_manager.get_session, session_id
+    )
 
     if session is None:
         await websocket.close(code=1008)
@@ -48,9 +49,7 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
             with suppress(asyncio.CancelledError):
                 await publisher_task
 
-        publisher_task = asyncio.create_task(
-            publish_equity_updates(job, send)
-        )
+        publisher_task = asyncio.create_task(publish_equity_updates(job, send))
 
     try:
         while True:
@@ -66,32 +65,40 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
                 return
 
             if not isinstance(message, dict):
-                await send({
-                    "type": "error",
-                    "detail": "Expected a JSON object",
-                })
+                await send(
+                    {
+                        "type": "error",
+                        "detail": "Expected a JSON object",
+                    }
+                )
                 continue
 
             command = message.get("type")
 
             if command == "start":
                 try:
-                    request = EquityRequest.model_validate({
-                        "mode": message.get("mode"),
-                        "target_moe": message.get("target_moe", 0.002),
-                    })
+                    request = EquityRequest.model_validate(
+                        {
+                            "mode": message.get("mode"),
+                            "target_moe": message.get("target_moe", 0.002),
+                        }
+                    )
                 except ValidationError as exc:
-                    await send({
-                        "type": "error",
-                        "detail": str(exc),
-                    })
+                    await send(
+                        {
+                            "type": "error",
+                            "detail": str(exc),
+                        }
+                    )
                     continue
 
                 if publisher_task is not None and not publisher_task.done():
-                    await send({
-                        "type": "error",
-                        "detail": "Previous result still being delivered",
-                    })
+                    await send(
+                        {
+                            "type": "error",
+                            "detail": "Previous result still being delivered",
+                        }
+                    )
                     continue
 
                 job, error = await submit_equity_calculation(
@@ -101,68 +108,78 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
                 )
 
                 if error is not None:
-                    await send({
-                        "type": "error",
-                        "detail": error,
-                    })
+                    await send(
+                        {
+                            "type": "error",
+                            "detail": error,
+                        }
+                    )
                     continue
 
                 assert job is not None
 
-                await send({
-                    "type": "started",
-                    "job_id": job.job_id,
-                })
-
-                await replace_publisher(job)
-                
-            elif command == "resume":
-                job = await asyncio.to_thread(
-                    get_equity_job, session
+                await send(
+                    {
+                        "type": "started",
+                        "job_id": job.job_id,
+                    }
                 )
 
+                await replace_publisher(job)
+
+            elif command == "resume":
+                job = await asyncio.to_thread(get_equity_job, session)
+
                 if job is None:
-                    await send({
-                        "type": "error",
-                        "detail": "No calculation to resume",
-                    })
+                    await send(
+                        {
+                            "type": "error",
+                            "detail": "No calculation to resume",
+                        }
+                    )
                     continue
 
                 requested_id = message.get("job_id")
 
                 if requested_id is not None and requested_id != job.job_id:
-                    await send({
-                        "type": "error",
-                        "detail": "Job ID does not match",
-                    })
+                    await send(
+                        {
+                            "type": "error",
+                            "detail": "Job ID does not match",
+                        }
+                    )
                     continue
 
-                await send({
-                    "type": "resumed",
-                    "job_id": job.job_id,
-                    "status": job.get_status(),
-                })
+                await send(
+                    {
+                        "type": "resumed",
+                        "job_id": job.job_id,
+                        "status": job.get_status(),
+                    }
+                )
 
                 await replace_publisher(job)
 
             elif command == "cancel":
-                error = await asyncio.to_thread(
-                    cancel_equity_calculation, session
-                )
+                error = await asyncio.to_thread(cancel_equity_calculation, session)
 
                 if error is not None:
-                    await send({
-                        "type": "error",
-                        "detail": error,
-                    })
+                    await send(
+                        {
+                            "type": "error",
+                            "detail": error,
+                        }
+                    )
                 else:
                     await send({"type": "cancel_requested"})
 
             else:
-                await send({
-                    "type": "error",
-                    "detail": "Unknown command",
-                })
+                await send(
+                    {
+                        "type": "error",
+                        "detail": "Unknown command",
+                    }
+                )
 
     except WebSocketDisconnect:
         pass
