@@ -153,15 +153,30 @@ def test_zero_match_filter_stays_inactive(manager, base):
 def test_clear_retains_definitions_and_deactivates_nested_children(manager, base):
     manager.create_group("g")
     manager.create_filter("A", path=("g",))
-    manager.set_active(FilterAddress("g"), True)
+
+    group = FilterAddress("g")
+    leaf = FilterAddress("A", ("g",))
+
+    manager.set_active(group, True)
+
+    original_coverage = manager.get_node(group).coverage
+
     manager.clear_all_filters()
+
     assert manager.filtered_coverage == 1.0
     assert manager.active_selection is None
     assert manager.current_range is base
-    assert not manager.get_node(FilterAddress("g")).active
-    assert not manager.get_node(FilterAddress("A", ("g",))).active
-    manager.set_active(FilterAddress("g"), True)
+
+    # Clearing deactivates filters without changing their membership coverage.
+    assert not manager.get_node(group).active
+    assert not manager.get_node(leaf).active
+    assert manager.get_node(group).coverage == pytest.approx(original_coverage)
+
+    # Saved definitions must remain usable.
+    manager.set_active(group, True)
+
     assert indices(base, manager.current_range) == {0, 1, 2}
+    assert manager.get_node(group).coverage == pytest.approx(original_coverage)
 
 
 def test_delete_group_removes_entire_subtree(manager, base):
@@ -194,22 +209,47 @@ def test_clone_isolates_tree_but_reuses_immutable_arrays(manager, base):
     manager.create_group("g")
     manager.create_filter("A", path=("g",))
     manager.set_active(FilterAddress("g"), True)
+
     cloned = manager.clone()
+
     node = FilterAddress("A", ("g",))
+    group = FilterAddress("g")
+
+    original_coverage = manager.get_node(group).coverage
+
     assert cloned.get_node(node) is not manager.get_node(node)
     assert cloned.get_node(node).selection is manager.get_node(node).selection
     assert cloned.current_range is manager.current_range
+    assert cloned.get_node(group).coverage == pytest.approx(original_coverage)
+
     cloned.set_active(node, False)
+
     assert cloned.current_range is base
     assert indices(base, manager.current_range) == {0, 1, 2}
+    assert cloned.get_node(group).coverage == pytest.approx(original_coverage)
+
+    # Modifying the clone's tree must not affect the original.
+    cloned.create_filter("K", path=("g",))
+
+    assert cloned.get_node(group).coverage > original_coverage
+    assert manager.get_node(group).coverage == pytest.approx(original_coverage)
 
 
 def test_group_coverage_excludes_overlap(manager, base):
     manager.create_group("g")
+    group = FilterAddress("g")
+    assert manager.get_node(group).coverage == 0.0
     manager.create_filter("A", path=("g",))
+    expected_a = sum(map(float, base.weights[:3])) / sum(
+        map(float, base.weights)
+    )
+    assert manager.get_node(group).coverage == pytest.approx(expected_a)
     manager.create_filter("K", path=("g",))
-    expected = sum(map(float, base.weights[:4])) / sum(map(float, base.weights))
-    assert manager.get_coverage(FilterAddress("g")) == pytest.approx(expected)
+    expected_union = sum(map(float, base.weights[:4])) / sum(
+        map(float, base.weights)
+    )
+    assert manager.get_node(group).coverage == pytest.approx(expected_union)
+    assert manager.get_coverage(group) == pytest.approx(expected_union)
 
 
 def test_full_nested_expression(manager, base):
@@ -265,10 +305,12 @@ def test_active_only_group_coverage_and_membership(manager: FilterManager) -> No
     manager.create_filter("A", path=("premium",))
     manager.create_filter("K", path=("premium",))
     address = FilterAddress("premium")
+    original_coverage = manager.get_node(address).coverage
     assert mask_indices(manager.get_selection(address)) == {0, 1, 2, 3}
     assert mask_indices(manager.get_selection(address, active_only=True)) == set()
     manager.set_active(address, True)
     manager.set_active(FilterAddress("K", ("premium",)), False)
+    assert manager.get_node(address).coverage == pytest.approx(original_coverage)
     assert mask_indices(manager.get_selection(address, active_only=True)) == {0, 1, 2}
     assert manager.get_coverage(address, active_only=True) < manager.get_coverage(address)
 
@@ -292,3 +334,94 @@ def test_root_filter_activation_is_idempotent(manager: FilterManager) -> None:
     manager.set_active(address, False)
     assert manager.active_selection is None
 
+
+def test_nested_group_coverage_updates_on_add_and_delete(manager, base):
+    total = sum(map(float, base.weights))
+
+    def expected(*indices: int) -> float:
+        return sum(float(base.weights[i]) for i in indices) / total
+
+    manager.create_group("outer")
+    manager.create_group("inner", path=("outer",))
+
+    outer = FilterAddress("outer")
+    inner = FilterAddress("inner", ("outer",))
+
+    assert manager.get_node(outer).coverage == 0.0
+    assert manager.get_node(inner).coverage == 0.0
+
+    # Add a filter two levels deep.
+    manager.create_filter("A", path=("outer", "inner"))
+    assert manager.get_node(inner).coverage == pytest.approx(
+        expected(0, 1, 2)
+    )
+    assert manager.get_node(outer).coverage == pytest.approx(
+        expected(0, 1, 2)
+    )
+
+    # Add an overlapping sibling filter.
+    manager.create_filter("K", path=("outer",))
+    assert manager.get_node(inner).coverage == pytest.approx(
+        expected(0, 1, 2)
+    )
+    assert manager.get_node(outer).coverage == pytest.approx(
+        expected(0, 1, 2, 3)
+    )
+
+    # Remove the nested filter.
+    manager.delete(FilterAddress("A", ("outer", "inner")))
+    assert manager.get_node(inner).coverage == 0.0
+    assert manager.get_node(outer).coverage == pytest.approx(
+        expected(0, 1, 3)
+    )
+
+    # Add another nested filter and delete its entire group.
+    manager.create_filter("ss", path=("outer", "inner"))
+    assert manager.get_node(inner).coverage == pytest.approx(
+        expected(0, 4)
+    )
+    assert manager.get_node(outer).coverage == pytest.approx(
+        expected(0, 1, 3, 4)
+    )
+    manager.delete(inner)
+    assert manager.get_node(outer).coverage == pytest.approx(
+        expected(0, 1, 3)
+    )
+
+
+def test_filter_tree_serialization(manager):
+    manager.create_group("g")
+    manager.create_filter("A", name="aces", path=("g",))
+    manager.create_filter("K", name="kings")
+
+    tree = manager.get_tree()
+
+    assert set(tree) == {"g", "kings"}
+
+    group = tree["g"]
+    assert group["type"] == "group"
+    assert group["name"] == "g"
+    assert group["active"] is False
+    assert group["coverage"] == pytest.approx(
+        manager.get_node(FilterAddress("g")).coverage
+    )
+
+    leaf = group["filters"]["aces"]
+
+    assert leaf["type"] == "filter"
+    assert leaf["name"] == "aces"
+    assert leaf["expression"] == "A"
+    assert leaf["active"] is False
+    assert isinstance(leaf["coverage"], float)
+
+    assert manager.get_node_info(FilterAddress("g")) == group
+    assert manager.get_node_info(FilterAddress("kings")) == tree["kings"]
+
+    # Returned dictionaries must not expose mutable internal objects.
+    leaf["active"] = True
+    group["filters"].clear()
+
+    assert not manager.get_node(
+        FilterAddress("aces", ("g",))
+    ).active
+    assert "aces" in manager.get_tree()["g"]["filters"]

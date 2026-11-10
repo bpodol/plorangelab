@@ -38,6 +38,7 @@ class FilterGroup:
 
     name: str
     filters: dict[str, Filter | FilterGroup] = field(default_factory=dict)
+    coverage: float = 0.0
     active: bool = False
 
 
@@ -110,7 +111,7 @@ class FilterManager:
         active = bool(ancestors and ancestors[-1].active and selection.any())
         coverage = self._coverage(selection)
         children[key] = Filter(filter_expression, selection, coverage, active)
-        self._refresh()
+        self._refresh(update_group_coverage=bool(ancestors))
         return coverage
 
     def create_group(self, name: str, path: tuple[str, ...] = ()) -> None:
@@ -122,13 +123,13 @@ class FilterManager:
         children[name] = FilterGroup(name=name)
 
     def delete(self, address: FilterAddress) -> None:
-        children, _ = self._parent(address.path)
+        children, ancestors = self._parent(address.path)
         if address.name not in children:
             raise ValueError(f"Unknown filter or group: {address!r}")
         del children[address.name]
         # No separate address list exists, so deleting a group cannot leave
         # dangling references to its descendants.
-        self._refresh()
+        self._refresh(update_group_coverage=bool(ancestors))
 
     def set_active(self, address: FilterAddress, value: bool) -> None:
         node, ancestors = self._find(address)
@@ -175,7 +176,50 @@ class FilterManager:
         self, address: FilterAddress, *, active_only: bool = False
     ) -> float:
         """Weighted coverage for a filter or a group, relative to its street."""
-        return self._coverage(self.get_selection(address, active_only=active_only))
+        if not active_only:
+            return self.get_node(address).coverage
+
+        return self._coverage(
+            self.get_selection(address, active_only=True)
+        )
+
+    def _serialize_node(
+        self,
+        name: str,
+        node: Filter | FilterGroup,
+    ) -> dict[str, object]:
+        if isinstance(node, Filter):
+            return {
+                "type": "filter",
+                "name": name,
+                "expression": node.expression,
+                "coverage": node.coverage,
+                "active": node.active,
+            }
+
+        return {
+            "type": "group",
+            "name": name,
+            "coverage": node.coverage,
+            "active": node.active,
+            "filters": {
+                child_name: self._serialize_node(child_name, child)
+                for child_name, child in node.filters.items()
+            },
+        }
+
+
+    def get_tree(self) -> dict[str, dict[str, object]]:
+        return {
+            name: self._serialize_node(name, node)
+            for name, node in self._filters.items()
+        }
+
+
+    def get_node_info(self, address: FilterAddress) -> dict[str, object]:
+        node = self.get_node(address)
+        return self._serialize_node(address.name, node)
+
 
     def clone(self) -> FilterManager:
         """Copy mutable configuration, share immutable masks and range arrays.
@@ -250,14 +294,43 @@ class FilterManager:
         self._union_into(result, node, active_only=False)
         return result
 
+    def _collect_membership_and_active(
+        self,
+        node: Filter | FilterGroup,
+        active_selection: NDArray[np.bool_] | None,
+    ) -> NDArray[np.bool_]:
+        if isinstance(node, Filter):
+            if node.active and active_selection is not None:
+                active_selection |= node.selection
+            return node.selection
+
+        membership = np.zeros(len(self.base_range.masks), dtype=np.bool_)
+
+        # An inactive group blocks its entire subtree.
+        if not node.active:
+            active_selection = None
+
+        for child in node.filters.values():
+            membership |= self._collect_membership_and_active(
+                child,
+                active_selection,
+            )
+
+        node.coverage = self._coverage(membership)
+        return membership
+
     def _coverage(self, selection: NDArray[np.bool_]) -> float:
         numerator = np.sum(self.base_range.weights[selection], dtype=np.float64)
         return float(numerator / self.base_weights_sum)
 
-    def _refresh(self) -> None:
+    def _refresh(self, *, update_group_coverage: bool = False) -> None:
         selection = np.zeros(len(self.base_range.masks), dtype=np.bool_)
-        for node in self._filters.values():
-            self._union_into(selection, node, active_only=True)
+        if update_group_coverage:
+            for node in self._filters.values():
+                self._collect_membership_and_active(node, selection)
+        else:
+            for node in self._filters.values():
+                self._union_into(selection, node, active_only=True)
 
         if not selection.any():
             # All filter definitions may be inactive (or empty groups).
@@ -294,6 +367,7 @@ class FilterManager:
                 result[name] = FilterGroup(
                     name=node.name,
                     filters=cls._clone_nodes(node.filters),
+                    coverage=node.coverage,
                     active=node.active,
                 )
         return result

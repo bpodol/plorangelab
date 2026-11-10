@@ -71,4 +71,17 @@ class FilterCoverageResponse(BaseModel):
     coverage: float
 
 
+class FilterInfoResponse(BaseModel):
+    type: Literal["filter"]
+    name: str
+    expression: str
+    coverage: float
+    active: bool
 
+
+class FilterGroupInfoResponse(BaseModel):
+    type: Literal["group"]
+    name: str
+    coverage: float
+    active: bool
+    filters: dict[str, FilterInfoResponse | FilterGroupInfoResponse]

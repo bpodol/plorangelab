@@ -292,3 +292,35 @@ def test_filtered_preflop_range_carries_to_board(
     assert updated_player.preflop.filter_manager.get_node(
         FilterAddress("AA")
     ).active
+
+
+def test_filter_retrieval_delegates_to_correct_player(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, mode=4, player_index=2)
+    manager.add_range(BASE_RANGE, mode=4, player_index=4)
+
+    manager.add_group("premium", player_index=2)
+    manager.add_filter(
+        "AA",
+        player_index=2,
+        name="aces",
+        path=("premium",),
+    )
+    manager.add_filter("KK", player_index=4, name="kings")
+
+    player = manager.players[2]
+
+    tree = manager.get_filters(player_index=2)
+
+    assert set(tree) == {"premium"}
+    assert manager.get_filter(
+        "aces",
+        player_index=2,
+        path=("premium",),
+    ) == tree["premium"]["filters"]["aces"]
+
+    assert set(manager.get_filters(player_index=4)) == {"kings"}
+
+    # Read operations must not clone or replace player state.
+    assert manager.players[2] is player

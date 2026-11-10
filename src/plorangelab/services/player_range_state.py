@@ -10,7 +10,10 @@ from plorangelab.encoder import EncodedRange, build_mask, encode_board
 from plorangelab.equity import sanitize_range
 from plorangelab.types import Mode
 
-from .filter_manager import FilterAddress, FilterManager
+from .filter_manager import (
+    FilterAddress,
+    FilterManager,
+)
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -159,6 +162,16 @@ class PlayerRangeState:
         self.active_street.filter_manager.clear_all_filters()
         return self.filtered_coverage
 
+    def get_filters(self) -> dict[str, dict[str, object]]:
+        return self.active_street.filter_manager.get_tree()
+
+    def get_filter(
+        self,
+        name: str,
+        path: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        return self.active_street.filter_manager.get_node_info(FilterAddress(name, path))
+    
     def clone(self) -> PlayerRangeState:
         cloned = copy(self)
         for name in ("preflop", "flop", "turn", "river"):
