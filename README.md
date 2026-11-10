@@ -1,5 +1,7 @@
 # PLO RangeLab
 
+[![CI](https://github.com/bpodol/plorangelab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/bpodol/plorangelab/actions/workflows/ci.yml)
+
 **A poker range analysis and equity calculation application for Pot-Limit Omaha (PLO4 and PLO5).**
 
 PLO RangeLab is a full-stack application built around a custom Python equity engine. It supports weighted hand ranges, multiway equity calculations, and range filtering.
