@@ -37,20 +37,22 @@ def get_session(
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-
 @contextmanager
-def editable_session(session: Session) -> Iterator[None]:
+def locked_session(session: Session) -> Iterator[None]:
     with session.lock:
         if session.closed:
             raise HTTPException(
                 status_code=404,
                 detail="Session not found or expired",
             )
+        yield
 
+@contextmanager
+def editable_session(session: Session) -> Iterator[None]:
+    with locked_session(session):
         if session.is_job_running():
             raise HTTPException(
                 status_code=409,
                 detail="Cannot modify session during equity calculation",
             )
-
         yield

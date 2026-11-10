@@ -170,3 +170,105 @@ def test_manager_value_error_returns_422(
     assert response.status_code == 422, response.text
     assert response.json() == {"detail": "Invalid filter operation"}
     operation.assert_called_once()
+
+def test_get_filters(client, filter_context, monkeypatch):
+    base_url, session = filter_context
+
+    tree = {
+        "Draws": {
+            "type": "group",
+            "name": "Draws",
+            "coverage": 0.6,
+            "active": True,
+            "filters": {
+                "FD": {
+                    "type": "filter",
+                    "name": "FD",
+                    "expression": "FD",
+                    "coverage": 0.4,
+                    "active": True,
+                }
+            },
+        }
+    }
+
+    get_filters = mock_operation(monkeypatch, session, "get_filters", result=tree)
+
+    response = client.get(f"{base_url}/filters")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == tree
+    get_filters.assert_called_once_with(2)
+
+@pytest.mark.parametrize(
+    ("resource", "name", "path", "result"),
+    [
+        (
+            "filters",
+            "FD",
+            ("Draws", "Aggressive"),
+            {
+                "type": "filter",
+                "name": "FD",
+                "expression": "FD",
+                "coverage": 0.4,
+                "active": True,
+            },
+        ),
+        (
+            "groups",
+            "Draws",
+            (),
+            {
+                "type": "group",
+                "name": "Draws",
+                "coverage": 0.6,
+                "active": False,
+                "filters": {},
+            },
+        ),
+    ],
+)
+
+def test_get_filter_or_group(client, filter_context, monkeypatch, resource, name, path, result):
+    base_url, session = filter_context
+
+    get_filter = mock_operation(monkeypatch, session, "get_filter", result=result)
+
+    response = client.get(
+        f"{base_url}/{resource}/{name}",
+        params=[("path", part) for part in path],
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == result
+    get_filter.assert_called_once_with(name=name, player_index=2, path=path)
+
+def test_get_missing_filter_returns_404(client, filter_context, monkeypatch):
+    base_url, session = filter_context
+
+    get_filter = mock_operation(
+        monkeypatch,
+        session,
+        "get_filter",
+        error=ValueError("Unknown filter or group"),
+    )
+
+    response = client.get(f"{base_url}/filters/missing")
+
+    assert response.status_code == 404, response.text
+    get_filter.assert_called_once()
+
+def test_get_filters_allowed_during_running_job(client, filter_context, monkeypatch):
+    base_url, session = filter_context
+
+    get_filters = mock_operation(monkeypatch, session, "get_filters", result={})
+
+    with monkeypatch.context() as patch:
+        patch.setattr(type(session), "is_job_running", lambda self: True)
+
+        response = client.get(f"{base_url}/filters")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {}
+    get_filters.assert_called_once_with(2)
