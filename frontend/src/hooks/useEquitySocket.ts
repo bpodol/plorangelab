@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { connectEquityWebSocket, type EquityMessage } from '../api/equity';
-import type { Mode } from '../api/sessions';
+import type { Mode } from '../types';
 
 export type EquityStatus = 'idle' | 'running' | 'completed' | 'error' | 'cancelling' | 'cancelled';
 

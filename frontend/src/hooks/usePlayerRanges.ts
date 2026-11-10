@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { addRange, deleteRange, type Mode } from '../api/sessions';
+import { addRange, deleteRange } from '../api/players.ts';
+import type { Mode } from '../types.ts';
 
 export interface PlayerState {
   range: string;

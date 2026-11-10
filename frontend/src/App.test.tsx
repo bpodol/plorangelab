@@ -3,12 +3,16 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
 import App from './App';
-import { createSession, changeBoard, addRange, deleteRange } from './api/sessions';
+import { createSession, changeBoard } from './api/sessions';
+import { addRange, deleteRange } from './api/players';
 import { connectEquityWebSocket } from './api/equity';
 
 vi.mock('./api/sessions', () => ({
   createSession: vi.fn(),
   changeBoard: vi.fn(),
+}));
+
+vi.mock('./api/players', () => ({
   addRange: vi.fn(),
   deleteRange: vi.fn(),
 }));

@@ -1,9 +1,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
-import { addRange, deleteRange } from '../api/sessions';
+import { addRange, deleteRange } from '../api/players';
 import { usePlayerRanges } from './usePlayerRanges';
 
-vi.mock('../api/sessions', () => ({
+vi.mock('../api/players', () => ({
   addRange: vi.fn(),
   deleteRange: vi.fn(),
 }));
