@@ -14,7 +14,7 @@ beforeEach(() => {
 test('adds a player range using PUT', async () => {
   vi.mocked(apiRequest).mockResolvedValue({ hands: 1 });
 
-  const result = await addRange(2, 'AsAhQcJd', 4, 'session-123');
+  const result = await addRange('session-123', 2, 'AsAhQcJd', 4);
 
   expect(apiRequest).toHaveBeenCalledWith('/api/sessions/session-123/players/2', {
     method: 'PUT',
@@ -43,7 +43,7 @@ test('deletes a player range using DELETE', async () => {
 });
 
 test.each([
-  ['addRange', () => addRange(0, 'AsAhQcJd', 4, 'session-123')],
+  ['addRange', () => addRange('session-123', 0, 'AsAhQcJd', 4)],
   ['deleteRange', () => deleteRange('session-123', 0)],
 ])('%s propagates API errors', async (_name, operation) => {
   const error = new Error('API request failed: 422 Unprocessable Entity');

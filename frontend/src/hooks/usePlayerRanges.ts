@@ -37,7 +37,7 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     updatePlayer(playerId, { isLoading: true, error: null });
 
     try {
-      const hands = await addRange(playerId, player.range, mode, sessionId);
+      const hands = await addRange(sessionId, playerId, player.range, mode);
 
       updatePlayer(playerId, { numberOfHands: hands.hands, hasAppliedRange: true });
     } catch (err) {

@@ -6,10 +6,10 @@ export interface RangeResponse {
 }
 
 export function addRange(
+  sessionId: string,
   playerId: number,
   hands: string,
   mode: Mode,
-  sessionId: string,
 ): Promise<RangeResponse> {
   return apiRequest<RangeResponse>(`/api/sessions/${sessionId}/players/${playerId}`, {
     method: 'PUT',
