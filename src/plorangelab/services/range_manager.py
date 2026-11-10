@@ -122,6 +122,17 @@ class RangeManager:
     def clear_filters(self, player_index: int) -> float:
         return self._edit_player(player_index, lambda player: player.clear_filters())
 
+    def get_filters(self, player_index: int) -> dict[str, dict[str, object]]:
+        return self._get_player(player_index).get_filters()
+
+    def get_filter(
+        self,
+        name: str,
+        player_index: int,
+        path: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        return self._get_player(player_index).get_filter(name, path)
+
     def calculate_equity(
             self, 
             mode: Mode, 

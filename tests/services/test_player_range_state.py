@@ -323,3 +323,26 @@ def test_filter_operations_return_coverage(
     # Deleting the last active filter restores full coverage.
     player.set_filter_active("AA", True)
     assert player.delete_filter("AA") == 1.0
+
+
+def test_filter_retrieval_uses_active_street(player: PlayerRangeState) -> None:
+    player.add_group("premium")
+    player.add_filter("AA", name="aces", path=("premium",))
+
+    preflop_tree = player.get_filters()
+
+    assert player.get_filter("aces", ("premium",)) == (
+        preflop_tree["premium"]["filters"]["aces"]
+    )
+
+    player.apply_board_change(Board.from_string("2c3d5h"))
+
+    assert player.get_filters() == {}
+
+    player.add_filter("QQ", name="queens")
+
+    assert set(player.get_filters()) == {"queens"}
+    assert player.get_filter("queens") == player.get_filters()["queens"]
+
+    # Preflop filters remain unchanged.
+    assert player.preflop.filter_manager.get_tree() == preflop_tree
