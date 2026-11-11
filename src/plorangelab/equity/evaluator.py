@@ -3,51 +3,12 @@
 Supports validated single-hand evaluation and Numba-compiled batch
 evaluation, including parallel execution.
 """
+
 import numpy as np
-from numba import njit, prange
+from numba import njit
 from numpy.typing import NDArray
 
-from plorangelab.rank_combination import RankLookup, rank_combination_lookup
-
-
-def evaluate_hand(
-    hand: NDArray[np.uint8], board: NDArray[np.uint8], rank_lookup: RankLookup
-) -> int:
-    """Evaluate the strongest Omaha hand using exactly two hole cards.
-
-    Validates the hand and board before calling the Numba-compiled evaluator.
-    The best ranking is determined from all combinations of exactly two hole
-    cards and three community cards.
-
-    Args:
-        hand: One-dimensional array containing 4 or 5 encoded hole cards.
-        board: One-dimensional array containing exactly 5 community cards.
-        rank_lookup: Precomputed tables used to rank five-card combinations.
-
-    Returns:
-        Integer ranking of the strongest valid five-card combination.
-        Higher scores represent stronger hands.
-
-    Raises:
-        ValueError: If the hand or board has an invalid length, contains
-            invalid or duplicate card IDs, or shares cards with the other.
-    """
-    if hand.ndim != 1 or len(hand) not in (4, 5):
-        raise ValueError("hand must be a one-dimensional array of 4 or 5 cards")
-    if board.ndim != 1 or len(board) != 5:
-        raise ValueError("board must be a one-dimensional array of exactly 5 cards")
-    if any(int(card) >= 52 for card in hand) or any(int(card) >= 52 for card in board):
-        raise ValueError("card IDs must be between 0 and 51")
-    if len({int(card) for card in hand}) != len(hand):
-        raise ValueError("hand cannot contain duplicate cards")
-    if len({int(card) for card in board}) != len(board):
-        raise ValueError("board cannot contain duplicate cards")
-    if {int(card) for card in hand} & {int(card) for card in board}:
-        raise ValueError("hand and board cannot contain the same card")
-
-    return _evaluate_hand_core(
-        hand, board, rank_lookup.rank_table, rank_lookup.binomial_table
-    )
+from plorangelab.rank_combination import rank_combination_lookup
 
 
 @njit(cache=True)
@@ -149,31 +110,6 @@ def numba_evaluate_hands(
     for i in range(hands.shape[0]):
         evaluations[i] = _evaluate_hand_core(
             hands[i], board, rank_table, binomial_table
-        )
-
-    return evaluations
-
-
-@njit(parallel=True, cache=True)
-def numba_evaluate_hands_parallel(
-    hands: NDArray[np.uint8],
-    board: NDArray[np.uint8],
-    rank_table: NDArray[np.uint32],
-    binomial_table: NDArray[np.uint32],
-) -> NDArray[np.uint32]:
-    """Evaluate multiple independent Omaha hands in parallel using Numba.
-
-    Produces the same rankings and output order as numba_evaluate_hands(),
-    but distributes evaluations across Numba threads using prange.
-
-    Each input row is evaluated independently against the same board.
-    Inputs are assumed valid and are not checked for card collisions.
-    """
-    evaluations = np.empty(hands.shape[0], dtype=np.uint32)
-
-    for i in prange(hands.shape[0]):
-        evaluations[i] = _evaluate_hand_core(
-            hands[i], board, rank_table=rank_table, binomial_table=binomial_table
         )
 
     return evaluations
