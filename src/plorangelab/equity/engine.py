@@ -32,7 +32,7 @@ def choose_method(
     Automatic selection always uses Monte Carlo preflop. Postflop, exact
     enumeration is selected when the estimated number of showdowns does
     not exceed the configured limit.
-    """   
+    """
     if board_cards == 0:
         return "monte-carlo"
 
@@ -381,7 +381,7 @@ def compute_equity(
             1_024,
             probe_rng,
         )
-        
+
         # Switch samplers when fewer than 10 of the 1,024 probe matchups
         # are collision-free (approximately 1% acceptance).
         use_importance = accepted < 10

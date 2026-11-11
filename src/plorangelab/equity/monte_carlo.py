@@ -58,7 +58,8 @@ def deal_card(deck: np.uint64, rng: np.random.Generator) -> tuple[int, np.uint64
     """
     if deck == 0:
         raise ValueError("Deck is empty")
-
+    # Rejection sampling over card IDs produces a uniform draw from
+    # the remaining cards, regardless of which deck bits are set.
     while True:
         pos = int(rng.integers(0, 52))
         bit = np.uint64(1) << pos
@@ -119,6 +120,11 @@ def _run_monte_carlo_batch(
     from the remaining deck. Each valid showdown awards an equal pot fraction
     to all players tied for the highest hand rank. The arrays allocated here
     are bounded by the requested batch size, not by the total simulation goal.
+
+    Sampling and board generation are performed sequentially, while
+    completed showdowns are evaluated in parallel using Numba's prange.
+    The batch may return fewer valid simulations than requested if its
+    attempt budget is exhausted.
 
     Args:
         hands: Board-filtered encoded hands for each player.
@@ -237,7 +243,16 @@ def _prepare_monte_carlo(
     np.uint64,
     np.random.Generator,
 ]:
-    """Prepare validated, board-filtered Numba inputs and a shared RNG."""
+    """Prepare encoded ranges for Numba-compiled Monte Carlo sampling.
+
+    Normalizes each player's weights, constructs cumulative probability
+    distributions for weighted hand selection, and converts the input
+    arrays into Numba typed lists.
+
+    Returns:
+        A tuple containing the hands, masks, cumulative probabilities,
+        known board mask, and a seeded NumPy random generator.
+    """
     probabilities = prepare_probabilities(players)
     hands = List([player.hands for player in players])
     masks = List([player.masks for player in players])
@@ -259,7 +274,23 @@ def _probe_collision_acceptance(
     trials: int,
     rng: np.random.Generator,
 ) -> int:
-    """Estimate acceptance of independently sampled player hands."""
+    """Measure the acceptance rate of independent weighted hand sampling.
+
+    Samples one hand per player using their cumulative probability
+    distributions and counts selections without overlapping cards.
+
+    The player ranges are assumed to have already been filtered against
+    known board cards.
+
+    Args:
+        masks: Encoded hand masks for each player.
+        cumulative_probabilities: Weighted sampling CDFs for each player.
+        trials: Number of independent matchup selections to attempt.
+        rng: Random generator used for sampling.
+
+    Returns:
+        Number of collision-free selections among the attempted trials.
+    """
     accepted = 0
 
     for _ in range(trials):
@@ -293,6 +324,30 @@ def _equity_statistics(
     simulations: int,
     confidence_multiplier: float,
 ) -> tuple[list[float], list[float | None]]:
+    """Calculate Monte Carlo equity estimates and approximate margins of error.
+
+    Each showdown contributes a pot share between 0 and 1, including
+    fractional shares for ties.
+
+    Equity is the mean pot share. The margin of error is estimated from
+    the sample variance of pot shares and the supplied confidence
+    multiplier.
+
+    Args:
+        share_sums: Sum of observed pot shares for each player.
+        squared_share_sums: Sum of squared pot shares for each player.
+        simulations: Number of valid showdowns.
+        confidence_multiplier: Multiplier applied to the estimated
+            standard error.
+
+    Returns:
+        A tuple containing per-player equity estimates and margins of
+        error. Margins are None when fewer than two samples are available.
+
+    Notes:
+        Margins are approximate and do not account for repeated testing
+        or adaptive stopping.
+    """
     equities: list[float] = []
     margins: list[float | None] = []
 
@@ -301,6 +356,8 @@ def _equity_statistics(
         if simulations < 2:
             margin = None
         else:
+            # Pot shares can be fractional due to ties, so estimate variance
+            # from the observed shares rather than assuming Bernoulli outcomes.
             variance = max(
                 float(
                     (squared_sum - share_sum * share_sum / simulations)
@@ -334,13 +391,50 @@ def _run_batched_monte_carlo(
     on_progress: Callable[[MonteCarloResult], None] | None = None,
     rank_lookup: RankLookup,
 ) -> MonteCarloResult:
-    """Coordinate batches and aggregate every completed showdown.
+    """Run adaptive rejection-sampling Monte Carlo in bounded batches.
 
-    The global attempt limit is shared across calls to the Numba batch kernel;
-    each invocation receives at most ``_MAX_BATCH_ATTEMPTS`` attempts so the
-    adaptive caller can observe cancellation between invocations. Any valid
-    simulations completed before an invocation exhausts its budget are added
-    before the coordinator decides whether to continue or stop.
+    Coordinates Numba sampling kernels while accumulating completed
+    showdowns across batches.
+
+    Stops when all player margins of error meet the target after the
+    minimum sample count, the maximum simulation count is reached,
+    the attempt limit is exhausted, or cancellation is requested.
+
+    Cancellation is checked between batches. Intermediate progress
+    callbacks are invoked after completed nonterminal batches.
+
+    Args:
+        hands: Numba typed list of encoded player hands.
+        masks: Corresponding hand masks.
+        cumulative_probabilities: Weighted sampling CDFs for each player.
+        mode: Number of hole cards per player (4 or 5).
+        board: Known community cards, or None for preflop.
+        board_mask: Bitmask of known community cards.
+        rng: Random generator shared across batches.
+        requested_samples: Maximum number of valid showdowns.
+        batch_size: Maximum number of valid showdowns per batch.
+        attempt_limit: Global maximum number of sampling attempts,
+            including rejected selections.
+        target_moe: Target absolute margin of error for every player.
+        min_samples: Minimum valid showdowns required for precision-based
+            stopping.
+        confidence_multiplier: Multiplier applied to estimated standard
+            errors.
+        cancel_event: Optional cancellation event.
+        on_progress: Optional callback receiving intermediate results.
+        rank_lookup: Precomputed five-card hand ranking tables.
+
+    Returns:
+        MonteCarloResult containing per-player equity estimates, margins
+        of error, simulation and attempt counts, and the stopping reason.
+
+    Raises:
+        ValueError: If simulation or batch limits exceed the configured
+            maximum values.
+        InterruptedError: If cancellation occurs before any valid
+            showdowns have been completed.
+        SamplingExhaustedError: If no valid showdowns are produced within
+            the attempt limit.
     """
     if requested_samples > _MAX_SIMULATIONS:
         raise ValueError(f"requested_samples must not exceed {_MAX_SIMULATIONS:,}")
@@ -370,6 +464,9 @@ def _run_batched_monte_carlo(
             break
 
         batch_count = min(batch_size, requested_samples - simulations)
+
+        # Stop the batch at the minimum sample threshold so the first
+        # precision check can occur without overshooting that threshold.
         if simulations < min_samples:
             batch_count = min(batch_count, min_samples - simulations)
 

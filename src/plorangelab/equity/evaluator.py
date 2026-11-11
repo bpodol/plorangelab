@@ -1,7 +1,7 @@
 """PLO4/PLO5 hand evaluation using precomputed five-card ranking tables.
 
-Supports validated single-hand evaluation and Numba-compiled batch
-evaluation, including parallel execution.
+Provides Numba-compiled evaluation of multiple Omaha hands against a
+complete board, using exactly two hole cards and three community cards.
 """
 
 import numpy as np
