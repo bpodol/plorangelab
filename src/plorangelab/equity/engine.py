@@ -27,6 +27,12 @@ from .results import EquityResult, MonteCarloResult
 def choose_method(
     board_cards: int, estimated_showdowns: int
 ) -> Literal["exact", "monte-carlo"]:
+    """Select the equity calculation method based on the estimated workload.
+
+    Automatic selection always uses Monte Carlo preflop. Postflop, exact
+    enumeration is selected when the estimated number of showdowns does
+    not exceed the configured limit.
+    """   
     if board_cards == 0:
         return "monte-carlo"
 
@@ -56,6 +62,7 @@ def validate_equity_inputs(
     Does not check whether a compatible multi-player matchup exists.
 
     Raises:
+        TypeError: If a player is not an EncodedRange.
         ValueError: If any parameter, board, or encoded range is invalid.
     """
     if mode not in (4, 5):
@@ -223,6 +230,7 @@ def prepare_ranges(
 
 
 def _positive_integer(value: object, name: str) -> int:
+    """Validate and return a positive integer, rejecting booleans."""
     if (
         isinstance(value, (bool, np.bool_))
         or not isinstance(value, (int, np.integer))
@@ -248,14 +256,59 @@ def compute_equity(
     on_progress: Callable[[MonteCarloResult], None] | None = None,
     rank_lookup: RankLookup,
 ) -> EquityResult:
-    """Calculate equity exactly or with adaptive Monte Carlo.
+    """Calculate multiway PLO4/PLO5 equity using exact or Monte Carlo evaluation.
 
-    Automatic selection uses exact enumeration for postflop estimates no
-    greater than ``_EXACT_MAX_SHOWDOWNS`` and adaptive Monte Carlo otherwise.
-    Monte Carlo margins are approximate plug-in estimates; repeated checks and
-    conditional stopping do not provide formal confidence bounds. Cancellation
-    is checked between Monte Carlo batches. Exact kernels cannot be interrupted
-    during execution.
+    Automatic selection uses exact enumeration for sufficiently small
+    postflop workloads and Monte Carlo otherwise.
+
+    Monte Carlo calculations use independent weighted hand sampling with
+    collision rejection, or sequential importance sampling when collision
+    acceptance is particularly low.
+
+    Monte Carlo margins of error are approximate estimates. Repeated
+    precision checks and adaptive stopping do not provide formal
+    confidence guarantees.
+
+    Cancellation is checked between Monte Carlo batches. Running exact
+    kernels cannot be interrupted.
+
+    Args:
+        players: Encoded ranges for 2 to 6 players. Each range must contain
+            valid hands, matching masks, and strictly positive finite weights.
+        mode: Number of hole cards per player (4 or 5).
+        board: Known community cards as uint8 card IDs, or None for preflop.
+            Supported board lengths are 0, 3, 4, and 5.
+        method: Calculation method. "auto" selects the method based on
+            estimated exact workload; "exact" and "monte-carlo" explicitly
+            select their respective engines.
+        target_moe: Target absolute margin of error for Monte Carlo equity
+            estimates, expressed as a fraction (0.001 = 0.1 percentage points).
+        confidence_multiplier: Multiplier applied to the estimated standard
+            error when calculating margins of error.
+        min_samples: Minimum sample count required for precision-based
+            stopping. Importance sampling uses effective sample size.
+        max_samples: Maximum number of valid Monte Carlo simulations.
+        batch_size: Maximum number of valid simulations per Monte Carlo batch.
+        seed: Non-negative seed for reproducible random sampling.
+        cancel_event: Optional threading event used to request cancellation.
+        on_progress: Optional callback receiving intermediate MonteCarloResult
+            instances after completed batches.
+        rank_lookup: Precomputed lookup tables used for five-card hand ranking.
+
+    Returns:
+        EquityResult containing each player's expected pot share as a
+        fraction from 0 to 1, along with the calculation method and,
+        for Monte Carlo, sampling and stopping diagnostics.
+
+    Raises:
+        TypeError: If a player is not an EncodedRange.
+        ValueError: If inputs are invalid or board filtering empties a range,
+            or if no compatible matchups exist during exact enumeration.
+        RuntimeError: If explicit exact calculation exceeds its workload limit.
+        SamplingExhaustedError: If Monte Carlo sampling produces no valid
+            showdowns within the attempt limit.
+        InterruptedError: If cancellation occurs before any Monte Carlo
+            samples are completed.
     """
     if cancel_event is not None:
         if not isinstance(cancel_event, Event):
@@ -328,7 +381,9 @@ def compute_equity(
             1_024,
             probe_rng,
         )
-
+        
+        # Switch samplers when fewer than 10 of the 1,024 probe matchups
+        # are collision-free (approximately 1% acceptance).
         use_importance = accepted < 10
 
     if use_importance:
