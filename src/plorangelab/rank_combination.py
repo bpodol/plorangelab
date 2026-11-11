@@ -1,3 +1,12 @@
+"""Five-card poker hand ranking and precomputed lookup tables.
+
+Encodes hand categories and kickers into comparable integer scores,
+generates rankings for all 2,598,960 five-card combinations, and
+provides constant-time ranking lookups using combinatorial indexing.
+
+Performance-critical operations are compiled with Numba.
+"""
+
 from dataclasses import dataclass
 from math import comb
 from typing import Literal
@@ -20,6 +29,15 @@ CombinationStrength = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8]
 
 @dataclass
 class RankLookup:
+    """Precomputed tables used for constant-time five-card hand ranking.
+
+    Attributes:
+        rank_table: uint32 array containing the strength score of every
+            possible five-card combination.
+        binomial_table: uint32 array of binomial coefficients used to
+            calculate unique combination indices.
+    """
+
     rank_table: NDArray[np.uint32]
     binomial_table: NDArray[np.uint32]
 
@@ -33,7 +51,14 @@ def _numba_calculate_rank(
     r4: int = 0,
     r5: int = 0,
 ) -> int:
-    """Encode a category and five rank values as a base-13 integer."""
+    """Encode a hand category and tie-breaking ranks as a base-13 score.
+
+    The hand category is the most significant component, followed by
+    up to five rank values in descending tie-breaking priority.
+
+    Higher scores represent stronger hands. Equal scores represent
+    equivalent hand strengths.
+    """
     return (
         (((c * 13 + int(r1)) * 13 + int(r2)) * 13 + int(r3)) * 13 + int(r4)
     ) * 13 + int(r5)
@@ -41,11 +66,24 @@ def _numba_calculate_rank(
 
 @njit(cache=True)
 def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
-    """Evaluate five cards.
+    """Evaluate a five-card poker hand and return its encoded strength.
+
+    Identifies the hand category using adjacent rank-equality patterns,
+    flush detection, and straight detection, including the ace-low wheel.
+
+    Returns a base-13 score encoding the hand category and relevant
+    tie-breaking ranks.
 
     Preconditions:
-        - Exactly 5 valid, distinct cards.
-        - Cards sorted by ID in descending order.
+        - Exactly five valid, distinct encoded cards.
+        - Cards sorted by card ID in descending order.
+
+    Returns:
+        Integer score where higher values indicate stronger hands.
+
+    Notes:
+        This function performs no input validation and is intended
+        for generating precomputed ranking tables.
     """
     # Card encoding: card_id = (rank * 4) + suit.
     # The lowest 2 bits store the suit (0-3); the remaining bits store the rank (0-12).
@@ -82,6 +120,8 @@ def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
         )
 
         is_straight = r0 == r1 + 1 and r1 == r2 + 1 and r2 == r3 + 1 and r3 == r4 + 1
+        # A-5-4-3-2 is the only straight where the ace acts as the
+        # lowest card. Its effective high-card rank is 5 (index 3).
         is_wheel = r0 == 12 and r1 == 3 and r2 == 2 and r3 == 1 and r4 == 0
         if is_wheel:
             is_straight = True
@@ -154,7 +194,19 @@ def _numba_rank_combination(cards: NDArray[np.uint8]) -> int:
 def _generate_ranking_table(
     binomial: NDArray[np.int32],
 ) -> NDArray[np.uint32]:
-    """Generate ranks for all 2,598,960 unique five-card combinations."""
+    """Generate strength scores for all possible five-card combinations.
+
+    Enumerates all 2,598,960 unique combinations from a standard
+    52-card deck, evaluates their strengths, and stores the results
+    at indices calculated using the combinatorial number system.
+
+    Args:
+        binomial: Precomputed binomial coefficients used for indexing.
+
+    Returns:
+        uint32 array containing one strength score per five-card
+        combination.
+    """
 
     ranking_table = np.empty(2_598_960, dtype=np.uint32)
     cards = np.empty(5, dtype=np.uint8)
@@ -174,7 +226,8 @@ def _generate_ranking_table(
 
                     for e in range(d):
                         cards[4] = e
-
+                        # Combinatorial number system (colex ranking) maps each unique
+                        # five-card combination to an integer index without a dictionary.
                         index = (
                             binomial[e, 1]
                             + binomial[d, 2]
@@ -189,11 +242,14 @@ def _generate_ranking_table(
 
 
 def build_lookup_tables() -> RankLookup:
-    """Generate the five-card ranking and binomial lookup tables.
+    """Build the tables required for five-card hand ranking.
+
+    Precomputes binomial coefficients for combination indexing and
+    generates strength scores for every unique five-card combination.
 
     Returns:
-        ranking_table: Precomputed five-card strength scores.
-        binomial: Coefficients used to calculate combination indices.
+        RankLookup containing the ranking table and binomial
+        coefficient table.
     """
     binomial = np.zeros((52, 6), dtype=np.uint32)
 
@@ -214,9 +270,23 @@ def rank_combination_lookup(
 ) -> np.uint32:
     """Retrieve the precomputed strength of a five-card combination.
 
+    Calculates the combination's unique index using precomputed
+    binomial coefficients and retrieves its strength from the
+    ranking table in constant time.
+
+    Args:
+        cards: Five encoded cards sorted by descending card ID.
+        rank_table: Precomputed five-card strength scores.
+        binomial_table: Precomputed combination-indexing coefficients.
+
+    Returns:
+        uint32 hand-strength score, with higher values representing
+        stronger hands.
+
     Preconditions:
-        - Exactly 5 valid, distinct cards.
-        - Cards sorted by ID in descending order.
+        - Exactly five valid, distinct encoded cards.
+        - Cards sorted by descending card ID.
+        - Ranking and binomial tables generated by build_lookup_tables().
     """
     index = (
         binomial_table[cards[4], 1]
