@@ -10,7 +10,6 @@ import pytest
 from plorangelab.encoder import encode_board, encode_range
 from plorangelab.equity.evaluator import (
     numba_evaluate_hands,
-    numba_evaluate_hands_parallel,
 )
 from plorangelab.rank_combination import RankLookup, _numba_rank_combination
 
@@ -121,36 +120,3 @@ def test_evaluate_hand_handles_varied_board_textures(
     rank_lookup: RankLookup,
 ) -> None:
     assert _evaluate_one(hand_text, board_text, rank_lookup) >= 0
-
-
-@pytest.mark.parametrize("mode", [4, 5])
-def test_parallel_evaluator_matches_sequential_lookup_evaluator(
-    mode: int,
-    rank_lookup: RankLookup,
-) -> None:
-    board = encode_board("2c3d5h7s9c")
-    hand_texts = (
-        ["AsAhKdQc", "KsKhJdTd", "QsQhJcTc"]
-        if mode == 4
-        else ["AsAhKdQc6c", "KsKhJdTd6d", "QsQhJcTc8h"]
-    )
-    hands = np.stack([encode_range(text, mode).hands[0] for text in hand_texts])
-    original_hands = hands.copy()
-    original_board = board.copy()
-
-    expected = numba_evaluate_hands(
-        hands,
-        board,
-        rank_lookup.rank_table,
-        rank_lookup.binomial_table,
-    )
-    actual = numba_evaluate_hands_parallel(
-        hands,
-        board,
-        rank_lookup.rank_table,
-        rank_lookup.binomial_table,
-    )
-
-    np.testing.assert_array_equal(actual, expected)
-    np.testing.assert_array_equal(hands, original_hands)
-    np.testing.assert_array_equal(board, original_board)

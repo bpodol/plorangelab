@@ -28,7 +28,14 @@ def _accumulate_exact_showdown(
     rank_table,
     binomial_table,
 ):
-    """Evaluate one showdown and add its weighted pot shares."""
+    """Evaluate a showdown and accumulate weighted pot shares.
+
+    Each player receives a fraction of the matchup weight proportional
+    to their share of the pot. Tied winners split the pot equally.
+
+    Returns:
+        Updated total weight, including the current showdown.
+    """
     scores = numba_evaluate_hands(
         selected_hands,
         current_board,
@@ -75,9 +82,12 @@ def _run_exact_equity_kernel(
         board: Known board cards, or None.
         board_mask: Bitmask of known board cards.
         mode: 4 or 5.
+        rank_table: Precomputed five-card hand ranking table.
+        binomial_table: Precomputed table for combination indexing.
 
     Returns:
-        (weighted_pot_shares, total_weight)
+        A tuple containing the accumulated weighted pot shares for
+        each player and the total weight of all evaluated showdowns.
     """
     player_count = len(hands)
     board_len = 0 if board is None else len(board)
@@ -212,7 +222,22 @@ def _run_exact_equity_kernel_parallel(
     rank_table,
     binomial_table,
 ):
-    """Enumerate exact equity in balanced, thread-local Cartesian partitions."""
+    """Enumerate exact equity using parallel hand-matchup partitions.
+
+    Divides the Cartesian product of player ranges into approximately
+    equal contiguous partitions, assigning each partition to a Numba
+    parallel worker.
+
+    Each worker independently enumerates its assigned matchups and all
+    compatible board runouts, accumulating results in local buffers.
+
+    Worker results are combined sequentially after parallel execution
+    to avoid write races.
+
+    Returns:
+        A tuple containing the accumulated weighted pot shares for
+        each player and the total weight of all evaluated showdowns.
+    """
     player_count = len(hands)
     board_len = 0 if board is None else len(board)
     missing_board = 5 - board_len
@@ -241,6 +266,8 @@ def _run_exact_equity_kernel_parallel(
                 current_board[card] = board[card]
 
         for matchup in range(start, end):
+            # Decode the flat matchup index into one hand index per player
+            # using the range sizes as mixed-radix bases.
             remainder = matchup
             for player in range(player_count - 1, -1, -1):
                 hand_count = len(hands[player])
@@ -344,7 +371,18 @@ def _estimate_exact_showdowns(
     mode: Mode,
     board: NDArray[np.uint8] | None,
 ) -> tuple[int, int]:
-    """Return candidate hand matchups and the conservative showdown estimate."""
+    """Estimate the upper bound on exact showdown evaluations.
+
+    The number of candidate matchups is the product of all player range
+    sizes. Each matchup is assumed to have the same number of possible
+    board completions.
+
+    The estimate ignores card collisions between player hands, so the
+    actual number of evaluated showdowns may be smaller.
+
+    Returns:
+        A tuple of (candidate_matchups, estimated_showdowns).
+    """
     player_count = len(players)
     board_len = 0 if board is None else len(board)
     missing_board = 5 - board_len
@@ -361,21 +399,28 @@ def run_exact_equity(
     board: NDArray[np.uint8] | None = None,
     max_showdowns: int | None = _EXACT_MAX_SHOWDOWNS,
 ) -> list[float]:
-    """Calculate exact weighted equity with the suitable Numba kernel.
+    """Calculate exact weighted equity using sequential or parallel Numba kernels.
 
-    Small estimated workloads stay sequential; larger workloads partition the
-    Cartesian product across the configured Numba threads.
+    Enumerates every compatible combination of player hands and all valid
+    board runouts. Hand weights determine the relative contribution of
+    each matchup, and tied winners split the pot equally.
+
+    Small estimated workloads use the sequential kernel. Larger workloads
+    use the parallel kernel when multiple candidate matchups and Numba
+    threads are available.
 
     Args:
         players: Validated, board-filtered player ranges with strictly
             positive weights.
         mode: Number of hole cards per player (4 or 5).
+        rank_lookup: Precomputed tables used for five-card hand ranking.
         board: Known community cards, or None for preflop.
         max_showdowns: Maximum estimated showdown evaluations.
             None disables the limit.
 
     Returns:
-        Exact equity for each player as a fraction from 0 to 1.
+        Exact equity for each player as a fraction from 0 to 1,
+        preserving the input player order.
 
     Raises:
         ValueError: If no compatible positive-weight matchups exist.

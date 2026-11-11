@@ -1,3 +1,13 @@
+"""Sequential importance sampling for multiway PLO equity estimation.
+
+Samples player hands conditionally on previously selected cards to
+reduce collision rejections. Importance weights correct for the
+modified sampling distribution.
+
+Uses precomputed compatibility indexes for smaller ranges and
+Numba-compiled kernels for sampling and showdown evaluation.
+"""
+
 from collections.abc import Callable
 from math import sqrt
 from threading import Event
@@ -58,7 +68,24 @@ def _probe_collision_acceptance(
 
 @njit(cache=True)
 def _index_one_range(masks, probabilities):
-    """Build card membership bitsets and weighted 8-hand lookup tables."""
+    """Build compatibility lookup tables for a single weighted range.
+
+    Creates a card-membership bitset identifying which hands contain
+    each card, and a lookup table containing the total probability mass
+    of every possible subset of eight consecutive hands.
+
+    The subset table enables efficient calculation of the probability
+    mass remaining after incompatible hands are excluded.
+
+    Args:
+        masks: One uint64 card mask per hand.
+        probabilities: Normalized hand probabilities aligned with masks.
+
+    Returns:
+        A tuple containing:
+            - membership: uint64 bitsets of shape (52, ceil(n / 64)).
+            - subset_masses: float64 array of shape (ceil(n / 8), 256).
+    """
     n = len(masks)
 
     membership = np.zeros(
@@ -97,7 +124,23 @@ def _build_compatibility_index(
     masks: List,
     probabilities: List,
 ) -> tuple[List, List, bool]:
-    """Build bounded lookup tables once per Monte Carlo calculation."""
+    """Prepare compatibility indexes for conditional hand sampling.
+
+    Builds card-membership and subset-mass lookup tables when every
+    player range contains at most _INDEX_MAX_HANDS combinations.
+
+    If any range exceeds this threshold, indexing is disabled for
+    all players and empty placeholder arrays are returned. The
+    sampler then uses direct compatibility scans instead.
+
+    Args:
+        masks: Numba typed list of player hand-mask arrays.
+        probabilities: Corresponding normalized probability arrays.
+
+    Returns:
+        A tuple containing membership tables, subset-mass tables,
+        and a boolean indicating whether indexed sampling is enabled.
+    """
     indexed = all(len(player_masks) <= _INDEX_MAX_HANDS for player_masks in masks)
 
     memberships = List()
@@ -129,7 +172,30 @@ def _select_indexed_hand(
     legal_blocks,
     rng,
 ):
-    """Select a compatible weighted hand and return its probability mass."""
+    """Sample a compatible hand using precomputed probability lookup tables.
+
+    Combines the membership bitsets of occupied cards to identify
+    blocked hands, then calculates the total probability mass of
+    all compatible hands.
+
+    Samples a hand proportionally to its original probability,
+    conditional on compatibility with the occupied cards.
+
+    Args:
+        occupied: Bitmask of cards already used by the board and
+            previously selected player hands.
+        probabilities: Normalized probabilities for the current range.
+        membership: Card-to-hand membership bitsets.
+        subset_masses: Precomputed probability masses for eight-hand
+            subsets.
+        blocked_words: Reusable buffer for blocked-hand bitsets.
+        legal_blocks: Reusable buffer for compatible eight-hand subsets.
+        rng: Random generator used for weighted selection.
+
+    Returns:
+        A tuple of (selected_hand_index, compatible_probability_mass).
+        Returns (-1, 0.0) when no compatible hand exists.
+    """
 
     word_count = membership.shape[1]
 
@@ -210,7 +276,33 @@ def _run_importance_batch(
     rank_table: NDArray[np.uint32],
     binomial_table: NDArray[np.uint32],
 ):
-    """Generate compatible matchups using sequential importance sampling."""
+    """Generate and evaluate a batch of importance-weighted Omaha showdowns.
+
+    Samples the first player's hand from its original distribution.
+    Subsequent players are sampled conditionally on cards already
+    selected, avoiding hand collisions whenever a compatible hand exists.
+
+    Each successful matchup receives an importance weight equal to the
+    product of the compatible probability masses for players after
+    the first. This corrects for the conditional sampling distribution.
+
+    Missing community cards are sampled uniformly from the remaining
+    deck. Sampling is sequential, while completed showdowns are
+    evaluated in parallel using Numba's prange.
+
+    The batch may return fewer valid showdowns than requested if the
+    attempt budget is exhausted.
+
+    Returns:
+        A tuple containing:
+            - Sum of importance weights.
+            - Sum of squared importance weights.
+            - Per-player sums of weighted pot shares.
+            - Per-player sums of squared weights times pot shares.
+            - Per-player sums of squared weights times squared pot shares.
+            - Number of completed showdowns.
+            - Number of sampling attempts.
+    """
     player_count = len(hands)
     board_len = 0 if board is None else len(board)
     missing_board = 5 - board_len
@@ -307,7 +399,8 @@ def _run_importance_batch(
                 if remaining_mass <= 0.0:
                     compatible = False
                     break
-
+                # Conditional sampling divides by the compatible probability mass.
+                # Multiplying these masses corrects the resulting sampling bias.
                 sample_weight *= remaining_mass
 
             selected_hands[player] = hands[player][selected_index]
@@ -332,7 +425,9 @@ def _run_importance_batch(
         (simulations, player_count),
         dtype=np.float64,
     )
-
+    # Sampling is sequential because each player's selection depends
+    # on previously selected cards. Completed showdowns are independent
+    # and can therefore be evaluated in parallel.
     for sim in prange(simulations):
         scores = numba_evaluate_hands(
             sampled_hands[sim],
@@ -399,7 +494,38 @@ def _importance_statistics(
     squared_weight_squared_shares: NDArray[np.float64],
     confidence_multiplier: float,
 ) -> tuple[list[float], list[float | None], float]:
-    """Calculate weighted equities, approximate MOEs, and effective sample size."""
+    """Calculate self-normalized importance sampling statistics.
+
+    Estimates equity from weighted pot shares and calculates an
+    approximate margin of error using squared importance weights
+    and residuals around the estimated equity.
+
+    Effective sample size measures the concentration of importance
+    weights and may be substantially smaller than the number of
+    completed showdowns.
+
+    Args:
+        weight_sum: Sum of importance weights.
+        squared_weight_sum: Sum of squared importance weights.
+        weighted_shares: Per-player sums of weight times pot share.
+        squared_weight_shares: Per-player sums of squared weight
+            times pot share.
+        squared_weight_squared_shares: Per-player sums of squared
+            weight times squared pot share.
+        confidence_multiplier: Multiplier applied to the estimated
+            standard error.
+
+    Returns:
+        Per-player equity estimates, approximate margins of error,
+        and effective sample size. Margins are None when effective
+        sample size is below two.
+
+    Notes:
+        The margins are approximate and do not provide formal
+        confidence guarantees under adaptive stopping.
+    """
+    # Kish effective sample size: unequal importance weights reduce
+    # the effective amount of information in the sample.
     effective_samples = weight_sum * weight_sum / squared_weight_sum
 
     equities = []
@@ -447,7 +573,50 @@ def _run_importance_monte_carlo(
     on_progress: Callable[[MonteCarloResult], None] | None = None,
     rank_lookup: RankLookup,
 ) -> MonteCarloResult:
-    """Run weighted batches until precision, cancellation, or resource limits."""
+    """Coordinate adaptive importance sampling across bounded batches.
+
+    Builds compatibility lookup tables once per calculation, executes
+    Numba sampling batches, and accumulates weighted showdown statistics.
+
+    Stops when the target margin of error is achieved for every player
+    after reaching the minimum effective sample size, the maximum
+    simulation count is reached, the attempt budget is exhausted,
+    or cancellation is requested.
+
+    Cancellation is checked between batches. Progress callbacks
+    receive intermediate MonteCarloResult instances.
+
+    Args:
+        hands: Numba typed list of encoded player hands.
+        masks: Corresponding hand-mask arrays.
+        probabilities: Normalized hand probabilities for each player.
+        cumulative_probabilities: Weighted sampling CDFs.
+        mode: Number of hole cards per player (4 or 5).
+        board: Known community cards, or None for preflop.
+        board_mask: Bitmask of known community cards.
+        rng: Random generator shared across batches.
+        requested_samples: Maximum number of completed showdowns.
+        batch_size: Maximum number of valid showdowns per batch.
+        attempt_limit: Global maximum number of sampling attempts.
+        target_moe: Target absolute margin of error for every player.
+        min_samples: Minimum effective sample size required for
+            precision-based stopping.
+        confidence_multiplier: Multiplier applied to estimated
+            standard errors.
+        cancel_event: Optional cancellation event.
+        on_progress: Optional callback for intermediate results.
+        rank_lookup: Precomputed five-card ranking tables.
+
+    Returns:
+        MonteCarloResult containing weighted equity estimates,
+        approximate margins of error, simulation and attempt counts,
+        stopping reason, and effective sample size.
+
+    Raises:
+        InterruptedError: If cancelled before any showdowns are completed.
+        SamplingExhaustedError: If no valid showdowns are produced within
+            the sampling attempt limit.
+    """
     player_count = len(hands)
 
     weight_sum = 0.0
