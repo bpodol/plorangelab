@@ -1,3 +1,12 @@
+"""Encode and decode PLO cards, hands, boards, and weighted ranges.
+
+Converts human-readable card notation into compact NumPy arrays
+and bitmasks used by the equity and filtering engines.
+
+Supports explicit weighted hand ranges and percentage-based selection
+from precomputed starting-hand orderings.
+"""
+
 import re
 from dataclasses import dataclass
 
@@ -36,7 +45,18 @@ SUITS_DECODE = ("c", "d", "h", "s")
 
 @dataclass
 class EncodedRange:
-    """Encoded hands, masks, and strictly positive per-hand weights."""
+    """Compact representation of a weighted PLO hand range.
+
+    The three arrays are aligned by hand index. Each hand is stored
+    in descending card-ID order, and its mask identifies the cards
+    contained in that hand.
+
+    Attributes:
+        hands: uint8 array of shape (n, mode) containing encoded hands.
+        masks: uint64 array of shape (n,) with one card bitmask per hand.
+        weights: float32 array of shape (n,) containing positive
+            per-hand weights.
+    """
 
     hands: NDArray[np.uint8]
     masks: NDArray[np.uint64]
@@ -52,7 +72,7 @@ def build_mask(cards: NDArray[np.uint8]) -> np.uint64:
     detection using bitwise AND.
 
     Args:
-        hand: A 1D NumPy array of card IDs (np.uint8).
+        cards: A 1D NumPy array of encoded card IDs (np.uint8).
 
     Returns:
         np.uint64: A bitmask representing all cards in the hand.
@@ -66,9 +86,12 @@ def build_mask(cards: NDArray[np.uint8]) -> np.uint64:
 
 
 def _encode_card(card: str) -> int:
-    """Encode a two-character card as an integer from 0 to 51.
+    """Encode a two-character card notation into an integer ID (0-51).
 
-    Example: ``encode_card("As")`` returns ``51``.
+    Card IDs are calculated as rank * 4 + suit.
+
+    Example:
+        _encode_card("As") returns 51.
     """
     rank, suit = card[0], card[1]
     try:
@@ -77,22 +100,23 @@ def _encode_card(card: str) -> int:
         raise ValueError(f"invalid card: {card!r}") from exc
 
 
-def _encode_hand(hand: str, mode: Mode) -> list[int]:
-    """Encode a concatenated 4- or 5-card hand as a list of card IDs.
-
-    Example: ``encode_hand("AsKcQdJh", 4)`` returns ``[51, 44, 41, 38]``.
-    """
-    cards = [hand[index : index + 2] for index in range(0, len(hand), 2)]
-    encoded_cards = [_encode_card(card) for card in cards]
-    if len(set(encoded_cards)) != mode:
-        raise ValueError("hand cannot contain duplicate cards")
-
-    encoded_cards.sort(reverse=True)
-    return encoded_cards
-
-
 def encode_board(board: str) -> NDArray[np.uint8]:
-    if len(board) not in (6, 8, 10):  # for flop: 3*2, turn: 4*2, and river: 5*2
+    """Encode a flop, turn, or river board into card IDs.
+
+    Preserves the order of the supplied cards and rejects duplicates.
+
+    Args:
+        board: Concatenated two-character card notations containing
+            exactly 3, 4, or 5 cards.
+
+    Returns:
+        One-dimensional uint8 array of encoded community cards.
+
+    Raises:
+        ValueError: If the board length, card notation, or card
+            uniqueness is invalid.
+    """
+    if len(board) not in (6, 8, 10):
         raise ValueError("board must contain 3, 4, or 5 two-character cards")
     cards = [board[index : index + 2] for index in range(0, len(board), 2)]
     encoded_cards = [_encode_card(card) for card in cards]
@@ -140,13 +164,32 @@ def _encode_hands_kernel(
     packed_chars: NDArray[np.uint8],
     mode: int,
 ) -> tuple[NDArray[np.uint8], NDArray[np.uint64], int, int]:
-    """Encode ASCII card bytes into sorted hands and card masks.
+    """Encode packed ASCII card notation into hand arrays and masks.
+
+    Processes each hand in a Numba-compiled loop, validates card IDs
+    and uniqueness, and sorts encoded cards in descending order.
+
+    A hand's bitmask also serves as its order-independent identity,
+    allowing duplicate combinations to be detected.
+
+    Args:
+        packed_chars: uint8 array of shape (n, mode * 2) containing
+            ASCII-encoded card notation.
+        mode: Number of hole cards per hand (4 or 5).
+
+    Returns:
+        A tuple containing encoded hands, card masks, a status code,
+        and the index of the first invalid hand (-1 on success).
 
     Status codes:
-        0: Success
-        1: Invalid card
-        2: Duplicate card within hand
-        3: Duplicate hand within range
+        0: Success.
+        1: Invalid card notation.
+        2: Duplicate card within a hand.
+        3: Duplicate hand within the range.
+
+    Notes:
+        On failure, the output arrays may be partially initialized
+        and must not be used.
     """
     n = packed_chars.shape[0]
 
@@ -227,7 +270,27 @@ def _encode_hands(
     weight_values: list[float],
     mode: Mode,
 ) -> EncodedRange:
-    """Prepare compact card data and run the Numba encoder."""
+    """Encode validated-length hand strings and their associated weights.
+
+    Packs all hand strings into a contiguous ASCII byte array and
+    delegates card encoding and duplicate detection to the Numba kernel.
+
+    Converts kernel status codes into Python exceptions and returns
+    the encoded arrays with float32 weights.
+
+    Args:
+        hand_strings: List of concatenated card strings.
+        weight_values: Per-hand weights aligned with hand_strings.
+        mode: Number of hole cards per hand (4 or 5).
+
+    Returns:
+        EncodedRange containing sorted hands, card masks, and weights.
+
+    Raises:
+        ValueError: If a hand contains invalid or duplicate cards,
+            a duplicate combination is found, or the input contains
+            non-ASCII characters.
+    """
 
     try:
         packed_chars = np.frombuffer(
@@ -261,6 +324,28 @@ def _encode_hands(
 
 
 def _encode_percentage(notation: str, hands_rating: HandRating):
+    """Select a percentage interval from a preordered PLO hand range.
+
+    Percentage notation selects a contiguous slice of the supplied
+    hand ordering, which is assumed to run from strongest to weakest.
+
+    For example, "50%" selects the first 50% of hands, while
+    "50%-7%" selects hands between the 7% and 50% boundaries.
+
+    Boundaries are converted to integer indices by truncation.
+    All selected combinations receive a weight of 1.0.
+
+    Args:
+        notation: Percentage range expression.
+        hands_rating: Precomputed ordered hands and corresponding masks.
+
+    Returns:
+        EncodedRange containing the selected hands with uniform weights.
+
+    Raises:
+        ValueError: If the notation or percentage boundaries are
+            invalid, or the selected interval contains no hands.
+    """
     pattern = r"(\d+(?:\.\d+)?)%(?:-(\d+(?:\.\d+)?)%)?"
 
     match = re.fullmatch(pattern, notation.strip())
@@ -273,7 +358,8 @@ def _encode_percentage(notation: str, hands_rating: HandRating):
 
     if not 0 <= lower < upper <= 100:
         raise ValueError("Percentages must satisfy 0 <= lower < upper <= 100")
-
+    # Truncate percentage boundaries to whole-hand indices rather
+    # than including fractional combinations.
     start = int(len(hands_rating.hands) * lower / 100)
     end = int(len(hands_rating.hands) * upper / 100)
 
@@ -288,13 +374,26 @@ def _encode_percentage(notation: str, hands_rating: HandRating):
 
 
 def encode_range(hands: str, mode: Mode) -> EncodedRange:
-    """Encode comma-separated hands and optional weights.
+    """Parse explicit PLO hand combinations with optional weights.
 
-    Each entry is a hand optionally followed by ``@weight`` in range @1-@100. Missing weights
-    default to 1.0. Returns the encoded hands and a parallel weight array.
+    Accepts comma-separated hands containing 4 or 5 cards, depending
+    on the selected mode. Each hand may include an @weight suffix
+    representing a percentage.
 
-    Example: ``encode_range("AsKsQhJhTh@100,AdKdQcJcTc@43", 5)`` returns
-    ``(hands, weights)`` with shapes ``(2, 5)`` and ``(2,)``.
+    Weights are stored as fractions: @50 becomes 0.5, and omitted
+    weights default to 1.0.
+
+    Args:
+        hands: Comma-separated hand combinations with optional
+            percentage weights, e.g. "AsKsQhJh@100,AdKdQcJc@50".
+        mode: Number of hole cards per hand (4 or 5).
+
+    Returns:
+        EncodedRange containing sorted hands, masks, and float32 weights.
+
+    Raises:
+        ValueError: If the mode, hand notation, weights, or card
+            combinations are invalid.
     """
 
     if mode not in (4, 5):
@@ -329,6 +428,23 @@ def encode_range(hands: str, mode: Mode) -> EncodedRange:
 
 
 def encode_input(input_str: str, mode: Mode, rating: HandRating) -> EncodedRange:
+    """Encode either percentage-based or explicit PLO range notation.
+
+    Inputs containing a percent sign are interpreted as percentage
+    ranges and resolved using the supplied hand ordering. Other
+    inputs are parsed as explicit weighted combinations.
+
+    Args:
+        input_str: Percentage notation or explicit hand combinations.
+        mode: Number of hole cards per hand (4 or 5).
+        rating: Precomputed hand ordering used for percentage selection.
+
+    Returns:
+        EncodedRange containing the selected hands, masks, and weights.
+
+    Raises:
+        ValueError: If the supplied range notation is invalid.
+    """
     input_str = input_str.strip()
 
     if "%" in input_str:

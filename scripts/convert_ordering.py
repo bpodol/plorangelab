@@ -1,7 +1,19 @@
-"""Convert a strength-ordered CSV of PLO hands into ready-to-use NumPy arrays.
+"""Convert preordered PLO hand ranges from CSV into NumPy lookup arrays.
 
-Place this script next to encoder.py, or ensure encoder is importable.
-Example: python convert_ordering.py plo4_ppt_hands.csv --mode 4
+Reads PLO4 or PLO5 hands from a CSV file already ordered by preflop
+strength, encodes them using the project's range encoder, and saves
+the resulting hand and card-mask arrays as .npy resources.
+
+The script preserves the source ordering without calculating or
+validating hand strength.
+
+Usage:
+    uv run python scripts/convert_ordering.py plo4_ppt_hands.csv --mode 4
+    uv run python scripts/convert_ordering.py plo5_ppt_hands.csv --mode 5
+
+Output:
+    plo{mode}_hands.npy: Encoded hands in the original CSV order.
+    plo{mode}_masks.npy: Corresponding uint64 card masks.
 """
 
 import argparse
@@ -14,6 +26,26 @@ from plorangelab.encoder import _encode_hands
 
 
 def convert_ordering(csv_path: Path, mode: int, output_dir: Path) -> None:
+    """Convert a strength-ordered CSV into encoded hand and mask arrays.
+
+    Reads all nonempty CSV cells in their original order and validates
+    hand lengths, card representations, and duplicate combinations
+    using the shared encoder.
+
+    Creates the output directory if necessary and saves two NumPy files
+    with aligned entries, preserving the source ordering.
+
+    Args:
+        csv_path: Path to a CSV containing preordered PLO hands.
+        mode: Number of hole cards per hand (4 or 5).
+        output_dir: Directory where the .npy files will be saved.
+
+    Raises:
+        ValueError: If the mode is invalid, the CSV contains no hands,
+            or any hand fails validation.
+        OSError: If an input file cannot be read or output files
+            cannot be written.
+    """
     if mode not in (4, 5):
         raise ValueError("mode must be 4 or 5")
 
