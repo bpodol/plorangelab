@@ -1,3 +1,16 @@
+/**
+ * Execute an HTTP request and parse its JSON response.
+ *
+ * Converts FastAPI error responses into Error messages, using
+ * string details or combined Pydantic validation messages when
+ * available. Falls back to the HTTP status for other errors.
+ *
+ * Returns undefined for HTTP 204 responses.
+ *
+ * @remarks
+ * The generic type T describes the expected response shape but
+ * does not validate the received JSON at runtime.
+ */
 export async function apiRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, options);
 
