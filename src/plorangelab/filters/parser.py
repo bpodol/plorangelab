@@ -48,7 +48,32 @@ def _suit_mask(suit: str) -> int:
 
 
 def encode_atomic_filter(text: str, mode: Mode) -> AtomicFilter:
-    """Encode a card atom, ensuring it fits the PLO4/PLO5 hand size."""
+    """Parse an atomic card expression into card-set requirements.
+
+    Supported tokens:
+        - Rank (e.g., "A"): Any card of the specified rank.
+        - Suit (e.g., "s"): Any card of the specified suit.
+        - Exact card (e.g., "As"): One specific card.
+
+    Adjacent tokens form a single atom whose requirements must be
+    satisfied by distinct hole cards. Repeated identical requirements
+    are combined into a single CardRequirement with an increased count.
+
+    Args:
+        text: Atomic expression containing card requirements.
+        mode: Number of hole cards per hand (4 or 5).
+
+    Returns:
+        AtomicFilter containing the parsed card requirements.
+
+    Raises:
+        ValueError: If the mode, notation, or requirement count is invalid.
+
+    Notes:
+        Basic requirement limits are validated here. Compatibility
+        between overlapping card sets is checked during evaluation.
+    """
+
     _validate_mode(mode)
     if not text:
         raise ValueError("Atomic filter must not be empty")
@@ -94,6 +119,19 @@ def encode_atomic_filter(text: str, mode: Mode) -> AtomicFilter:
 
 
 class _Parser:
+    """Recursive-descent parser for logical card-filter expressions.
+
+    Maintains the current position within the expression and builds
+    an immutable AST according to operator precedence.
+
+    Precedence, highest to lowest:
+        1. Prefix ! (NOT)
+        2. : (AND) and binary ! (AND NOT)
+        3. | (OR)
+
+    Parentheses override the default precedence.
+    """
+
     def __init__(self, text: str, mode: Mode) -> None:
         _validate_mode(mode)
         self.text = text
@@ -115,6 +153,8 @@ class _Parser:
         return False
 
     def parse(self) -> FilterExpression:
+        """Parse the complete expression and reject unexpected trailing input."""
+
         if self._peek() is None:
             raise ValueError("Filter expression must not be empty")
         result = self._parse_or()
@@ -149,7 +189,8 @@ class _Parser:
             if not self._accept(")"):
                 raise ValueError(f"Expected ')' at position {self.pos}")
             return inner
-
+        # Consecutive card tokens form one atom, requiring distinct cards.
+        # Logical operators separate independently evaluated atoms.
         self._skip_spaces()
         start = self.pos
         while self.pos < len(self.text) and (
@@ -163,9 +204,34 @@ class _Parser:
 
 
 def encode_filter(expression: str, mode: Mode) -> FilterExpression:
-    """Parse a PLO4/PLO5 filter string into an immutable expression tree.
+    """Parse a PLO card-filter expression into an immutable AST.
 
-    Each atomic expression must require at most ``mode`` distinct cards.
-    Examples: ``8!88``, ``(AsKK|AA):!ss``, and ``Asss|Ks``.
+    Supports exact cards, ranks, suits, logical operators, and nested
+    parentheses. Atomic requirements must not exceed the number of
+    hole cards supported by the selected PLO mode.
+
+    Args:
+        expression: Filter expression using card requirements and
+            logical operators (:, !, |).
+        mode: Number of hole cards per hand (4 or 5).
+
+    Returns:
+        FilterExpression AST containing atomic requirements and
+        logical operations.
+
+    Raises:
+        ValueError: If the mode, expression syntax, or atomic
+            requirements are invalid.
+
+    Examples:
+        "8!88"          - At least one eight, excluding hands with
+                        two or more eights.
+        "(AsKK|AA):!ss" - Combined logical card requirements.
+        "Asss|Ks"       - Alternative atomic card requirements.
+
+    Notes:
+        This function only parses the expression. Compilation and
+        evaluation are handled by separate modules.
     """
+
     return _Parser(expression, mode).parse()

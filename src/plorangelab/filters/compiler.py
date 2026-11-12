@@ -53,11 +53,34 @@ class CompiledFilter:
 
 
 def compile_filter(expression: FilterExpression, mode: Mode) -> CompiledFilter:
-    """Compile a parsed AST for the given PLO variant.
+    """Compile a filter AST into postfix instructions for Numba evaluation.
 
-    ``mode`` must match the mode used when parsing the filter. It is also
-    validated here to protect against manually constructed invalid ASTs.
+    Converts logical expression nodes into MATCH, NOT, AND, and OR
+    instructions. Each atomic filter is expanded into card requirement
+    slots, ordered from most restrictive to least restrictive.
+
+    The resulting program uses read-only NumPy arrays and can be
+    reused to evaluate multiple ranges without recompilation.
+
+    Args:
+        expression: Parsed filter expression AST.
+        mode: Number of hole cards per hand (4 or 5). Atomic
+            requirements are validated against this limit.
+
+    Returns:
+        CompiledFilter containing postfix operations, operands,
+        card requirement masks, slot counts, and the PLO mode.
+
+    Raises:
+        ValueError: If the mode or atomic requirements are invalid.
+        TypeError: If the AST contains an unsupported node type.
+
+    Notes:
+        Compilation validates individual requirements but does not
+        determine whether overlapping card sets can be satisfied
+        using distinct cards. That is handled by the evaluator.
     """
+
     if not isinstance(mode, int) or isinstance(mode, bool) or mode not in (4, 5):
         raise ValueError("mode must be 4 (PLO4) or 5 (PLO5)")
 
@@ -124,6 +147,8 @@ def compile_filter(expression: FilterExpression, mode: Mode) -> CompiledFilter:
         slot_masks,
         np.asarray([len(slots) for slots in atom_slots], dtype=np.int32),
     )
+    # frozen=True prevents field reassignment but does not protect
+    # NumPy array contents. Mark the compiled arrays read-only.
     for array in arrays:
         array.setflags(write=False)
 

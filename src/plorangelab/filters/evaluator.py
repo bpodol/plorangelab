@@ -27,11 +27,32 @@ def _matches_slots(
     available: NDArray[np.uint64],
     used: NDArray[np.uint64],
 ) -> bool:
-    """Assign a different card to each required slot, if possible.
+    """Check whether distinct cards can satisfy all slots of an atomic filter.
 
-    ``available`` and ``used`` are reusable scratch arrays of length
-    ``mode``. The compiler guarantees 1 <= count <= mode.
+    Uses iterative depth-first backtracking to assign one eligible card
+    to each requirement slot. If a slot has no available candidates,
+    the algorithm backtracks and tries another assignment.
+
+    A card assigned to one slot cannot be reused by another slot
+    within the same atom.
+
+    Args:
+        hand_mask: Bitmask representing the cards in the evaluated hand.
+        slot_masks: Compiled card requirements for all atomic filters.
+        atom_index: Index of the atomic filter being evaluated.
+        count: Number of requirement slots in the atom.
+        available: Reusable buffer holding remaining candidate cards
+            at each backtracking depth.
+        used: Reusable buffer tracking cards assigned at each depth.
+
+    Returns:
+        True if every slot can be assigned a distinct eligible card.
+
+    Notes:
+        The compiler guarantees that count is between 1 and mode.
+        The scratch buffers must have at least mode elements.
     """
+
     depth = 0
     used[0] = np.uint64(0)
     available[0] = hand_mask & slot_masks[atom_index, 0]
@@ -50,6 +71,7 @@ def _matches_slots(
         if depth + 1 == count:
             return True  # All slots have distinct matching cards.
 
+        # Carry assigned cards forward to prevent their reuse in later slots.
         used[depth + 1] = used[depth] | chosen
         depth += 1
         available[depth] = hand_mask & slot_masks[atom_index, depth] & ~used[depth]
@@ -66,7 +88,32 @@ def _evaluate_compiled(
     slot_counts: NDArray[np.int32],
     mode: int,
 ) -> NDArray[np.bool_]:
-    """Evaluate postfix instructions for every hand, reusing scratch space."""
+    """Execute a compiled filter program against every encoded hand mask.
+
+    Evaluates postfix instructions using a Boolean stack. MATCH pushes
+    the result of atomic card matching, NOT negates the top value, and
+    AND/OR combine the top two values into one.
+
+    Each hand is evaluated independently. The stack and backtracking
+    buffers are allocated once and reused across hands.
+
+    Args:
+        hand_masks: One uint64 card mask per hand.
+        operations: Compiled postfix operation codes.
+        operands: Atomic filter indices for MATCH instructions.
+        slot_masks: Eligible card masks for atomic requirement slots.
+        slot_counts: Number of slots belonging to each atomic filter.
+        mode: Number of hole cards per hand (4 or 5).
+
+    Returns:
+        Boolean array aligned with hand_masks, indicating which hands
+        satisfy the compiled filter expression.
+
+    Notes:
+        Inputs are assumed to be valid compiled instructions and
+        encoded hand masks.
+    """
+
     selection = np.empty(len(hand_masks), dtype=np.bool_)
     stack = np.empty(len(operations), dtype=np.bool_)
     available = np.empty(mode, dtype=np.uint64)
