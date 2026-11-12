@@ -1,3 +1,10 @@
+"""Manage player ranges and filter state across poker streets.
+
+Maintains independent preflop, flop, turn, and river states,
+propagates filtered ranges between streets, and preserves
+compatible street states when community cards change.
+"""
+
 from __future__ import annotations
 
 from copy import copy
@@ -18,11 +25,34 @@ from .filter_manager import (
 
 @dataclass(frozen=True, eq=False, slots=True)
 class Board:
+    """Represent a community board using encoded cards and a bitmask.
+
+    Attributes:
+        cards: Encoded community cards stored in a uint8 array.
+        mask: uint64 bitmask identifying the cards on the board.
+
+    Notes:
+        Boards created through from_string() have read-only card arrays.
+        The mask allows board comparison regardless of card order.
+    """
+
     cards: NDArray[np.uint8]
     mask: np.uint64
 
     @classmethod
     def from_string(cls, board: str) -> Board:
+        """Create a board from concatenated card notation.
+
+        Args:
+            board: String containing 3, 4, or 5 two-character cards.
+
+        Returns:
+            Board containing encoded cards and their combined bitmask.
+
+        Raises:
+            ValueError: If the board notation or cards are invalid.
+        """
+
         cards = encode_board(board)
         mask = build_mask(cards)
         cards.setflags(write=False)
@@ -32,6 +62,17 @@ class Board:
 
 @dataclass
 class StreetState:
+    """Maintain a player's range and filter configuration for one street.
+
+    Each street owns a FilterManager initialized with its base range.
+    The current range and filtered coverage are derived from that manager.
+
+    Attributes:
+        board: Community cards defining the street, or None for preflop.
+        filter_manager: Manager owning this street's filter definitions,
+            activation states, and derived range selection.
+    """
+
     board: Board | None
     filter_manager: FilterManager
 
@@ -59,6 +100,20 @@ def _extends(previous: Board, next_board: Board) -> bool:
 
 
 class PlayerRangeState:
+    """Manage one player's ranges and filtering across poker streets.
+
+    Maintains a persistent preflop state and optional states for the
+    flop, turn, and river. Each street has an independent FilterManager.
+
+    When advancing to a new street, its base range is derived from
+    the current filtered range of the latest compatible previous street.
+    Filter definitions are not copied between streets.
+
+    Existing street states are reused when their boards remain valid.
+    Changing earlier community cards invalidates incompatible later
+    street states.
+    """
+
     def __init__(self, hands: EncodedRange, id: int, mode: Mode):
         self.mode: Mode = mode
         self.id: int = id
@@ -77,6 +132,26 @@ class PlayerRangeState:
         return self.active_street.filtered_coverage
 
     def apply_board_change(self, board: Board) -> None:
+        """Update the active street and preserve compatible range states.
+
+        Selects the street corresponding to the new board length.
+        An existing state is reused when its board matches the new board.
+
+        When a new street state is required, its base range is derived
+        from the current filtered range of the latest compatible earlier
+        street, with hands containing board cards removed.
+
+        Incompatible street states and states for later streets are
+        discarded. Newly created states start with empty filter trees.
+
+        Args:
+            board: Valid encoded flop, turn, or river board.
+
+        Raises:
+            ValueError: If the board does not contain 3, 4, or 5 cards,
+                or board-card removal leaves no hands in the parent range.
+        """
+
         street_size = len(board.cards)
         if street_size == 3:
             if self.flop is not None and board.mask == self.flop.board.mask:
@@ -100,6 +175,8 @@ class PlayerRangeState:
                     if self.flop is not None and _extends(self.flop.board, board)
                     else None
                 )
+                # Carry forward the parent's filtered range, not its filter
+                # definitions. The new street receives an independent filter tree.
                 parent = keep_flop if keep_flop is not None else self.preflop
                 sanitized_range = sanitize_range(parent.current_range, board.mask)
                 next_turn = StreetState.from_range(sanitized_range, board, self.mode)
@@ -137,6 +214,13 @@ class PlayerRangeState:
         raise ValueError("Board can only contain 3, 4, or 5 cards")
 
     def clear_board(self) -> None:
+        """Return to preflop and discard all postflop street states.
+
+        Preserves the original preflop range and its filter configuration.
+        Removes the flop, turn, and river states, including their saved
+        filters and activation states.
+        """
+
         self.active_street = self.preflop
         self.flop = None
         self.turn = None
@@ -177,6 +261,19 @@ class PlayerRangeState:
         )
 
     def clone(self) -> PlayerRangeState:
+        """Clone player state without sharing mutable filter configuration.
+
+        Creates independent StreetState and FilterManager instances for
+        all existing streets while reusing immutable-by-convention board
+        and encoded range data.
+
+        The active_street reference is updated to point to the
+        corresponding cloned street.
+
+        Returns:
+            Independent PlayerRangeState suitable for transactional edits.
+        """
+
         cloned = copy(self)
         for name in ("preflop", "flop", "turn", "river"):
             old_street = getattr(self, name)
@@ -185,6 +282,8 @@ class PlayerRangeState:
                 continue
             new_street = old_street.clone()
             setattr(cloned, name, new_street)
+            # Rebind the active street to its clone rather than retaining
+            # a reference to the original player's mutable street state.
             if old_street is self.active_street:
                 cloned.active_street = new_street
         return cloned

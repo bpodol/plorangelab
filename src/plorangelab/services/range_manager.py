@@ -1,3 +1,12 @@
+"""Coordinate player ranges, board state, filters, and equity calculations.
+
+Manages six optional player slots and delegates street-specific state
+to PlayerRangeState instances.
+
+Uses clone-based updates to prevent failed operations from publishing
+partially modified player or board state.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -16,6 +25,19 @@ from .player_range_state import Board, PlayerRangeState
 
 
 class RangeManager:
+    """Manage player ranges and shared board state for one calculation context.
+
+    Owns up to six player slots and a shared community board. Delegates
+    range parsing to the encoder, street transitions to PlayerRangeState,
+    and filter operations to each player's active FilterManager.
+
+    Coordinates equity calculations using the currently selected ranges
+    and shared ranking resources.
+
+    State-changing operations prepare replacement objects before
+    publishing them, preserving the previous state if preparation fails.
+    """
+
     def __init__(
         self,
         resources: EngineResources,
@@ -43,6 +65,25 @@ class RangeManager:
         return result
 
     def add_range(self, input_range: str, mode: Mode, player_index: int) -> None:
+        """Create or replace a player range in the specified slot.
+
+        Parses the supplied range notation and initializes a new
+        PlayerRangeState. If a board is already selected, applies that
+        board before publishing the new player state.
+
+        Replacing a player discards the previous range and filter states
+        associated with that slot.
+
+        Args:
+            input_range: Explicit weighted hands or percentage-based range.
+            mode: PLO variant (4 or 5).
+            player_index: Zero-based player slot index (0-5).
+
+        Raises:
+            ValueError: If the slot index or range is invalid, or board
+                filtering removes all hands.
+        """
+
         if not 0 <= player_index <= 5:
             raise ValueError("Out of range player index")
         encoded_range = encode_input(input_range, mode, self.ratings[mode])
@@ -57,10 +98,34 @@ class RangeManager:
         self.players[player_index] = None
 
     def change_board(self, input_board: str | None):
+        """Update the shared board and all occupied player slots atomically.
+
+        Creates a validated Board instance and applies the change to
+        clones of every occupied PlayerRangeState.
+
+        Each player independently preserves compatible street states
+        and updates its current range according to the new board.
+
+        The updated player list and board are published only after
+        every player has been updated successfully.
+
+        Passing None clears the board and returns all players to preflop.
+
+        Args:
+            input_board: Concatenated notation of 3, 4, or 5 community
+                cards, or None to clear the board.
+
+        Raises:
+            ValueError: If the board is invalid or the change leaves
+                any player's applicable range empty.
+        """
+
         if input_board is None:
             self.clear_board()
             return
         new_board = Board.from_string(input_board)
+        # Stage changes to every player before publishing the new state.
+        # If any player update fails, the original players and board remain intact.
         updated_players = self.players.copy()
 
         for i, player in enumerate(self.players):
@@ -74,6 +139,15 @@ class RangeManager:
         self.board = new_board
 
     def clear_board(self) -> None:
+        """Clear the community board and reset all players to preflop.
+
+        Clones each occupied player and discards its postflop street
+        states while preserving its preflop range and filters.
+
+        Publishes the updated player list and clears the shared board
+        after all player updates have completed.
+        """
+
         updated_players = self.players.copy()
 
         for index, player in enumerate(self.players):
@@ -140,6 +214,39 @@ class RangeManager:
         cancel_event: Event | None = None,
         target_moe: float = 0.001,
     ) -> tuple[list[int], EquityResult]:
+        """Calculate equity for all occupied player slots.
+
+        Collects the current filtered range from each occupied player,
+        preserving their slot order, and delegates the calculation to
+        the equity engine.
+
+        Uses the shared board and precomputed ranking tables.
+        Monte Carlo progress callbacks, cancellation, and precision
+        settings are forwarded to compute_equity().
+
+        Args:
+            mode: PLO variant used for the equity calculation (4 or 5).
+            on_progress: Optional callback receiving intermediate
+                MonteCarloResult instances.
+            cancel_event: Optional event requesting calculation cancellation.
+            target_moe: Target absolute Monte Carlo margin of error.
+
+        Returns:
+            A tuple containing:
+                - Player slot indices in calculation order.
+                - EquityResult with corresponding per-player equities.
+
+        Raises:
+            ValueError: If the player configuration or equity inputs
+                are invalid.
+            RuntimeError: If the delegated calculation fails or exceeds
+                an execution limit.
+
+        Notes:
+            This method does not modify player ranges or filter states.
+            Equity values are aligned with the returned player indices,
+            not necessarily with all six available slots.
+        """
 
         active_players = [player for player in self.players if player is not None]
         ranges = [player.current_range for player in active_players]

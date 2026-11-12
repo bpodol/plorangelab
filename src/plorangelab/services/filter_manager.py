@@ -1,3 +1,12 @@
+"""Manage hierarchical filters and weighted range selections for one street.
+
+Stores filter definitions and nested groups, manages activation states,
+and derives the current range by combining active filter selections.
+
+Uses the filter expression engine to evaluate predicates against
+the street's original encoded range.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -99,6 +108,29 @@ class FilterManager:
         name: str | None = None,
         path: tuple[str, ...] = (),
     ) -> float:
+        """Create a filter evaluated against the street's base range.
+
+        Stores the Boolean selection and its weighted coverage. The filter
+        is identified by its name, or by its expression when no name is given.
+
+        New root-level filters start inactive. Filters added directly inside
+        an active group start active if they match at least one hand.
+
+        Filters matching zero hands can be saved but start inactive.
+
+        Args:
+            filter_expression: Expression evaluated by the filter engine.
+            name: Optional filter name, defaulting to the expression.
+            path: Group names identifying the parent location.
+
+        Returns:
+            Weighted coverage relative to the original street range.
+
+        Raises:
+            ValueError: If the name, path, or expression is invalid,
+                or the name already exists at the target location.
+        """
+
         key = filter_expression if name is None else name
         self._check_name(key)
         children, ancestors = self._parent(path)
@@ -117,6 +149,20 @@ class FilterManager:
         return coverage
 
     def create_group(self, name: str, path: tuple[str, ...] = ()) -> None:
+        """Create an empty, inactive filter group.
+
+        The group can contain filters and nested groups. New groups start
+        inactive even when their parent group is active.
+
+        Args:
+            name: Unique group name within the parent location.
+            path: Group names identifying the parent location.
+
+        Raises:
+            ValueError: If the name is invalid, the parent does not exist,
+                or the name already exists at the target location.
+        """
+
         self._check_name(name)
         children, _ = self._parent(path)
         self._check_new_name(children, name)
@@ -125,6 +171,19 @@ class FilterManager:
         children[name] = FilterGroup(name=name)
 
     def delete(self, address: FilterAddress) -> None:
+        """Delete a filter or group and update the derived range.
+
+        Deleting a group also removes all its descendants. The active
+        selection and affected group coverage values are recalculated.
+
+        Args:
+            address: Name and parent-group path identifying the target node.
+
+        Raises:
+            ValueError: If the target filter, group, or parent path
+                does not exist.
+        """
+
         children, ancestors = self._parent(address.path)
         if address.name not in children:
             raise ValueError(f"Unknown filter or group: {address!r}")
@@ -134,6 +193,29 @@ class FilterManager:
         self._refresh(update_group_coverage=bool(ancestors))
 
     def set_active(self, address: FilterAddress, value: bool) -> None:
+        """Activate or deactivate a filter or group.
+
+        Activating a filter also activates its ancestor groups without
+        changing sibling activation states.
+
+        Activating a group recursively activates all descendants.
+        Deactivating a group recursively deactivates all descendants.
+
+        If the requested state already matches the node's state, no
+        changes are made, preserving individually toggled children.
+
+        The active selection and current range are recalculated after
+        a successful state change.
+
+        Args:
+            address: Name and parent-group path identifying the target node.
+            value: Desired activation state.
+
+        Raises:
+            ValueError: If the target does not exist or activation is
+                requested for a node whose membership matches no hands.
+        """
+
         node, ancestors = self._find(address)
         if node.active == value:
             return  # Idempotent: do not reset individually toggled children.
@@ -177,7 +259,19 @@ class FilterManager:
     def get_coverage(
         self, address: FilterAddress, *, active_only: bool = False
     ) -> float:
-        """Weighted coverage for a filter or a group, relative to its street."""
+        """Return weighted coverage relative to the original street range.
+
+        By default, returns the node's full membership coverage regardless
+        of activation state.
+
+        When active_only=True, includes only currently active descendants
+        and respects inactive ancestor groups.
+
+        Returns:
+            Fraction of the street's original total weight covered by
+            the selected hands.
+        """
+
         if not active_only:
             return self.get_node(address).coverage
 
@@ -209,12 +303,26 @@ class FilterManager:
         }
 
     def get_tree(self) -> dict[str, dict[str, object]]:
+        """Return a serialized snapshot of the complete filter hierarchy.
+
+        Includes filter expressions, names, coverage, activation states,
+        and recursively nested groups.
+
+        The returned dictionaries do not expose internal selection arrays
+        or mutable filter nodes.
+        """
+
         return {
             name: self._serialize_node(name, node)
             for name, node in self._filters.items()
         }
 
     def get_node_info(self, address: FilterAddress) -> dict[str, object]:
+        """Return serialized metadata for the addressed filter or group.
+
+        Group results include recursively serialized descendants.
+        """
+
         node = self.get_node(address)
         return self._serialize_node(address.name, node)
 
@@ -294,6 +402,29 @@ class FilterManager:
         node: Filter | FilterGroup,
         active_selection: NDArray[np.bool_] | None,
     ) -> NDArray[np.bool_]:
+        """Collect group membership and accumulate active filter selections.
+
+        Returns the union of all descendant leaf selections regardless
+        of their activation states. This membership determines each
+        group's total coverage.
+
+        Separately accumulates active leaf selections into the supplied
+        array. Inactive groups prevent their descendants from contributing
+        to the active selection.
+
+        Args:
+            node: Filter or group being traversed.
+            active_selection: Shared Boolean accumulator, or None when
+                the current subtree is gated by an inactive ancestor.
+
+        Returns:
+            Boolean membership selection of the node, including inactive
+            descendants.
+
+        Notes:
+            Group coverage values are updated as a side effect.
+        """
+
         if isinstance(node, Filter):
             if node.active and active_selection is not None:
                 active_selection |= node.selection
@@ -315,10 +446,30 @@ class FilterManager:
         return membership
 
     def _coverage(self, selection: NDArray[np.bool_]) -> float:
+        """Calculate selected weight as a fraction of total base-range weight.
+
+        Overlapping filter selections are counted only once because
+        coverage is calculated from their combined Boolean selection.
+        """
+
         numerator = np.sum(self.base_range.weights[selection], dtype=np.float64)
         return float(numerator / self.base_weights_sum)
 
     def _refresh(self, *, update_group_coverage: bool = False) -> None:
+        """Rebuild the active selection, current range, and coverage caches.
+
+        Combines active filter selections using Boolean OR.
+
+        When update_group_coverage=True, also recalculates group
+        membership coverage from all descendant leaves, including
+        inactive ones.
+
+        If no active selection contains any hands, the manager restores
+        the original base range and sets filtered coverage to 1.0.
+
+        The resulting active selection is stored as a read-only array.
+        """
+
         selection = np.zeros(len(self.base_range.masks), dtype=np.bool_)
         if update_group_coverage:
             for node in self._filters.values():
@@ -328,7 +479,8 @@ class FilterManager:
                 self._union_into(selection, node, active_only=True)
 
         if not selection.any():
-            # All filter definitions may be inactive (or empty groups).
+            # An empty effective selection means no filtering is applied,
+            # not that the current range should become empty.
             self._active_selection = None
             self._current_range = self.base_range
             self._filtered_coverage = 1.0
