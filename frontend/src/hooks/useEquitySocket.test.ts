@@ -570,7 +570,7 @@ test('confirms cancellation and does not resume a cancelled job', () => {
       });
     });
 
-    expect(result.current.equityStatus).toBe('running');
+    expect(result.current.equityStatus).toBe('cancelling');
 
     // Backend confirms cancellation.
     act(() => {
@@ -599,4 +599,38 @@ test('confirms cancellation and does not resume a cancelled job', () => {
     vi.clearAllTimers();
     vi.useRealTimers();
   }
+});
+
+test('handles cooperative cancellation returned as a result', () => {
+  const socket = setupSocket();
+  const { result } = renderHook(() => useEquitySocket('session-123'));
+
+  const cancelledResult = {
+    type: 'result',
+    job_id: 'job-123',
+    equities: { '0': 0.6, '1': 0.4 },
+    details: {
+      method: 'monte-carlo',
+      margins_of_error: [0.01, 0.01],
+      simulations: 1000,
+      attempts: 1200,
+      stop_reason: 'cancelled',
+      sampler: 'rejection',
+      effective_samples: null,
+    },
+  } satisfies EquityMessage;
+
+  act(() => {
+    socket.emitMessage({ type: 'started', job_id: 'job-123' });
+    socket.emitMessage({ type: 'cancel_requested' });
+  });
+
+  expect(result.current.equityStatus).toBe('cancelling');
+
+  act(() => {
+    socket.emitMessage(cancelledResult);
+  });
+
+  expect(result.current.equityStatus).toBe('cancelled');
+  expect(result.current.equityMessage).toEqual(cancelledResult);
 });

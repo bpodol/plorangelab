@@ -86,13 +86,16 @@ export function useEquitySocket(sessionId: string | null) {
               break;
 
             case 'result':
-              setEquityStatus('completed');
+              setEquityStatus(
+                message.details.stop_reason === 'cancelled' ? 'cancelled' : 'completed',
+              );
               jobRef.current = null;
               console.log('Equities:', message.equities);
               console.log('Details:', message.details);
               break;
 
             case 'cancel_requested':
+              setEquityStatus('cancelling');
               console.log('Cancellation requested');
               break;
 
