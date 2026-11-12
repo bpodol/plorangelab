@@ -12,6 +12,23 @@ interface EquityPanelProps {
   onCancel: () => void;
 }
 
+/**
+ * Render equity calculation controls, progress, and results.
+ *
+ * Maintains the target margin of error input locally and validates
+ * it before allowing a calculation to start.
+ *
+ * Receives connection status, calculation status, and WebSocket
+ * messages from the parent. Calculation and cancellation requests
+ * are delegated through callbacks.
+ *
+ * Displays simulation progress, the highest reported margin of
+ * error, and per-player equity results when available.
+ *
+ * @remarks
+ * This component does not manage the WebSocket connection or
+ * perform equity calculations.
+ */
 export function EquityPanel({
   mode,
   status,
@@ -22,6 +39,8 @@ export function EquityPanel({
 }: EquityPanelProps) {
   const [targetMoeInput, setTargetMoeInput] = useState('0.0015');
 
+  // Keep the input as a string to support intermediate editing
+  // states; convert it to a number separately for validation.
   const targetMoe = Number(targetMoeInput);
 
   const isValidTargetMoe =
@@ -30,6 +49,8 @@ export function EquityPanel({
     targetMoe > 0 &&
     targetMoe <= 0.005;
 
+  // Show the highest available player MOE as the current precision
+  // indicator; null entries represent unavailable estimates.
   const validMoes =
     message?.type === 'progress' ? message.margins_of_error.filter((moe) => moe !== null) : [];
 
