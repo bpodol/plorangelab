@@ -1,3 +1,9 @@
+"""Initialize the FastAPI application and manage shared resources.
+
+Loads equity engine resources, creates the session registry and
+thread pool, registers API routers, and coordinates shutdown.
+"""
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -15,6 +21,27 @@ from .routers.sessions import router as sessions_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Initialize shared resources and release them on application shutdown.
+
+    Startup:
+        Load precomputed equity engine resources.
+        Create the in-memory SessionManager.
+        Create a ThreadPoolExecutor with two workers.
+
+    Shutdown:
+        Close all registered sessions and request cancellation
+        of their unfinished equity calculations.
+        Shut down the executor, cancelling queued futures and
+        waiting for running workers to finish.
+
+    Resources are stored on app.state for use by API handlers.
+
+    Notes:
+        Running equity calculations use cooperative cancellation.
+        Executor shutdown waits for running workers to exit rather
+        than forcibly terminating their threads.
+    """
+
     resources = load_resources()
 
     app.state.session_manager = SessionManager(resources)
@@ -23,6 +50,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Request cancellation through session cleanup before shutting
+        # down the executor and waiting for running workers to finish.
         app.state.session_manager.clear()
 
         await asyncio.to_thread(

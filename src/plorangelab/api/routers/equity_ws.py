@@ -1,4 +1,12 @@
-"""WebSocket endpoint for live equity calculations."""
+"""Expose the WebSocket protocol for asynchronous equity calculations.
+
+Handles start, resume, and cancel commands for a session's equity job.
+Coordinates connection-specific update publishers while delegating
+job execution and progress delivery to the WebSocket runtime.
+
+Disconnecting does not cancel an equity calculation. Clients may
+reconnect and resume receiving updates from the session's saved job.
+"""
 
 import asyncio
 from contextlib import suppress
@@ -22,7 +30,36 @@ router = APIRouter()
 
 @router.websocket("/api/sessions/{session_id}/equity/ws")
 async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
+    """Handle equity calculation commands over a session WebSocket.
+
+    Validates the session before accepting the connection and checks
+    its validity again whenever a client message is received.
+
+    Supported commands:
+        start: Validate calculation parameters and submit a new job.
+        resume: Subscribe to the session's existing job, optionally
+            verifying its identifier.
+        cancel: Request cooperative cancellation of the running job.
+
+    Progress and terminal results are published by a separate
+    asynchronous task using the WebSocket runtime.
+
+    An asyncio.Lock serializes outgoing messages from the command
+    handler and the background publisher.
+
+    Args:
+        websocket: Active FastAPI WebSocket connection.
+        session_id: Identifier of the session associated with the job.
+
+    Notes:
+        Invalid or expired sessions are closed with WebSocket code 1008.
+        Disconnecting stops this connection's publisher but does not
+        cancel the underlying equity job.
+    """
+
     session_manager: SessionManager = websocket.app.state.session_manager
+    # SessionManager uses threading locks, so perform the lookup
+    # outside the event loop to avoid blocking other async tasks.
     session: Session | None = await asyncio.to_thread(
         session_manager.get_session, session_id
     )
@@ -37,12 +74,24 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
     publisher_task: asyncio.Task[None] | None = None
 
     async def send(message: dict) -> None:
+        """Serialize outgoing messages across concurrent connection tasks."""
+
         async with send_lock:
             await websocket.send_json(message)
 
     async def replace_publisher(job: EquityJob) -> None:
+        """Replace this connection's update publisher with one for the given job.
+
+        Cancels and awaits the previous publisher task, if present,
+        before starting a new task that subscribes to job updates.
+
+        Cancelling the publisher does not cancel the equity job itself.
+        """
+
         nonlocal publisher_task
 
+        # Stop the previous publisher before subscribing this connection
+        # to another job. The underlying calculation remains unaffected.
         if publisher_task is not None:
             publisher_task.cancel()
 
