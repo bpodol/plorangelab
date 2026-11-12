@@ -10,7 +10,7 @@ The design separates three responsibilities:
 2. **`PlayerRangeState`** owns one player's preflop, flop, turn, and river states and manages transitions between them.
 3. **`FilterManager`** owns a single street's hierarchical filter definitions and derives the selected range from their activation states.
 
-The services reuse the stateless [filter expression engine](filter-engine.md) to evaluate predicates, the [range encoder](encoding.md) to parse inputs, and the [equity engine](equity.md) to calculate equities. They do not implement those algorithms themselves.
+The services reuse the stateless [filter expression engine](../filter-engine.md) to evaluate predicates, the [range encoder](../encoding.md) to parse inputs, and the [equity engine](../equity.md) to calculate equities. They do not implement those algorithms themselves.
 
 ## Source files and ownership
 
@@ -206,7 +206,7 @@ The design relies on callers treating shared encoded arrays and other exposed mu
 
 `RangeManager.calculate_equity()` gathers the `current_range` of every occupied slot, preserving ascending slot order. It passes those ranges, the shared board, the selected PLO mode, and the shared `rank_lookup` to `compute_equity()`.
 
-The method forwards optional Monte Carlo progress callbacks, a cancellation event, and a target margin of error. It delegates sampling, exact enumeration, input validation, and statistics to the [equity engine](equity.md).
+The method forwards optional Monte Carlo progress callbacks, a cancellation event, and a target margin of error. It delegates sampling, exact enumeration, input validation, and statistics to the [equity engine](../equity.md).
 
 Its return value is a pair:
 
@@ -230,7 +230,9 @@ The shared calculation mode must be compatible with all occupied ranges. A mixed
 
 ## Related documentation
 
-- [Encoding and starting-hand orderings](encoding.md)
-- [Card filter expression engine](filter-engine.md)
-- [Equity engine](equity.md)
-- [Five-card hand ranking](hand-ranking.md)
+- [Encoding and starting-hand orderings](../encoding.md)
+- [Card filter expression engine](../filter-engine.md)
+- [Equity engine](../equity.md)
+- [Five-card hand ranking](../hand-ranking.md)
+
+[← Services overview](README.md) · [Session and equity jobs](session-and-jobs.md)
