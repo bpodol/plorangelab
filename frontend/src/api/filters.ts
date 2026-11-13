@@ -1,29 +1,5 @@
 import { apiRequest } from './client';
-
-export interface FilterInfo {
-  type: 'filter';
-  name: string;
-  expression: string;
-  coverage: number;
-  active: boolean;
-}
-
-/**
- * Represent a saved filter group with recursively nested children.
- *
- * Children are keyed by name and may be individual filters
- * or other groups.
- */
-export interface FilterGroupInfo {
-  type: 'group';
-  name: string;
-  coverage: number;
-  active: boolean;
-  filters: Record<string, FilterNode>;
-}
-
-export type FilterNode = FilterInfo | FilterGroupInfo;
-export type FilterTree = Record<string, FilterNode>;
+import type { FilterTree, FilterNode, PlayerFilterSnapshot } from '../types';
 
 export type FilterResource = 'filters' | 'groups';
 
@@ -36,20 +12,6 @@ export interface CreateFilterRequest {
 export interface CreateGroupRequest {
   name: string;
   path?: string[];
-}
-
-export interface CoverageResponse {
-  /**
-   * Weighted coverage relative to the active street's base range.
-   * Filter creation returns the new filter's membership coverage;
-   * activation, deletion, and clearing return effective range coverage.
-   */
-  coverage: number;
-}
-
-export interface GroupResponse {
-  name: string;
-  path: string[];
 }
 
 function baseUrl(sessionId: string, playerId: number): string {
@@ -119,14 +81,15 @@ export function getFilter(
  * range and saves its selection in the specified parent group.
  *
  * @param request - Filter expression, optional name, and parent path.
- * @returns The new filter's weighted membership coverage.
+ * @returns Updated player snapshot containing hand counts,
+ * weighted filter coverage, and the complete filter tree.
  */
 export function createFilter(
   sessionId: string,
   playerId: number,
   request: CreateFilterRequest,
-): Promise<CoverageResponse> {
-  return apiRequest<CoverageResponse>(`${baseUrl(sessionId, playerId)}/filters`, {
+): Promise<PlayerFilterSnapshot> {
+  return apiRequest<PlayerFilterSnapshot>(`${baseUrl(sessionId, playerId)}/filters`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -139,14 +102,15 @@ export function createFilter(
  * New groups start inactive, including those created inside
  * active groups.
  *
- * @returns The created group's name and parent path.
+ * @returns Updated player snapshot containing hand counts,
+ * weighted filter coverage, and the complete filter tree.
  */
 export function createGroup(
   sessionId: string,
   playerId: number,
   request: CreateGroupRequest,
-): Promise<GroupResponse> {
-  return apiRequest<GroupResponse>(`${baseUrl(sessionId, playerId)}/groups`, {
+): Promise<PlayerFilterSnapshot> {
+  return apiRequest<PlayerFilterSnapshot>(`${baseUrl(sessionId, playerId)}/groups`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -164,7 +128,8 @@ export function createGroup(
  * @param name - Target node name.
  * @param active - Desired activation state.
  * @param path - Parent group hierarchy.
- * @returns The player's resulting effective weighted coverage.
+ * @returns Updated player snapshot containing hand counts,
+ * weighted filter coverage, and the complete filter tree.
  */
 export function setFilterActive(
   sessionId: string,
@@ -173,8 +138,8 @@ export function setFilterActive(
   name: string,
   active: boolean,
   path: string[] = [],
-): Promise<CoverageResponse> {
-  return apiRequest<CoverageResponse>(nodeUrl(sessionId, playerId, resource, name, path), {
+): Promise<PlayerFilterSnapshot> {
+  return apiRequest<PlayerFilterSnapshot>(nodeUrl(sessionId, playerId, resource, name, path), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ active }),
@@ -189,7 +154,8 @@ export function setFilterActive(
  * @param resource - Filter or group URL.
  * @param name - Target node name.
  * @param path - Parent group hierarchy.
- * @returns The player's resulting effective weighted coverage.
+ * @returns Updated player snapshot containing hand counts,
+ * weighted filter coverage, and the complete filter tree.
  */
 export function deleteFilter(
   sessionId: string,
@@ -197,8 +163,8 @@ export function deleteFilter(
   resource: FilterResource,
   name: string,
   path: string[] = [],
-): Promise<CoverageResponse> {
-  return apiRequest<CoverageResponse>(nodeUrl(sessionId, playerId, resource, name, path), {
+): Promise<PlayerFilterSnapshot> {
+  return apiRequest<PlayerFilterSnapshot>(nodeUrl(sessionId, playerId, resource, name, path), {
     method: 'DELETE',
   });
 }
@@ -209,10 +175,11 @@ export function deleteFilter(
  * Preserves their definitions and hierarchy while restoring
  * the effective range to the street's unfiltered base range.
  *
- * @returns Effective weighted coverage of 1.0 on success.
+ * @returns Updated player snapshot containing hand counts,
+ * weighted filter coverage, and the complete filter tree.
  */
-export function clearFilters(sessionId: string, playerId: number): Promise<CoverageResponse> {
-  return apiRequest<CoverageResponse>(`${baseUrl(sessionId, playerId)}/filters/clear`, {
+export function clearFilters(sessionId: string, playerId: number): Promise<PlayerFilterSnapshot> {
+  return apiRequest<PlayerFilterSnapshot>(`${baseUrl(sessionId, playerId)}/filters/clear`, {
     method: 'POST',
   });
 }

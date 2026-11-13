@@ -65,13 +65,39 @@ A session ID is required for subsequent requests. A successful session lookup re
 
 A non-null string must describe a valid flop (3 cards), turn (4 cards), or river (5 cards) in concatenated two-character card notation. Full card validation is performed by the underlying encoder/service, not the Pydantic field type.
 
-**200 response** (`BoardResponse`; illustrative hand counts):
+
+**200 response** (`BoardResponse`; illustrative):
 
 ```json
-{ "players": [1200, 0, 875, 0, 0, 620] }
+{
+  "players": [
+    {
+      "base_hands": 1200,
+      "filtered_hands": 1200,
+      "filtered_coverage": 1.0,
+      "filters": {}
+    },
+    null,
+    null,
+    null,
+    null,
+    null
+  ]
+}
 ```
 
-`players` contains **six hand counts in slot order**, not player IDs. Empty slots have count `0`. Changing the board can invalidate later street filter states; setting `null` returns occupied players to preflop and discards postflop states. See [range management](../backend/services/range-management.md).
+`players` contains six current-street snapshots in player slot order. Empty slots contain `null`.
+
+Each occupied slot includes:
+- `base_hands`: Number of hands in the current street's base range.
+- `filtered_hands`: Number of hands remaining after current-street filtering.
+- `filtered_coverage`: Weighted coverage relative to the current street's base range.
+- `filters`: Complete filter tree for the current street.
+
+Returning to a previously visited compatible street may restore its cached filter state. Setting the board to `null` returns players to preflop and discards their postflop street states.
+
+See [Range Management](../backend/services/range-management.md).
+
 
 ## Player ranges
 
@@ -109,6 +135,39 @@ The count is the player's **current** range size, after applying the board if ap
 
 All filter routes operate on the **specified player's active street**. Saved filters represent evaluated membership selections; activation controls which of those selections currently affect that player's range.
 
+### Shared mutation response
+
+All successful filter and group mutations return a `PlayerFilterSnapshotResponse` containing the affected player's updated current-street state.
+
+For example, creating an inactive root-level filter might return:
+
+```json
+{
+  "base_hands": 4,
+  "filtered_hands": 4,
+  "filtered_coverage": 1.0,
+  "filters": {
+    "aces": {
+      "type": "filter",
+      "name": "aces",
+      "expression": "AA",
+      "coverage": 0.25,
+      "active": false
+    }
+  }
+}
+```
+
+Values are illustrative.
+
+`filtered_coverage` represents the effective weighted coverage of the current street's base range. It is not necessarily relative to the original preflop range, because filtering from previous streets may already have narrowed the current street's base range.
+
+Each filter or group's `coverage` describes its membership coverage independently of activation. Therefore, creating an inactive filter can leave `filtered_coverage` at `1.0`.
+
+The response contains the complete resulting filter tree, not only the modified node.
+
+Read-only GET endpoints continue returning filter trees or individual nodes rather than player snapshots.
+
 ### Addressing nested nodes
 
 On **POST** creation requests, `path` is a JSON array of parent group names, starting at the root:
@@ -141,13 +200,28 @@ The target's `{name}` is **not** included in `path`. Omit `path` for a root-leve
 | `name` | string or null | Optional; defaults to the expression when omitted/null. |
 | `path` | array of strings | Optional; defaults to the root (`[]`). |
 
-**201 response** (`FilterCoverageResponse`; illustrative):
+**201 response** (`PlayerFilterSnapshotResponse`; illustrative):
 
 ```json
-{ "coverage": 0.35 }
+{
+  "base_hands": 4,
+  "filtered_hands": 4,
+  "filtered_coverage": 1.0,
+  "filters": {
+    "aces": {
+      "type": "filter",
+      "name": "aces",
+      "expression": "AA",
+      "coverage": 0.25,
+      "active": false
+    }
+  }
+}
 ```
 
-Here `coverage` is the **new filter's membership coverage**, measured using weights relative to the active street's base range; it is **not necessarily the player's effective range coverage**. A root-level filter is created inactive. A nonempty filter created directly inside an active group may start active. Zero-match filters may be saved but not directly activated.
+The new filter's `coverage` describes its weighted membership coverage relative to the current street's base range. The snapshot's `filtered_coverage` describes the player's effective range coverage.
+
+A root-level filter is created inactive. A nonempty filter created directly inside an active group may start active. Zero-match filters may be saved but not directly activated.
 
 ### Create a group
 
@@ -161,11 +235,26 @@ Here `coverage` is the **new filter's membership coverage**, measured using weig
 
 `name` is required and nonempty; `path` is an optional array of parent group names. New groups are always empty and inactive, even inside active groups.
 
-**201 response** (`GroupResponse`):
+**201 response** (`PlayerFilterSnapshotResponse`; illustrative):
 
 ```json
-{ "name": "draws", "path": [] }
+{
+  "base_hands": 4,
+  "filtered_hands": 4,
+  "filtered_coverage": 1.0,
+  "filters": {
+    "draws": {
+      "type": "group",
+      "name": "draws",
+      "coverage": 0.0,
+      "active": false,
+      "filters": {}
+    }
+  }
+}
 ```
+
+The response includes the newly created group in the complete filter tree. New groups are always empty and inactive, including groups created inside active parent groups.
 
 ### Activate or deactivate a node
 
@@ -186,13 +275,30 @@ Optional `?path=...` identifies parent groups.
 
 Activating a leaf also activates its ancestor groups without activating siblings. Activating a group recursively activates descendants; deactivating a group recursively deactivates them. Activation of a node whose membership matches zero hands is rejected.
 
-**200 response** (`FilterCoverageResponse`; illustrative):
+**200 response** (`PlayerFilterSnapshotResponse`; illustrative):
 
 ```json
-{ "coverage": 0.42 }
+{
+  "base_hands": 4,
+  "filtered_hands": 1,
+  "filtered_coverage": 0.25,
+  "filters": {
+    "aces": {
+      "type": "filter",
+      "name": "aces",
+      "expression": "AA",
+      "coverage": 0.25,
+      "active": true
+    }
+  }
+}
 ```
 
-Here `coverage` is the **resulting effective weighted coverage** of the player's active street, not the addressed node's total membership coverage.
+The response reflects the resulting activation state, filtered hand count, and effective weighted coverage.
+
+Activating a leaf also activates its ancestor groups without activating siblings. Activating a group recursively activates descendants; deactivating a group recursively deactivates them. Activation of a node whose membership matches zero hands is rejected.
+
+The snapshot's `filtered_coverage` may differ from the addressed node's membership `coverage`.
 
 ### Clear filters
 
@@ -200,11 +306,28 @@ Here `coverage` is the **resulting effective weighted coverage** of the player's
 
 No request body is used. **Deactivates** all filters and groups for that street while retaining definitions and hierarchy. The range reverts to that street's base range.
 
-**200 response:**
+**200 response** (`PlayerFilterSnapshotResponse`; illustrative):
 
 ```json
-{ "coverage": 1.0 }
+{
+  "base_hands": 4,
+  "filtered_hands": 4,
+  "filtered_coverage": 1.0,
+  "filters": {
+    "aces": {
+      "type": "filter",
+      "name": "aces",
+      "expression": "AA",
+      "coverage": 0.25,
+      "active": false
+    }
+  }
+}
 ```
+
+Clearing filters deactivates every filter and group on the current street without deleting their definitions or hierarchy.
+
+The effective range returns to the street's base range, so `filtered_hands` equals `base_hands` and `filtered_coverage` becomes `1.0`.
 
 ### Delete a node
 
@@ -215,7 +338,22 @@ DELETE /api/sessions/{session_id}/players/{player_id}/filters/{name}
 DELETE /api/sessions/{session_id}/players/{player_id}/groups/{name}
 ```
 
-An optional repeated `path` query identifies the parent group hierarchy. Deleting a group deletes all descendants. **200 response**: `FilterCoverageResponse` with the **updated effective coverage**.
+An optional repeated `path` query identifies the parent group hierarchy. Deleting a group deletes all descendants.
+
+**200 response** (`PlayerFilterSnapshotResponse`; illustrative):
+
+```json
+{
+  "base_hands": 4,
+  "filtered_hands": 4,
+  "filtered_coverage": 1.0,
+  "filters": {}
+}
+```
+
+The response contains the complete updated filter tree with the deleted node removed. Deleting a group also removes its descendants.
+
+The effective hand count and weighted coverage are recalculated based on the remaining active filters. In this example, deleting the only filter restores the unfiltered base range.
 
 ### Retrieve the tree or a node
 

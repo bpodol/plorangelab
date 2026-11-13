@@ -10,6 +10,7 @@ partially modified player or board state.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from threading import Event
 
 from plorangelab.bootstrap import EngineResources
@@ -22,6 +23,24 @@ from plorangelab.equity import (
 from plorangelab.types import Mode
 
 from .player_range_state import Board, PlayerRangeState
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerFilterSnapshot:
+    """Serialized view of a player's current street state.
+
+    Attributes:
+        base_hands: Number of hands in the current street's base range,
+            which may incorporate filtering from earlier streets.
+        filtered_hands: Number of hands remaining after active filters.
+        filtered_coverage: Fraction of base-range weight retained.
+        filters: Serialized tree of filter and group metadata.
+    """
+
+    base_hands: int
+    filtered_hands: int
+    filtered_coverage: float
+    filters: dict[str, dict[str, object]]
 
 
 class RangeManager:
@@ -64,6 +83,40 @@ class RangeManager:
         self.players[player_index] = updated
         return result
 
+    def _get_player_snapshot(self, player_index: int) -> PlayerFilterSnapshot:
+        """Build a snapshot of an occupied player's current street.
+
+        Args:
+            player_index: Zero-based player slot index.
+
+        Returns:
+            Current street hand counts, coverage, and serialized filter tree.
+
+        Raises:
+            ValueError: If the player index is invalid or the slot is empty.
+        """
+
+        player = self._get_player(player_index)
+        active_street = player.active_street
+
+        return PlayerFilterSnapshot(
+            base_hands=len(active_street.filter_manager.base_range.hands),
+            filtered_hands=len(active_street.current_range.hands),
+            filtered_coverage=active_street.filtered_coverage,
+            filters=self.get_filters(player_index),
+        )
+
+    def _get_players_snapshot(self) -> list[PlayerFilterSnapshot | None]:
+        """Return filter snapshots for all six player slots.
+
+        Preserves slot order, representing empty slots with None.
+        """
+
+        return [
+            self._get_player_snapshot(player_index) if player is not None else None
+            for player_index, player in enumerate(self.players)
+        ]
+
     def add_range(self, input_range: str, mode: Mode, player_index: int) -> None:
         """Create or replace a player range in the specified slot.
 
@@ -97,7 +150,9 @@ class RangeManager:
             raise ValueError("Out of range player index")
         self.players[player_index] = None
 
-    def change_board(self, input_board: str | None):
+    def change_board(
+        self, input_board: str | None
+    ) -> list[PlayerFilterSnapshot | None]:
         """Update the shared board and all occupied player slots atomically.
 
         Creates a validated Board instance and applies the change to
@@ -106,7 +161,7 @@ class RangeManager:
         Each player independently preserves compatible street states
         and updates its current range according to the new board.
 
-        The updated player list and board are published only after
+        The updated player filter snapshot list and board are published only after
         every player has been updated successfully.
 
         Passing None clears the board and returns all players to preflop.
@@ -115,6 +170,10 @@ class RangeManager:
             input_board: Concatenated notation of 3, 4, or 5 community
                 cards, or None to clear the board.
 
+        Returns:
+            A six-element list in player slot order. Each occupied slot
+            contains its current PlayerFilterSnapshot; empty slots contain None
+
         Raises:
             ValueError: If the board is invalid or the change leaves
                 any player's applicable range empty.
@@ -122,7 +181,8 @@ class RangeManager:
 
         if input_board is None:
             self.clear_board()
-            return
+            return self._get_players_snapshot()
+
         new_board = Board.from_string(input_board)
         # Stage changes to every player before publishing the new state.
         # If any player update fails, the original players and board remain intact.
@@ -137,6 +197,8 @@ class RangeManager:
 
         self.players = updated_players
         self.board = new_board
+
+        return self._get_players_snapshot()
 
     def clear_board(self) -> None:
         """Clear the community board and reset all players to preflop.
@@ -165,22 +227,23 @@ class RangeManager:
         player_index: int,
         name: str | None = None,
         path: tuple[str, ...] = (),
-    ) -> float:
-        return self._edit_player(
+    ) -> PlayerFilterSnapshot:
+        self._edit_player(
             player_index, lambda player: player.add_filter(expression, name, path)
         )
+        return self._get_player_snapshot(player_index)
 
     def add_group(
         self, name: str, player_index: int, path: tuple[str, ...] = ()
-    ) -> None:
+    ) -> PlayerFilterSnapshot:
         self._edit_player(player_index, lambda player: player.add_group(name, path))
+        return self._get_player_snapshot(player_index)
 
     def delete_filter(
         self, name: str, player_index: int, path: tuple[str, ...] = ()
-    ) -> float:
-        return self._edit_player(
-            player_index, lambda player: player.delete_filter(name, path)
-        )
+    ) -> PlayerFilterSnapshot:
+        self._edit_player(player_index, lambda player: player.delete_filter(name, path))
+        return self._get_player_snapshot(player_index)
 
     def set_filter_active(
         self,
@@ -188,13 +251,15 @@ class RangeManager:
         player_index: int,
         active: bool,
         path: tuple[str, ...] = (),
-    ) -> float:
-        return self._edit_player(
+    ) -> PlayerFilterSnapshot:
+        self._edit_player(
             player_index, lambda player: player.set_filter_active(name, active, path)
         )
+        return self._get_player_snapshot(player_index)
 
-    def clear_filters(self, player_index: int) -> float:
-        return self._edit_player(player_index, lambda player: player.clear_filters())
+    def clear_filters(self, player_index: int) -> PlayerFilterSnapshot:
+        self._edit_player(player_index, lambda player: player.clear_filters())
+        return self._get_player_snapshot(player_index)
 
     def get_filters(self, player_index: int) -> dict[str, dict[str, object]]:
         return self._get_player(player_index).get_filters()

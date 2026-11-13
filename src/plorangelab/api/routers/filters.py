@@ -17,12 +17,11 @@ from ..dependencies import (
     locked_session,
 )
 from ..schemas import (
-    FilterCoverageResponse,
     FilterCreateRequest,
     FilterGroupInfoResponse,
     FilterInfoResponse,
     GroupCreateRequest,
-    GroupResponse,
+    PlayerFilterSnapshotResponse,
     SetActiveRequest,
 )
 
@@ -36,7 +35,7 @@ router = APIRouter(
 )
 
 
-@router.post("/filters", status_code=201, response_model=FilterCoverageResponse)
+@router.post("/filters", status_code=201, response_model=PlayerFilterSnapshotResponse)
 def create_filter(
     player_id: PlayerId,
     request: FilterCreateRequest,
@@ -51,8 +50,7 @@ def create_filter(
     identifies the parent group, or the root when omitted.
 
     Returns:
-        HTTP 201 with the new filter's weighted membership coverage
-        relative to the active street's base range.
+        HTTP 201 with the updated player snapshot.
 
     Raises:
         HTTPException: 404 if the session is missing or expired.
@@ -63,7 +61,7 @@ def create_filter(
 
     with editable_session(session):
         try:
-            coverage = session.manager.add_filter(
+            snapshot = session.manager.add_filter(
                 expression=request.expression,
                 player_index=player_id,
                 name=request.name,
@@ -72,10 +70,10 @@ def create_filter(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        return FilterCoverageResponse(coverage=coverage)
+        return PlayerFilterSnapshotResponse.model_validate(snapshot)
 
 
-@router.post("/groups", status_code=201, response_model=GroupResponse)
+@router.post("/groups", status_code=201, response_model=PlayerFilterSnapshotResponse)
 def create_group(
     player_id: PlayerId,
     request: GroupCreateRequest,
@@ -87,7 +85,7 @@ def create_group(
     New groups start inactive, even when their parent is active.
 
     Returns:
-        HTTP 201 with the new group's name and parent path.
+        HTTP 201 with the updated player snapshot.
 
     Raises:
         HTTPException: 404 if the session is missing or expired.
@@ -98,7 +96,7 @@ def create_group(
 
     with editable_session(session):
         try:
-            session.manager.add_group(
+            snapshot = session.manager.add_group(
                 name=request.name,
                 player_index=player_id,
                 path=request.path,
@@ -106,11 +104,11 @@ def create_group(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        return GroupResponse(name=request.name, path=request.path)
+        return PlayerFilterSnapshotResponse.model_validate(snapshot)
 
 
-@router.patch("/groups/{name}", response_model=FilterCoverageResponse)
-@router.patch("/filters/{name}", response_model=FilterCoverageResponse)
+@router.patch("/groups/{name}", response_model=PlayerFilterSnapshotResponse)
+@router.patch("/filters/{name}", response_model=PlayerFilterSnapshotResponse)
 def set_filter_active(
     player_id: PlayerId,
     name: str,
@@ -127,8 +125,7 @@ def set_filter_active(
     Deactivating a group recursively deactivates its descendants.
 
     Returns:
-        HTTP 200 with the player's resulting effective weighted
-        coverage for the active street.
+        HTTP 200 with the updated player snapshot.
 
     Raises:
         HTTPException: 404 if the session is missing or expired.
@@ -139,7 +136,7 @@ def set_filter_active(
 
     with editable_session(session):
         try:
-            coverage = session.manager.set_filter_active(
+            snapshot = session.manager.set_filter_active(
                 name=name,
                 player_index=player_id,
                 active=request.active,
@@ -148,10 +145,10 @@ def set_filter_active(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        return FilterCoverageResponse(coverage=coverage)
+        return PlayerFilterSnapshotResponse.model_validate(snapshot)
 
 
-@router.post("/filters/clear", response_model=FilterCoverageResponse)
+@router.post("/filters/clear", response_model=PlayerFilterSnapshotResponse)
 def clear_filters(player_id: PlayerId, session: SessionDep):
     """Deactivate all filters and groups in the active street.
 
@@ -159,7 +156,7 @@ def clear_filters(player_id: PlayerId, session: SessionDep):
     The player's effective range returns to the street's base range.
 
     Returns:
-        HTTP 200 with effective weighted coverage of 1.0.
+        HTTP 200 with the updated player snapshot.
 
     Raises:
         HTTPException: 404 if the session is missing or expired.
@@ -169,17 +166,17 @@ def clear_filters(player_id: PlayerId, session: SessionDep):
 
     with editable_session(session):
         try:
-            coverage = session.manager.clear_filters(player_id)
+            snapshot = session.manager.clear_filters(player_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        return FilterCoverageResponse(coverage=coverage)
+        return PlayerFilterSnapshotResponse.model_validate(snapshot)
 
 
 # Both URLs delegate to the same tree operation; the manager
 # resolves the node by its name and parent path.
-@router.delete("/filters/{name}", response_model=FilterCoverageResponse)
-@router.delete("/groups/{name}", response_model=FilterCoverageResponse)
+@router.delete("/filters/{name}", response_model=PlayerFilterSnapshotResponse)
+@router.delete("/groups/{name}", response_model=PlayerFilterSnapshotResponse)
 def delete_filter_or_group(
     player_id: PlayerId,
     name: str,
@@ -194,7 +191,7 @@ def delete_filter_or_group(
     The resulting active range is recalculated after deletion.
 
     Returns:
-        HTTP 200 with the updated effective weighted coverage.
+        HTTP 200 with the updated player snapshot.
 
     Raises:
         HTTPException: 404 if the session is missing or expired.
@@ -205,11 +202,11 @@ def delete_filter_or_group(
 
     with editable_session(session):
         try:
-            coverage = session.manager.delete_filter(name, player_id, path)
+            snapshot = session.manager.delete_filter(name, player_id, path)
         except ValueError as exc:
             raise HTTPException(422, detail=str(exc)) from exc
 
-        return FilterCoverageResponse(coverage=coverage)
+        return PlayerFilterSnapshotResponse.model_validate(snapshot)
 
 
 @router.get(

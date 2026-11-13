@@ -14,14 +14,14 @@ and application workflows, see [Frontend Architecture](README.md).
 | Source | Responsibility |
 | --- | --- |
 | `src/App.tsx` | Owns the session ID, editable board string, selected PLO mode, board/session loading and errors; connects hooks to UI components. |
-| `src/hooks/usePlayerRanges.ts` | Owns six local player states and handles add/replace/delete range requests. |
+| `src/hooks/usePlayerRanges.ts` | Owns six local player states, handles range requests, and applies board-returned player filter snapshots. |
 | `src/hooks/useEquitySocket.ts` | Owns the equity WebSocket connection lifecycle, latest server message, UI status, and tracked job ID. |
 | `src/api/client.ts` | Shared `fetch` helper for REST responses and FastAPI error messages. |
 | `src/api/sessions.ts` | Session creation and board-update REST calls. |
 | `src/api/players.ts` | Player-range PUT and DELETE calls. |
-| `src/api/filters.ts` | Filter-tree types and REST calls; **not yet wired into React state or UI**. |
+| `src/api/filters.ts` | Filter and group REST calls; mutation functions return player snapshots but are not yet integrated into the UI. |
 | `src/api/equity.ts` | Equity WebSocket message types and connection creation. |
-| `src/types.ts` | Shared `Mode = 4 | 5` type. |
+| `src/types.ts` | Shared mode, recursive filter-tree types, and `PlayerFilterSnapshot`. |
 
 The current UI consists of `BoardInput`, `PlayerRangeInput`, and `EquityPanel`, coordinated by `App.tsx`. Their internal rendering and props will be covered in the frontend architecture overview.
 
@@ -32,7 +32,8 @@ App.tsx
 ├── local state: sessionId, board input, mode, loading/errors, board message
 ├── sessions API: createSession(), changeBoard()
 ├── usePlayerRanges(sessionId, mode)
-│   ├── six PlayerState entries
+│   ├── six PlayerState entries (including filterSnapshot)
+│   ├── applyBoardSnapshots() for board responses
 │   └── players API: addRange(), deleteRange()
 ├── useEquitySocket(sessionId)
 │   ├── WebSocket connection, job ID, latest message, status
@@ -56,11 +57,15 @@ The **backend owns the authoritative session, applied ranges, board, and equity 
 | `App` | `board` | Updated as the user types; sent to the backend only when applied. |
 | `App` | `mode` | User chooses PLO4 or PLO5; the selector is disabled while any player has an applied range or is loading. |
 | `App` | `isLoading`, `error`, `boardMessage` | Session creation and board-request feedback. |
-| `usePlayerRanges` | `players: PlayerState[6]` | Local edits, range-request results, and board hand-count updates. |
+| `usePlayerRanges` | `players: PlayerState[6]` | Local edits, range-request results, and board-returned snapshots (effective hand counts and current-street filter state). |
 | `useEquitySocket` | `equityStatus`, `equityMessage`, `isConnected` | WebSocket lifecycle events and incoming messages. |
 | `useEquitySocket` | `socketRef`, `jobRef` | Mutable connection and job identifiers that persist across renders without triggering renders. |
 
-Each `PlayerState` contains `range`, `numberOfHands`, `hasAppliedRange`, `isLoading`, and `error`. The **editable `range` string is not necessarily the range applied on the backend**: changing input text alone does not make a network request. Similarly, editing the `board` string does not change the server board until the Apply action succeeds.
+Each `PlayerState` contains `range`, `numberOfHands`, `filterSnapshot`, `hasAppliedRange`, `isLoading`, and `error`.
+
+`filterSnapshot` has type `PlayerFilterSnapshot | null` and contains the backend's latest current-street filter state. A `null` value means no snapshot is stored locally, not necessarily that the backend has no filters.
+
+The **editable `range` string is not necessarily the range applied on the backend**: changing input text alone does not make a network request. Similarly, editing the `board` string does not change the server board until the Apply action succeeds.
 
 `updatePlayer()` makes immutable per-slot updates using a functional React state setter. Individual range operations maintain their own loading and error state; `App` maintains a separate loading flag for session and board operations.
 
@@ -86,27 +91,33 @@ PlayerRangeInput event
     -> api/players.addRange(sessionId, playerId, range, mode)
     -> backend replaces that player's range
     -> { hands: number }
-    -> update PlayerState: numberOfHands, hasAppliedRange, isLoading/error
+    -> update PlayerState:
+         numberOfHands, hasAppliedRange,
+         filterSnapshot=null, isLoading/error
     -> React rerender
 ```
 
 `handleAddRange()` returns without a request if no session exists. It sets the individual player's loading state, uses the current editable range and mode, then stores the hand count returned by the backend. Errors are stored on that player rather than rethrown.
 
-A successful PUT **replaces** backend player state, including any previous street/filter state. Updating the local input string without applying it leaves the backend range unchanged.
+A successful PUT **replaces** the backend player state, including any previous street and filter state. Consequently, `handleAddRange()` clears the local `filterSnapshot` after a successful response. The endpoint returns a hand count rather than a complete player snapshot.
+
+Updating the local input string without applying it leaves the backend range unchanged.
 
 ### 3. Delete a player range
 
-`handleDeleteRange()` calls the players API DELETE method. On success it clears the local input, resets the hand count to zero, and marks the slot as not applied. On failure it retains the previous range-related state and records an error. Empty backend slots may also be deleted successfully.
+`handleDeleteRange()` calls the players API DELETE method. On success, it clears the local input, resets the hand count to zero, clears `filterSnapshot`, and marks the slot as not applied. On failure, it retains the previous range-related state and records an error. Empty backend slots may also be deleted successfully.
 
 ### 4. Apply or clear the board
 
 1. `App` takes the trimmed board input; an empty string becomes `null` (clear board).
 2. `changeBoard(sessionId, boardValue)` sends the request.
-3. On success, the backend returns `players`, an array of **six hand counts in slot order**.
-4. `App` shows a success message and calls `usePlayerRanges.updateHandCounts(result.players)`.
-5. The hook updates the counts while preserving range text, applied flags, and other player fields.
+3. On success, the backend returns `players`, an array of six current-street player snapshots or `null` values in player-slot order.
+4. `App` calls `usePlayerRanges.applyBoardSnapshots(result.players)` and displays a success message.
+5. The hook updates each player's `numberOfHands` from `snapshot.filtered_hands` and stores the complete `filterSnapshot` in the same React state update. Empty slots receive a count of `0` and a `null` snapshot. Range input text and applied flags are preserved.
 
-The backend is responsible for board validation, blockers, and street-state changes. The frontend updates hand counts **only after a successful response**.
+The backend is responsible for board validation, card blockers, street transitions, and restoring compatible cached street states.
+
+The frontend applies the returned snapshots **only after a successful response**. It does not reconstruct or carry over filter trees between streets itself.
 
 ### Shared REST helper and errors
 
@@ -179,7 +190,7 @@ For the server-side behavior, see the [WebSocket protocol](../api/websocket.md) 
 
 These are **current behavior**, not promises about planned features:
 
-- **Frontend filtering is not yet integrated.** `api/filters.ts` contains typed request functions and recursive tree definitions, but the uploaded `App` and hooks do not yet manage filter state or expose filter UI workflows.
+- **Filter UI and mutation orchestration are not yet integrated.** `api/filters.ts` provides typed REST functions, and shared filter types live in `src/types.ts`. `usePlayerRanges` stores snapshots returned by board changes, but it does not yet invoke filter mutations or expose filter-management UI workflows.
 - **No automatic range-state rehydration.** `usePlayerRanges` initializes six empty slots locally and does not load the existing session's player state or reset automatically when `sessionId` changes.
 - **No stale-response protection in the range hook.** Overlapping operations for one player can complete out of order; no request versioning or abort mechanism is implemented there.
 - **Draft inputs are distinct from applied state.** `hasAppliedRange` indicates a successful prior application, not necessarily that the current editable text equals the backend range.
@@ -192,7 +203,7 @@ These are **current behavior**, not promises about planned features:
 | Problem or question | Start with |
 | --- | --- |
 | A REST request returns an unexpected error | `src/api/client.ts`, then the relevant `src/api/*.ts` file and [REST contract](../api/rest.md) |
-| A player hand count is stale after changing the board | `src/App.tsx` (`handleApplyBoard`), `usePlayerRanges.updateHandCounts()` |
+| A player hand count or filter tree is stale after changing the board | `src/App.tsx` (`handleApplyBoard`), `usePlayerRanges.applyBoardSnapshots()` |
 | An applied range differs from the input field | `usePlayerRanges.ts` (`range` versus `hasAppliedRange`) |
 | Equity does not start or connection status is wrong | `useEquitySocket.ts`, then `src/api/equity.ts` |
 | A disconnected equity job does not resume | `useEquitySocket.ts` (`jobRef`, `onopen`, `onclose`) and [WebSocket contract](../api/websocket.md) |

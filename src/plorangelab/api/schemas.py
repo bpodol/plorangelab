@@ -7,9 +7,11 @@ Models are shared between REST endpoints and WebSocket
 message construction where applicable.
 """
 
+from __future__ import annotations
+
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from plorangelab.equity.results import StopReason
 from plorangelab.types import Mode
@@ -76,16 +78,6 @@ class EquityResponse(BaseModel):
     details: EquityDetails
 
 
-class BoardResponse(BaseModel):
-    """Return current hand counts for all six player slots.
-
-    The players list follows slot order. Occupied slots contain
-    their current range size, while empty slots contain zero.
-    """
-
-    players: list[int]
-
-
 class RangeResponse(BaseModel):
     hands: int
 
@@ -105,26 +97,8 @@ class GroupCreateRequest(BaseModel):
     path: tuple[str, ...] = ()
 
 
-class GroupResponse(BaseModel):
-    name: str
-    path: tuple[str, ...]
-
-
 class SetActiveRequest(BaseModel):
     active: bool
-
-
-class FilterCoverageResponse(BaseModel):
-    """Return weighted range coverage after a filter operation.
-
-    For filter creation, coverage describes the new filter's
-    membership relative to the active street's base range.
-
-    For activation, deletion, and clearing operations, coverage
-    describes the resulting effective range.
-    """
-
-    coverage: float
 
 
 class FilterInfoResponse(BaseModel):
@@ -150,3 +124,25 @@ class FilterGroupInfoResponse(BaseModel):
     coverage: float
     active: bool
     filters: dict[str, FilterInfoResponse | FilterGroupInfoResponse]
+
+
+class PlayerFilterSnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    base_hands: int
+    filtered_hands: int
+    filtered_coverage: float
+    filters: dict[str, FilterInfoResponse | FilterGroupInfoResponse]
+
+
+class BoardResponse(BaseModel):
+    """Return current-street snapshots for all six player slots.
+
+    Snapshots include base and filtered hand counts, weighted coverage
+    relative to the current street's base range, and the complete
+    filter tree.
+
+    Player slot order is preserved, with None for empty slots.
+    """
+
+    players: list[PlayerFilterSnapshotResponse | None]

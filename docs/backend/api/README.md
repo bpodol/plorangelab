@@ -66,7 +66,9 @@ Client → routers/filters.py
           ↓ acquire Session.lock; verify open and no unfinished job
        session.manager.add_filter(...)
           ↓ PlayerRangeState → FilterManager → filter evaluator
-       Pydantic response → HTTP JSON
+       RangeManager returns PlayerFilterSnapshot
+          ↓ PlayerFilterSnapshotResponse validates and serializes
+       HTTP JSON
 ```
 
 `SessionDep` resolves an existing session through `SessionManager.get_session()`. A missing or expired session produces **HTTP 404**. Successful resolution refreshes session activity, but does **not** hold the lock until the endpoint returns; the endpoint explicitly enters a context manager to do that.
@@ -81,6 +83,16 @@ Client → routers/filters.py
 `locked_session()` rechecks `session.closed` because deletion can occur between dependency resolution and the protected operation. `editable_session()` also prevents a running equity calculation from observing concurrent **API-mediated range mutations**. This is a convention enforced at these API entry points, not an automatic thread-safety feature of `RangeManager`.
 
 `PlayerId` validates path indices **0–5**. Pydantic models validate fields and simple constraints; deeper checks such as card notation, filter expressions, invalid group paths, and range availability happen in the services. The REST routers generally convert service `ValueError` to **HTTP 422**. Read endpoints for missing filters instead convert those errors to **HTTP 404**.
+
+### Snapshot responses
+
+Filter and group mutations return `PlayerFilterSnapshotResponse` for the affected player.
+
+Board changes return `BoardResponse` containing six slot-aligned player snapshots. Occupied slots contain `PlayerFilterSnapshotResponse` objects, while empty slots contain `null`.
+
+`RangeManager` constructs the service-level `PlayerFilterSnapshot` independently of HTTP. The API layer uses Pydantic response models to validate and serialize these snapshots into JSON.
+
+See [REST API](../../api/rest.md) for the response fields and examples.
 
 ## WebSocket request path
 

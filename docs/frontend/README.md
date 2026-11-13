@@ -42,7 +42,11 @@ The REST clients handle request and response details rather than maintaining Rea
 
 ### State-management hooks
 
-`usePlayerRanges()` manages the six player slots, including their range inputs, applied-range status, hand counts, loading indicators, and errors.
+
+`usePlayerRanges()` manages the six player slots, including their range inputs, applied-range status, effective hand counts, current-street filter snapshots, loading indicators, and errors.
+
+Each player's range and filter snapshot are stored together in a single `PlayerState`, avoiding synchronization between separate React states.
+
 
 `useEquitySocket()` manages the session's WebSocket connection, reconnection, equity job lifecycle, progress messages, and calculation results.
 
@@ -85,7 +89,7 @@ The frontend maintains editable input state separately from whether a range has 
 1. The user edits the board in `BoardInput`.
 2. The input remains local until the user applies it.
 3. `App.tsx` sends the board to the backend.
-4. After a successful response, the player hand counts are synchronized.
+4. After a successful response, `App.tsx` passes the six returned player snapshots to `applyBoardSnapshots()`, which updates effective hand counts and current-street filter snapshots together.
 
 Editing the board input alone does not modify the backend session.
 
@@ -113,7 +117,9 @@ The backend remains authoritative for applied ranges, board state, and equity co
 
 The frontend currently supports session creation, player range management, board application, and equity calculations.
 
-The filter REST client exists, but filter management is not yet integrated into the frontend UI.
+The filter REST client is implemented, and `usePlayerRanges()` stores current-street filter snapshots returned by board changes.
+
+Filter mutation actions and filter-management components are not yet integrated into the frontend UI.
 
 ## Further Documentation
 

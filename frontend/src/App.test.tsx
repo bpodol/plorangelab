@@ -101,7 +101,32 @@ test('updates displayed hand counts after changing the board', async () => {
   });
 
   vi.mocked(changeBoard).mockResolvedValue({
-    players: [100, 0, 50, 0, 0, 0],
+    players: [
+      {
+        base_hands: 100,
+        filtered_hands: 100,
+        filtered_coverage: 1.0,
+        filters: {},
+      },
+      null,
+      {
+        base_hands: 100,
+        filtered_hands: 50,
+        filtered_coverage: 0.5,
+        filters: {
+          aces: {
+            type: 'filter',
+            name: 'aces',
+            expression: 'AA',
+            coverage: 0.5,
+            active: true,
+          },
+        },
+      },
+      null,
+      null,
+      null,
+    ],
   });
 
   const user = userEvent.setup();
