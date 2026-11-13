@@ -65,7 +65,18 @@ def test_change_board_updates_players_without_mutating_old_states(
     manager.add_range("JsJhTdTc", mode=4, player_index=5)
     previous_players = manager.players.copy()
 
-    manager.change_board("2c3d5h")
+    snapshots = manager.change_board("2c3d5h")
+
+    assert len(snapshots) == 6
+    assert snapshots[1:5] == [None] * 4
+
+    assert snapshots[0].base_hands == 4
+    assert snapshots[0].filtered_hands == 4
+    assert snapshots[0].filtered_coverage == 1.0
+    assert snapshots[0].filters == {}
+
+    assert snapshots[5].base_hands == 1
+    assert snapshots[5].filtered_hands == 1
 
     assert manager.board is not None
     assert manager.players[1:5] == [None] * 4
@@ -173,13 +184,19 @@ def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
     assert kwargs["rank_lookup"] is manager.rank_lookup
 
 
-def test_none_board_resets_players(manager):
+def test_none_board_resets_players(manager: RangeManager):
     manager.add_range("AsAhKdQc", mode=4, player_index=0)
     manager.change_board("2c3d4h")
 
     assert manager.players[0].active_street is manager.players[0].flop
 
-    manager.change_board(None)
+    snapshots = manager.change_board(None)
+
+    assert len(snapshots) == 6
+    assert snapshots[0].base_hands == 1
+    assert snapshots[0].filtered_hands == 1
+    assert snapshots[0].filters == {}
+    assert snapshots[1:] == [None] * 5
 
     player = manager.players[0]
 
@@ -193,15 +210,22 @@ def test_none_board_resets_players(manager):
 def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
     manager.add_range(BASE_RANGE, mode=4, player_index=0)
     original = manager.players[0]
-    coverage = manager.add_filter("AA", player_index=0, name="aces")
-    assert coverage == pytest.approx(0.25)
+    snapshot = manager.add_filter("AA", player_index=0, name="aces")
+    assert snapshot.base_hands == 4
+    assert snapshot.filtered_hands == 4
+    assert snapshot.filtered_coverage == 1.0
+    assert snapshot.filters["aces"]["coverage"] == pytest.approx(0.25)
+    assert snapshot.filters["aces"]["active"] is False
     after_save = manager.players[0]
     assert after_save is not original
     assert original.current_range is original.preflop.filter_manager.base_range
     assert after_save.current_range is after_save.preflop.filter_manager.base_range
 
-    coverage = manager.set_filter_active("aces", player_index=0, active=True)
-    assert coverage == pytest.approx(0.25)
+    snapshot = manager.set_filter_active("aces", player_index=0, active=True)
+    assert snapshot.base_hands == 4
+    assert snapshot.filtered_hands == 1
+    assert snapshot.filtered_coverage == pytest.approx(0.25)
+    assert snapshot.filters["aces"]["active"] is True
     activated = manager.players[0]
     assert activated is not after_save
     assert len(activated.current_range.masks) == 1
@@ -211,8 +235,11 @@ def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
         manager.add_filter("A|", player_index=0)
     assert manager.players[0] is activated
 
-    coverage = manager.clear_filters(player_index=0)
-    assert coverage == 1.0
+    snapshot = manager.clear_filters(player_index=0)
+    assert snapshot.filtered_hands == 4
+    assert snapshot.filtered_coverage == 1.0
+    assert "aces" in snapshot.filters
+    assert snapshot.filters["aces"]["active"] is False
     assert manager.players[0].current_range is (
         manager.players[0].preflop.filter_manager.base_range
     )
@@ -225,21 +252,32 @@ def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
 
 def test_nested_group_management_via_range_manager(manager: RangeManager) -> None:
     manager.add_range(BASE_RANGE, mode=4, player_index=2)
-    manager.add_group("premium", player_index=2)
+    snapshot = manager.add_group("premium", player_index=2)
+
+    assert snapshot.filtered_coverage == 1.0
+    assert snapshot.filters["premium"]["type"] == "group"
+    assert snapshot.filters["premium"]["filters"] == {}
+
     manager.add_filter("AA", player_index=2, path=("premium",))
     manager.add_filter("KK", player_index=2, path=("premium",))
-    coverage = manager.set_filter_active("premium", player_index=2, active=True)
-    assert coverage == pytest.approx(0.5)
+    snapshot = manager.set_filter_active("premium", player_index=2, active=True)
+    assert snapshot.filtered_coverage == pytest.approx(0.5)
+    assert snapshot.filtered_hands == 2
+    assert snapshot.filters["premium"]["active"] is True
     assert len(manager.players[2].current_range.masks) == 2
 
-    coverage = manager.set_filter_active(
+    snapshot = manager.set_filter_active(
         "KK", player_index=2, active=False, path=("premium",)
     )
-    assert coverage == pytest.approx(0.25)
+    assert snapshot.filtered_coverage == pytest.approx(0.25)
+    assert snapshot.filtered_hands == 1
+    assert snapshot.filters["premium"]["filters"]["KK"]["active"] is False
     assert len(manager.players[2].current_range.masks) == 1
 
-    coverage = manager.delete_filter("AA", player_index=2, path=("premium",))
-    assert coverage == 1.0
+    snapshot = manager.delete_filter("AA", player_index=2, path=("premium",))
+    assert snapshot.filtered_coverage == 1.0
+    assert snapshot.filtered_hands == 4
+    assert "AA" not in snapshot.filters["premium"]["filters"]
     assert manager.players[2].current_range is (
         manager.players[2].active_street.filter_manager.base_range
     )
@@ -281,7 +319,11 @@ def test_filtered_preflop_range_carries_to_board(
     manager.set_filter_active("AA", player_index=0, active=True)
     old_player = manager.players[0]
 
-    manager.change_board("2c3d5h")
+    snapshots = manager.change_board("2c3d5h")
+    snapshot = snapshots[0]
+
+    assert snapshot.filtered_hands == 1
+    assert snapshot.filtered_coverage == pytest.approx(1.0)
     updated_player = manager.players[0]
     assert updated_player is not old_player
     assert len(updated_player.current_range.masks) == 1
@@ -324,3 +366,28 @@ def test_filter_retrieval_delegates_to_correct_player(
 
     # Read operations must not clone or replace player state.
     assert manager.players[2] is player
+
+
+@pytest.mark.parametrize("board", [None, "2c3d5h"])
+def test_change_board_without_players_returns_empty_snapshots(
+    manager: RangeManager,
+    board: str | None,
+) -> None:
+    snapshots = manager.change_board(board)
+
+    assert snapshots == [None] * 6
+
+
+def test_change_board_restores_cached_filter_snapshot(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, mode=4, player_index=2)
+    manager.change_board("2c3d5h")
+
+    manager.add_filter("AA", player_index=2, name="aces")
+    expected = manager.set_filter_active("aces", player_index=2, active=True)
+
+    manager.change_board("2c3d5h7s")
+    snapshots = manager.change_board("2c3d5h")
+
+    assert snapshots[2] == expected

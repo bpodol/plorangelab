@@ -1,12 +1,15 @@
 import { apiRequest } from './client.ts';
+import type { PlayerFilterSnapshot } from '../types.ts';
 
 export interface SessionResponse {
   session_id: string;
 }
 
 export interface BoardResponse {
-  /** Current hand counts for all six player slots, in slot order. */
-  players: number[];
+  /** Current-street snapshots for all six player slots, in slot order.
+   * Empty slots are represented by null.
+   */
+  players: (PlayerFilterSnapshot | null)[];
 }
 
 /**
@@ -28,7 +31,7 @@ export function createSession(): Promise<SessionResponse> {
  *
  * @param sessionId - Identifier of the target session.
  * @param board - Concatenated card notation, or null to clear the board.
- * @returns Current hand counts for all six player slots.
+ * @returns Six slot-aligned player snapshots, with null for empty slots.
  */
 export function changeBoard(sessionId: string, board: string | null): Promise<BoardResponse> {
   return apiRequest<BoardResponse>(`/api/sessions/${sessionId}/board`, {

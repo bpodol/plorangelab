@@ -7,7 +7,12 @@ while board changes are handled by the session's RangeManager.
 from fastapi import APIRouter, HTTPException
 
 from ..dependencies import SessionDep, SessionManagerDep, editable_session
-from ..schemas import BoardRequest, BoardResponse, SessionResponse
+from ..schemas import (
+    BoardRequest,
+    BoardResponse,
+    PlayerFilterSnapshotResponse,
+    SessionResponse,
+)
 
 router = APIRouter(
     prefix="/api/sessions",
@@ -36,11 +41,11 @@ def change_board(request: BoardRequest, session: SessionDep):
     cards and returns all players to preflop.
 
     Updates the ranges of occupied player slots and returns their
-    resulting hand counts.
+    current hand counts, weighted filter coverage, and filter trees.
 
     Returns:
-        HTTP 200 with six hand counts in player slot order.
-        Empty slots are represented by zero.
+        HTTP 200 with six player snapshots in player slot order.
+        Empty slots are represented by None.
 
     Raises:
         HTTPException: 404 if the session is missing or expired.
@@ -50,15 +55,15 @@ def change_board(request: BoardRequest, session: SessionDep):
 
     with editable_session(session):
         try:
-            session.manager.change_board(request.board)
+            snapshots = session.manager.change_board(request.board)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        # Return hand counts for all six slots, preserving their positions
-        # so the frontend can map each count to the correct player.
-        players = [
-            len(player.current_range.hands) if player is not None else 0
-            for player in session.manager.players
-        ]
-
-        return BoardResponse(players=players)
+        return BoardResponse(
+            players=[
+                PlayerFilterSnapshotResponse.model_validate(snapshot)
+                if snapshot is not None
+                else None
+                for snapshot in snapshots
+            ]
+        )

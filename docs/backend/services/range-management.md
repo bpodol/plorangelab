@@ -175,6 +175,42 @@ Consequently, a new turn can begin at `filtered_coverage == 1.0` even though its
 
 The `filters` property exposes a read-only **root mapping**, and `get_node()` returns node objects for inspection. Neither prevents mutation of the nested `Filter` / `FilterGroup` objects; callers are expected to treat those objects as read-only and use manager methods for changes.
 
+### Player filter snapshots
+
+`RangeManager` produces a `PlayerFilterSnapshot` representing an occupied player's current-street state.
+
+The snapshot is a frozen dataclass containing:
+
+| Field | Description |
+| --- | --- |
+| `base_hands` | Number of combinations in the current street's base range. |
+| `filtered_hands` | Number of combinations remaining after applying the current street's active filters. |
+| `filtered_coverage` | Weighted fraction of the current street's base range retained by filtering. |
+| `filters` | Complete serialized filter tree for the current street, including inactive nodes. |
+
+Hand counts represent combinations, while coverage accounts for their weights.
+
+The base range may already incorporate filtering from earlier streets and community-card exclusions. Consequently, `filtered_coverage == 1.0` does not necessarily mean that the player retains their entire original preflop range.
+
+### Snapshot-producing operations
+
+Filter and group mutations return the updated `PlayerFilterSnapshot` for the affected player after the change succeeds.
+
+`change_board()` returns a list of six elements in player-slot order:
+
+- Occupied slots contain their updated current-street snapshots.
+- Empty slots contain `None`.
+
+This also applies to `change_board(None)`, which returns the resulting preflop snapshots after clearing the board.
+
+Snapshots are produced from the published player state. A failed mutation does not publish a partially modified state.
+
+### Snapshot immutability
+
+`PlayerFilterSnapshot` is a frozen dataclass. Its filter tree is serialized separately from the mutable `Filter` and `FilterGroup` objects.
+
+However, freezing the dataclass does not make its nested dictionaries deeply immutable. Consumers should treat snapshots as read-only data.
+
 ## Update consistency and cloning
 
 ### Player edits

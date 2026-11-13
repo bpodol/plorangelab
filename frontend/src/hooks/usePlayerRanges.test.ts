@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { addRange, deleteRange } from '../api/players';
 import { usePlayerRanges } from './usePlayerRanges';
+import type { PlayerFilterSnapshot } from '../types';
 
 vi.mock('../api/players', () => ({
   addRange: vi.fn(),
@@ -20,6 +21,7 @@ test('initializes six empty players', () => {
   for (const player of result.current.players) {
     expect(player.range).toBe('');
     expect(player.numberOfHands).toBe(0);
+    expect(player.filterSnapshot).toBe(null);
     expect(player.hasAppliedRange).toBe(false);
     expect(player.isLoading).toBe(false);
     expect(player.error).toBeNull();
@@ -127,6 +129,7 @@ test('deletes a range and resets player state', async () => {
   expect(result.current.players[1]).toMatchObject({
     range: '',
     numberOfHands: 0,
+    filterSnapshot: null,
     hasAppliedRange: false,
     isLoading: false,
     error: null,
@@ -189,4 +192,92 @@ test('sets isLoading while adding a range', async () => {
 
   expect(result.current.players[2].isLoading).toBe(false);
   expect(result.current.players[2].numberOfHands).toBe(150);
+});
+
+test('applies board snapshots to the correct player slots', () => {
+  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+
+  const snapshot: PlayerFilterSnapshot = {
+    base_hands: 100,
+    filtered_hands: 25,
+    filtered_coverage: 0.25,
+    filters: {
+      aces: {
+        type: 'filter',
+        name: 'aces',
+        expression: 'AA',
+        coverage: 0.25,
+        active: true,
+      },
+    },
+  };
+
+  act(() => {
+    result.current.applyBoardSnapshots([
+      snapshot,
+      null,
+      {
+        base_hands: 50,
+        filtered_hands: 50,
+        filtered_coverage: 1,
+        filters: {},
+      },
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  expect(result.current.players[0]).toMatchObject({
+    numberOfHands: 25,
+    filterSnapshot: snapshot,
+  });
+
+  expect(result.current.players[1]).toMatchObject({
+    numberOfHands: 0,
+    filterSnapshot: null,
+  });
+
+  expect(result.current.players[2]).toMatchObject({
+    numberOfHands: 50,
+    filterSnapshot: {
+      base_hands: 50,
+      filtered_coverage: 1,
+      filters: {},
+    },
+  });
+});
+
+test('replacing a range clears the previous filter snapshot', async () => {
+  vi.mocked(addRange).mockResolvedValue({ hands: 3 });
+
+  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+
+  act(() => {
+    result.current.updatePlayer(0, {
+      range: 'AsAhKdQc',
+      numberOfHands: 1,
+      hasAppliedRange: true,
+      filterSnapshot: {
+        base_hands: 4,
+        filtered_hands: 1,
+        filtered_coverage: 0.25,
+        filters: {},
+      },
+    });
+  });
+
+  await act(async () => {
+    await result.current.handleAddRange(0);
+  });
+
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'AsAhKdQc', 4);
+
+  expect(result.current.players[0]).toMatchObject({
+    numberOfHands: 3,
+    hasAppliedRange: true,
+    filterSnapshot: null,
+    isLoading: false,
+    error: null,
+  });
 });

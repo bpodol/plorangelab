@@ -32,7 +32,7 @@ function App() {
   const [mode, setMode] = useState<4 | 5>(4);
   const { equityStatus, isConnected, equityMessage, startEquity, cancelEquity } =
     useEquitySocket(sessionId);
-  const { players, updateHandCounts, updatePlayer, handleAddRange, handleDeleteRange } =
+  const { players, applyBoardSnapshots, updatePlayer, handleAddRange, handleDeleteRange } =
     usePlayerRanges(sessionId, mode);
 
   /**
@@ -88,8 +88,7 @@ function App() {
     try {
       const result = await changeBoard(sessionId, boardValue);
       setBoardMessage(boardValue === null ? 'Board cleared' : 'Board updated successfully');
-
-      updateHandCounts(result.players);
+      applyBoardSnapshots(result.players);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {

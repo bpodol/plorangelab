@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { addRange, deleteRange } from '../api/players.ts';
 import type { Mode } from '../types.ts';
+import type { PlayerFilterSnapshot } from '../types.ts';
 
 /**
  * Represent the frontend state of one player slot.
@@ -15,6 +16,8 @@ import type { Mode } from '../types.ts';
 export interface PlayerState {
   range: string;
   numberOfHands: number;
+  /** Current-street filter state returned by the backend, or null if unavailable. */
+  filterSnapshot: PlayerFilterSnapshot | null;
   hasAppliedRange: boolean;
   isLoading: boolean;
   error: string | null;
@@ -43,6 +46,7 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     Array.from({ length: 6 }, () => ({
       range: '',
       numberOfHands: 0,
+      filterSnapshot: null,
       hasAppliedRange: false,
       isLoading: false,
       error: null,
@@ -61,8 +65,9 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
    * Submit a player's range expression to the backend.
    *
    * Creates or replaces the range in the selected player slot.
-   * On success, updates the reported hand count and marks the
-   * range as applied.
+   * On success, updates the reported hand count, marks the range as applied,
+   * and clears the previous filter
+   * snapshot because the backend initializes a new player range state.
    *
    * Loading and error states are maintained for the target slot.
    *
@@ -82,7 +87,11 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     try {
       const hands = await addRange(sessionId, playerId, player.range, mode);
 
-      updatePlayer(playerId, { numberOfHands: hands.hands, hasAppliedRange: true });
+      updatePlayer(playerId, {
+        numberOfHands: hands.hands,
+        filterSnapshot: null,
+        hasAppliedRange: true,
+      });
     } catch (err) {
       updatePlayer(playerId, { error: err instanceof Error ? err.message : 'Unknown error' });
     } finally {
@@ -113,7 +122,12 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     try {
       await deleteRange(sessionId, playerId);
 
-      updatePlayer(playerId, { range: '', numberOfHands: 0, hasAppliedRange: false });
+      updatePlayer(playerId, {
+        range: '',
+        numberOfHands: 0,
+        filterSnapshot: null,
+        hasAppliedRange: false,
+      });
     } catch (err) {
       updatePlayer(playerId, { error: err instanceof Error ? err.message : 'Unknown error' });
     } finally {
@@ -140,9 +154,32 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     );
   }
 
+  /**
+   * Apply the player snapshots returned after a board change.
+   *
+   * Updates effective hand counts and filter states together, preserving
+   * player slot order. Empty slots receive a zero count and null snapshot.
+   *
+   * @param snapshots - Six slot-aligned snapshots returned by the backend.
+   */
+  function applyBoardSnapshots(snapshots: (PlayerFilterSnapshot | null)[]) {
+    setPlayers((previousPlayers) =>
+      previousPlayers.map((player, index) => {
+        const snapshot = snapshots[index] ?? null;
+
+        return {
+          ...player,
+          numberOfHands: snapshot?.filtered_hands ?? 0,
+          filterSnapshot: snapshot,
+        };
+      }),
+    );
+  }
+
   return {
     players,
     updateHandCounts,
+    applyBoardSnapshots,
     updatePlayer,
     handleAddRange,
     handleDeleteRange,

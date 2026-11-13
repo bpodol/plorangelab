@@ -1,9 +1,38 @@
+from dataclasses import asdict
 from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from plorangelab.services.range_manager import PlayerFilterSnapshot
+
 from ._helpers import create_session
+
+
+@pytest.fixture
+def snapshot() -> PlayerFilterSnapshot:
+    return PlayerFilterSnapshot(
+        base_hands=10,
+        filtered_hands=4,
+        filtered_coverage=0.4,
+        filters={
+            "Draws": {
+                "type": "group",
+                "name": "Draws",
+                "coverage": 0.4,
+                "active": True,
+                "filters": {
+                    "FD": {
+                        "type": "filter",
+                        "name": "FD",
+                        "expression": "ss",
+                        "coverage": 0.4,
+                        "active": True,
+                    }
+                },
+            }
+        },
+    )
 
 
 @pytest.fixture
@@ -32,14 +61,16 @@ def mock_operation(monkeypatch, session, name: str, *, result=None, error=None) 
         ),
     ],
 )
-def test_create_filter(client, filter_context, monkeypatch, payload, name, path):
+def test_create_filter(
+    client, filter_context, monkeypatch, payload, name, path, snapshot
+):
     base_url, session = filter_context
-    add_filter = mock_operation(monkeypatch, session, "add_filter", result=0.4)
+    add_filter = mock_operation(monkeypatch, session, "add_filter", result=snapshot)
 
     response = client.post(f"{base_url}/filters", json=payload)
 
     assert response.status_code == 201, response.text
-    assert response.json() == {"coverage": pytest.approx(0.4)}
+    assert response.json() == asdict(snapshot)
     add_filter.assert_called_once_with(
         expression="top_pair",
         player_index=2,
@@ -55,22 +86,24 @@ def test_create_filter(client, filter_context, monkeypatch, payload, name, path)
         ({"name": "Draws", "path": ["Aggressive", "Flop"]}, ("Aggressive", "Flop")),
     ],
 )
-def test_create_group(client, filter_context, monkeypatch, payload, path):
+def test_create_group(client, filter_context, monkeypatch, payload, path, snapshot):
     base_url, session = filter_context
-    add_group = mock_operation(monkeypatch, session, "add_group")
+    add_group = mock_operation(monkeypatch, session, "add_group", result=snapshot)
 
     response = client.post(f"{base_url}/groups", json=payload)
 
     assert response.status_code == 201, response.text
-    assert response.json() == {"name": "Draws", "path": list(path)}
+    assert response.json() == asdict(snapshot)
     add_group.assert_called_once_with(name="Draws", player_index=2, path=path)
 
 
 @pytest.mark.parametrize("resource", ["filters", "groups"])
 @pytest.mark.parametrize("active", [True, False])
-def test_set_active(client, filter_context, monkeypatch, resource, active):
+def test_set_active(client, filter_context, monkeypatch, resource, active, snapshot):
     base_url, session = filter_context
-    set_active = mock_operation(monkeypatch, session, "set_filter_active", result=0.65)
+    set_active = mock_operation(
+        monkeypatch, session, "set_filter_active", result=snapshot
+    )
 
     response = client.patch(
         f"{base_url}/{resource}/Draws",
@@ -79,7 +112,7 @@ def test_set_active(client, filter_context, monkeypatch, resource, active):
     )
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"coverage": pytest.approx(0.65)}
+    assert response.json() == asdict(snapshot)
     set_active.assert_called_once_with(
         name="Draws",
         player_index=2,
@@ -89,9 +122,13 @@ def test_set_active(client, filter_context, monkeypatch, resource, active):
 
 
 @pytest.mark.parametrize("resource", ["filters", "groups"])
-def test_delete_filter_or_group(client, filter_context, monkeypatch, resource):
+def test_delete_filter_or_group(
+    client, filter_context, monkeypatch, resource, snapshot
+):
     base_url, session = filter_context
-    delete_filter = mock_operation(monkeypatch, session, "delete_filter", result=0.8)
+    delete_filter = mock_operation(
+        monkeypatch, session, "delete_filter", result=snapshot
+    )
 
     response = client.delete(
         f"{base_url}/{resource}/Draws",
@@ -99,20 +136,26 @@ def test_delete_filter_or_group(client, filter_context, monkeypatch, resource):
     )
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"coverage": pytest.approx(0.8)}
+    assert response.json() == asdict(snapshot)
     delete_filter.assert_called_once_with("Draws", 2, ("Aggressive",))
 
 
-def test_clear_filters_only_calls_clear(client, filter_context, monkeypatch):
+def test_clear_filters_only_calls_clear(client, filter_context, monkeypatch, snapshot):
     base_url, session = filter_context
-    clear_filters = mock_operation(monkeypatch, session, "clear_filters", result=1.0)
-    delete_filter = mock_operation(monkeypatch, session, "delete_filter")
-    set_filter_active = mock_operation(monkeypatch, session, "set_filter_active")
+    clear_filters = mock_operation(
+        monkeypatch, session, "clear_filters", result=snapshot
+    )
+    delete_filter = mock_operation(
+        monkeypatch, session, "delete_filter", result=snapshot
+    )
+    set_filter_active = mock_operation(
+        monkeypatch, session, "set_filter_active", result=snapshot
+    )
 
     response = client.post(f"{base_url}/filters/clear")
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"coverage": pytest.approx(1.0)}
+    assert response.json() == asdict(snapshot)
     clear_filters.assert_called_once_with(2)
     delete_filter.assert_not_called()
     set_filter_active.assert_not_called()
