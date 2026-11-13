@@ -6,6 +6,9 @@ PLO RangeLab's React frontend coordinates session setup, player-range editing, c
 
 This document explains **where state lives**, **how requests update it**, and **what happens when work is asynchronous**. It describes the implementation reviewed for this documentation pass, not planned functionality. For backend request and message formats, use the [REST API contract](../api/rest.md) and [WebSocket protocol](../api/websocket.md).
 
+For an overview of the frontend structure, component responsibilities,
+and application workflows, see [Frontend Architecture](README.md).
+
 ## Source map
 
 | Source | Responsibility |
@@ -196,4 +199,3 @@ These are **current behavior**, not promises about planned features:
 | Cancellation displays the wrong status | `useEquitySocket.ts` message switch and [WebSocket contract](../api/websocket.md) |
 | Filter API calls exist but no filter UI appears | `src/api/filters.ts`; React integration is not yet implemented |
 
-For UI composition and component responsibilities, see the planned `docs/frontend/README.md` after the component documentation review.
