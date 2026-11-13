@@ -26,7 +26,7 @@ const progressMessage = {
   type: 'progress',
   job_id: 'job-123',
   simulations: 125000,
-  margins_of_error: [null, 0.0018, 0.0023],
+  margins_of_error: [0.0018, 0.0023],
 } satisfies EquityMessage;
 
 const resultMessage = {
@@ -35,7 +35,7 @@ const resultMessage = {
   equities: { '2': 0.347, '0': 0.653 },
   details: {
     method: 'monte-carlo',
-    margins_of_error: [0.0012, null, 0.0023],
+    margins_of_error: [0.0012, 0.0023],
     simulations: 100000,
     attempts: 110000,
     stop_reason: 'target_reached',

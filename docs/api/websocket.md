@@ -149,6 +149,19 @@ Progress is a **snapshot, not a stream with guaranteed delivery of every interme
 
 The values above are examples, not a recorded calculation. `equities` includes **participating player slots only**, using their zero-based indices as keys. JSON object keys are strings even though the Python response schema uses `dict[int, float]`. Array diagnostics correspond to the participating players in slot order.
 
+**Margin-of-error ordering:** The `margins_of_error` array contains one entry per participating player, ordered by ascending player slot ID. Inactive slots are omitted, so the array is not padded with `null` values.
+
+For example, if only player slots `0` and `2` participate,
+`margins_of_error: [0.0012, 0.0023]` assigns `0.0012` to player `0`
+and `0.0023` to player `2`.
+
+For `result` messages, clients should match MOEs to `equities`
+after sorting the equity keys numerically. `progress` messages
+follow the same ordering, although they do not include equities.
+
+A `null` array entry means that the margin of error is unavailable,
+not that the corresponding player slot is inactive.
+
 The `details` object always has these field names, though several values may be `null` depending on the calculation:
 
 | Field | Type / allowed values | Meaning |
