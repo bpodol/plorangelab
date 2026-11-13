@@ -100,8 +100,9 @@ export function EquityPanel({
           <ul>
             {Object.entries(message.equities)
               .sort(([a], [b]) => Number(a) - Number(b))
-              .map(([playerId, equity]) => {
-                const moe = message.details.margins_of_error?.[Number(playerId)];
+              // MOEs follow participating-player order, not player slot IDs.
+              .map(([playerId, equity], index) => {
+                const moe = message.details.margins_of_error?.[index];
 
                 return (
                   <li key={playerId}>
