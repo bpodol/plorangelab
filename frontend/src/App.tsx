@@ -6,6 +6,23 @@ import { EquityPanel } from './components/EquityPanel';
 import { useEquitySocket } from './hooks/useEquitySocket';
 import { usePlayerRanges } from './hooks/usePlayerRanges';
 
+/**
+ * Coordinate the frontend's session, player, board, and equity workflows.
+ *
+ * Owns application-level state for the active session, community
+ * board input, PLO mode, loading indicators, and feedback messages.
+ *
+ * Delegates player range management to usePlayerRanges() and equity
+ * calculation state to useEquitySocket().
+ *
+ * Connects these hooks to presentational components and coordinates
+ * operations that affect multiple parts of the application.
+ *
+ * @remarks
+ * Session creation and board changes are handled directly through
+ * REST API clients. Individual components receive state and actions
+ * through props rather than communicating with the backend.
+ */
 function App() {
   const [board, setBoard] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -18,6 +35,17 @@ function App() {
   const { players, updateHandCounts, updatePlayer, handleAddRange, handleDeleteRange } =
     usePlayerRanges(sessionId, mode);
 
+  /**
+   * Create a backend session and store its identifier.
+   *
+   * Updates the application loading and error states while the
+   * request is pending.
+   *
+   * A successful response updates sessionId, allowing the
+   * session-dependent hooks to establish backend communication.
+   *
+   * Errors are displayed through application-level state.
+   */
   async function handleCreateSession() {
     setIsLoading(true);
     setError(null);
@@ -32,6 +60,22 @@ function App() {
     }
   }
 
+  /**
+   * Apply the current board input to the backend session.
+   *
+   * Trims the entered board expression and converts an empty
+   * string to null, which requests clearing the board.
+   *
+   * On success, synchronizes player hand counts with the backend
+   * response and displays confirmation feedback.
+   *
+   * On failure, preserves the existing hand counts and displays
+   * the returned error.
+   *
+   * @remarks
+   * The input is not validated locally. Board notation validation
+   * and street transitions are handled by the backend.
+   */
   async function handleApplyBoard() {
     if (sessionId === null) return;
 
@@ -64,7 +108,8 @@ function App() {
       <p>Session: {sessionId ?? 'Not created'}</p>
 
       <label htmlFor="mode">Game mode</label>
-
+      {/* Prevent switching PLO modes while player ranges exist
+          or a player range operation is in progress. */}
       <select
         id="mode"
         value={mode}

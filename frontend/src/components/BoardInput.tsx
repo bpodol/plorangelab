@@ -6,6 +6,19 @@ interface BoardInputProps {
   isLoading: boolean;
 }
 
+/**
+ * Render a controlled community board input and apply button.
+ *
+ * Displays the board expression provided by the parent and
+ * reports input changes through onBoardChange.
+ *
+ * The onApply callback delegates board submission to the parent.
+ * The component does not validate or submit the board itself.
+ *
+ * @remarks
+ * The disabled prop controls the apply button, while the text
+ * input remains editable.
+ */
 export function BoardInput({
   board,
   onBoardChange,
