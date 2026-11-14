@@ -42,11 +42,11 @@ The REST clients handle request and response details rather than maintaining Rea
 
 ### State-management hooks
 
-
 `usePlayerRanges()` manages the six player slots, including their range inputs, applied-range status, effective hand counts, current-street filter snapshots, loading indicators, and errors.
 
-Each player's range and filter snapshot are stored together in a single `PlayerState`, avoiding synchronization between separate React states.
+It provides operations for managing player ranges and filter trees, including creating filters and groups, toggling activation, deleting nodes, and clearing active filters.
 
+Filter mutations share a common helper that handles loading, errors, and snapshot synchronization. Each player's range and filter snapshot are stored together in a single `PlayerState`, avoiding synchronization between separate React states.
 
 `useEquitySocket()` manages the session's WebSocket connection, reconnection, equity job lifecycle, progress messages, and calculation results.
 
@@ -84,6 +84,20 @@ These components receive application state and callbacks through props. They do 
 
 The frontend maintains editable input state separately from whether a range has been successfully applied to the backend.
 
+### Filter management
+
+1. A filter operation is invoked through `usePlayerRanges()`.
+2. The hook checks that a session exists and the player is not loading.
+3. The corresponding REST client sends the mutation to the backend.
+4. The backend returns a complete `PlayerFilterSnapshot`.
+5. The hook updates the player's effective hand count and filter snapshot.
+
+Supported operations include creating filters and groups, toggling activation, deleting filters or groups, and deactivating all filters.
+
+Activation toggles determine the desired state using the locally stored filter tree. The backend remains responsible for validating and applying mutations.
+
+Filter-management UI components are not yet connected to these operations.
+
 ### Board application
 
 1. The user edits the board in `BoardInput`.
@@ -115,11 +129,13 @@ The backend remains authoritative for applied ranges, board state, and equity co
 
 ## Current Scope
 
-The frontend currently supports session creation, player range management, board application, and equity calculations.
+The frontend supports session creation, player range management, board application, and equity calculations.
 
-The filter REST client is implemented, and `usePlayerRanges()` stores current-street filter snapshots returned by board changes.
+The filter REST client and hook-level mutation operations are implemented. `usePlayerRanges()` maintains filter snapshots using backend mutation responses and board-change responses.
 
-Filter mutation actions and filter-management components are not yet integrated into the frontend UI.
+Dedicated filter-management UI components are not yet integrated.
+
+Database persistence and automatic session-state restoration are not implemented.
 
 ## Further Documentation
 

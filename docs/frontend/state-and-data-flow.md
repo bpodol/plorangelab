@@ -14,12 +14,12 @@ and application workflows, see [Frontend Architecture](README.md).
 | Source | Responsibility |
 | --- | --- |
 | `src/App.tsx` | Owns the session ID, editable board string, selected PLO mode, board/session loading and errors; connects hooks to UI components. |
-| `src/hooks/usePlayerRanges.ts` | Owns six local player states, handles range requests, and applies board-returned player filter snapshots. |
+| `src/hooks/usePlayerRanges.ts` | Owns six player states, handles range and filter mutations, and applies backend-returned filter snapshots. |
 | `src/hooks/useEquitySocket.ts` | Owns the equity WebSocket connection lifecycle, latest server message, UI status, and tracked job ID. |
 | `src/api/client.ts` | Shared `fetch` helper for REST responses and FastAPI error messages. |
 | `src/api/sessions.ts` | Session creation and board-update REST calls. |
 | `src/api/players.ts` | Player-range PUT and DELETE calls. |
-| `src/api/filters.ts` | Filter and group REST calls; mutation functions return player snapshots but are not yet integrated into the UI. |
+| `src/api/filters.ts` | Typed filter and group REST operations that return updated player snapshots after mutations. |
 | `src/api/equity.ts` | Equity WebSocket message types and connection creation. |
 | `src/types.ts` | Shared mode, recursive filter-tree types, and `PlayerFilterSnapshot`. |
 
@@ -33,8 +33,17 @@ App.tsx
 ├── sessions API: createSession(), changeBoard()
 ├── usePlayerRanges(sessionId, mode)
 │   ├── six PlayerState entries (including filterSnapshot)
-│   ├── applyBoardSnapshots() for board responses
-│   └── players API: addRange(), deleteRange()
+│   ├── range operations: add / delete
+│   ├── filter operations:
+│   │   ├── addFilter()
+│   │   ├── addGroup()
+│   │   ├── toggleFilterActive()
+│   │   ├── removeFilter()
+│   │   └── clearAllFilters()
+│   ├── runFilterMutation() — shared mutation lifecycle
+│   ├── applyBoardSnapshots()
+│   ├── players API
+│   └── filters API
 ├── useEquitySocket(sessionId)
 │   ├── WebSocket connection, job ID, latest message, status
 │   └── equity API: connectEquityWebSocket()
@@ -67,7 +76,7 @@ Each `PlayerState` contains `range`, `numberOfHands`, `filterSnapshot`, `hasAppl
 
 The **editable `range` string is not necessarily the range applied on the backend**: changing input text alone does not make a network request. Similarly, editing the `board` string does not change the server board until the Apply action succeeds.
 
-`updatePlayer()` makes immutable per-slot updates using a functional React state setter. Individual range operations maintain their own loading and error state; `App` maintains a separate loading flag for session and board operations.
+`updatePlayer()` makes immutable per-slot updates using a functional React state setter. Range and filter operations update the corresponding player's loading and error state. Filter mutations share runFilterMutation(), which also synchronizes the effective hand count and filter snapshot using the backend response; `App` maintains a separate loading flag for session and board operations.
 
 ## REST request flows
 
@@ -118,6 +127,29 @@ Updating the local input string without applying it leaves the backend range unc
 The backend is responsible for board validation, card blockers, street transitions, and restoring compatible cached street states.
 
 The frontend applies the returned snapshots **only after a successful response**. It does not reconstruct or carry over filter trees between streets itself.
+
+### 5. Filter mutations
+
+`usePlayerRanges()` exposes five filter-management operations:
+
+- `addFilter()` — Creates a filter in the specified group.
+- `addGroup()` — Creates a nested filter group.
+- `toggleFilterActive()` — Switches a filter or group's activation state.
+- `removeFilter()` — Deletes a filter or group.
+- `clearAllFilters()` — Deactivates all filters and groups while preserving
+  their definitions.
+
+All mutations use `runFilterMutation()`.
+
+The helper checks for an active session and skips the operation if the target player is loading. It then executes the REST request and updates `numberOfHands` and `filterSnapshot` using the returned snapshot.
+
+Errors are stored in the player's state rather than propagated. The previous filter snapshot is preserved if the request fails.
+
+`toggleFilterActive()` retrieves the target node from the locally stored filter tree and sends the opposite activation state to the backend. If the snapshot or target node is missing, the operation is skipped.
+
+Filter mutations do not refetch the entire tree because their responses already include the updated `PlayerFilterSnapshot`.
+
+These operations are implemented at the hook level but are not yet connected to filter-management UI components.
 
 ### Shared REST helper and errors
 
@@ -190,9 +222,10 @@ For the server-side behavior, see the [WebSocket protocol](../api/websocket.md) 
 
 These are **current behavior**, not promises about planned features:
 
-- **Filter UI and mutation orchestration are not yet integrated.** `api/filters.ts` provides typed REST functions, and shared filter types live in `src/types.ts`. `usePlayerRanges` stores snapshots returned by board changes, but it does not yet invoke filter mutations or expose filter-management UI workflows.
+- **Filter UI is not yet integrated.** Filter mutation operations are available through `usePlayerRanges()`, but dedicated UI controls are still pending.
 - **No automatic range-state rehydration.** `usePlayerRanges` initializes six empty slots locally and does not load the existing session's player state or reset automatically when `sessionId` changes.
 - **No stale-response protection in the range hook.** Overlapping operations for one player can complete out of order; no request versioning or abort mechanism is implemented there.
+- **No automatic filter-state recovery.** The hook does not refetch filter snapshots after failed or interrupted mutation responses. The backend may have completed an operation even if its response was not received.
 - **Draft inputs are distinct from applied state.** `hasAppliedRange` indicates a successful prior application, not necessarily that the current editable text equals the backend range.
 - **Job resume is in-memory only.** The hook tracks a known job across reconnects within the current mount, not across page reloads.
 - **WebSocket messages are only partially validated at runtime.** TypeScript assertions do not check arbitrary incoming JSON fields.
@@ -208,5 +241,5 @@ These are **current behavior**, not promises about planned features:
 | Equity does not start or connection status is wrong | `useEquitySocket.ts`, then `src/api/equity.ts` |
 | A disconnected equity job does not resume | `useEquitySocket.ts` (`jobRef`, `onopen`, `onclose`) and [WebSocket contract](../api/websocket.md) |
 | Cancellation displays the wrong status | `useEquitySocket.ts` message switch and [WebSocket contract](../api/websocket.md) |
-| Filter API calls exist but no filter UI appears | `src/api/filters.ts`; React integration is not yet implemented |
+| A filter mutation fails or returns unexpected state | `usePlayerRanges.runFilterMutation()`, then `src/api/filters.ts` and the REST contract |
 

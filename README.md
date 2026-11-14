@@ -6,7 +6,7 @@
 
 PLO RangeLab is a full-stack application built around a custom Python equity engine. It supports weighted hand ranges, multiway equity calculations, and range filtering.
 
-**Status:** Under active development. The equity engine, backend services, REST API, and core equity calculation UI are implemented. Frontend filter management and database persistence are in progress.
+**Status:** Under active development. The equity engine, backend services, REST API, core equity calculation UI, and frontend filter state management are implemented. Filter-management UI and database persistence are in progress.
 
 ## Features
 
@@ -139,7 +139,7 @@ npm run build
 
 ## Roadmap
 
-- Implement frontend filter management.
+- Connect filter-management UI components to the existing frontend operations.
 - Generate board-dependent filter groups automatically.
 - Implement database persistence.
 - Finalize the MVP interface.
