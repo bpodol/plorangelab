@@ -61,6 +61,7 @@ See [State and Data Flow](state-and-data-flow.md) for their detailed behavior.
 | `BoardInput` | Collect board notation and request board application |
 | `PlayerRangeInput` | Display and manage an individual player's range input |
 | `EquityPanel` | Configure calculations and display progress and results |
+| `FilterPanel` | Display filtered hand counts, coverage, and nested filter trees; provide controls for creating, activating, and deleting filters and groups |
 
 These components receive application state and callbacks through props. They do not communicate directly with the backend.
 
@@ -96,7 +97,11 @@ Supported operations include creating filters and groups, toggling activation, d
 
 Activation toggles determine the desired state using the locally stored filter tree. The backend remains responsible for validating and applying mutations.
 
-Filter-management UI components are not yet connected to these operations.
+`FilterPanel` provides the user interface for managing filters and groups. It renders the complete nested filter tree recursively, displaying each node's coverage and activation state.
+
+Reusable creation controls allow users to add filters or groups at the root or within existing groups. Parent paths are derived automatically from the tree hierarchy.
+
+All mutation callbacks are provided by `usePlayerRanges()` through `App.tsx`. The component does not maintain a separate copy of the filter tree.
 
 ### Board application
 
@@ -133,7 +138,9 @@ The frontend supports session creation, player range management, board applicati
 
 The filter REST client and hook-level mutation operations are implemented. `usePlayerRanges()` maintains filter snapshots using backend mutation responses and board-change responses.
 
-Dedicated filter-management UI components are not yet integrated.
+`FilterPanel` is integrated into `App.tsx` and displayed alongside each player's range input once a range has been applied.
+
+The component supports nested filter and group creation, activation toggles, individual node deletion, and bulk deactivation. Filter operations are connected to `usePlayerRanges()` and covered by component tests.
 
 Database persistence and automatic session-state restoration are not implemented.
 

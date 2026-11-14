@@ -6,7 +6,7 @@
 
 PLO RangeLab is a full-stack application built around a custom Python equity engine. It supports weighted hand ranges, multiway equity calculations, and range filtering.
 
-**Status:** Under active development. The equity engine, backend services, REST API, core equity calculation UI, and frontend filter state management are implemented. Filter-management UI and database persistence are in progress.
+**Status:** Under active development. The equity engine, backend services, REST API, equity calculation UI, and filter-management UI are implemented. Database persistence and further UI improvements are in progress.
 
 ## Features
 
@@ -14,7 +14,7 @@ PLO RangeLab is a full-stack application built around a custom Python equity eng
 - **Weighted hand ranges** with card-blocker handling.
 - **Exact equity calculations** and adaptive Monte Carlo simulations.
 - **Preflop, flop, turn, and river** calculations.
-- **Range management and backend filtering** with nested filter groups.
+- **Interactive range filtering** with nested filter groups, individual activation controls, weighted coverage statistics, and filter management through the frontend.
 - **WebSocket-based equity calculations** with progress updates and cancellation.
 - **Session-based REST API** for managing player ranges and boards.
 

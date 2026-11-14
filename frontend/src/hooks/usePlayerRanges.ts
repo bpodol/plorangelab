@@ -163,9 +163,9 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
   async function runFilterMutation(
     playerId: number,
     operation: (sessionId: string) => Promise<PlayerFilterSnapshot>,
-  ): Promise<void> {
-    if (sessionId === null) return;
-    if (players[playerId].isLoading) return;
+  ): Promise<boolean> {
+    if (sessionId === null) return false;
+    if (players[playerId].isLoading) return false;
 
     updatePlayer(playerId, { isLoading: true, error: null });
 
@@ -176,10 +176,13 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
         numberOfHands: filterSnapshot.filtered_hands,
         filterSnapshot,
       });
+
+      return true;
     } catch (err) {
       updatePlayer(playerId, {
         error: err instanceof Error ? err.message : 'Unknown error',
       });
+      return false;
     } finally {
       updatePlayer(playerId, { isLoading: false });
     }
@@ -232,7 +235,7 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     expression: string,
     name?: string,
     path?: string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     return runFilterMutation(playerId, (sessionId) =>
       createFilter(sessionId, playerId, { expression, name, path }),
     );
@@ -251,7 +254,7 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
    * @param name - Name of the new filter group.
    * @param path - Optional path to the parent group.
    */
-  function addGroup(playerId: number, name: string, path?: string[]): Promise<void> {
+  function addGroup(playerId: number, name: string, path?: string[]): Promise<boolean> {
     return runFilterMutation(playerId, (sessionId) =>
       createGroup(sessionId, playerId, { name, path }),
     );
@@ -276,14 +279,14 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     resource: FilterResource,
     name: string,
     path?: string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     const tree = players[playerId]?.filterSnapshot?.filters;
 
-    if (!tree) return Promise.resolve();
+    if (!tree) return Promise.resolve(false);
 
     const node = getFilterNode(tree, name, path);
 
-    if (!node) return Promise.resolve();
+    if (!node) return Promise.resolve(false);
 
     return runFilterMutation(playerId, (sessionId) =>
       setFilterActive(sessionId, playerId, resource, name, !node.active, path),
@@ -308,7 +311,7 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     resource: FilterResource,
     name: string,
     path?: string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     return runFilterMutation(playerId, (sessionId) =>
       deleteFilter(sessionId, playerId, resource, name, path),
     );
@@ -325,7 +328,7 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
    *
    * @param playerId - Zero-based player slot index (0-5).
    */
-  function clearAllFilters(playerId: number): Promise<void> {
+  function clearAllFilters(playerId: number): Promise<boolean> {
     return runFilterMutation(playerId, (sessionId) => clearFilters(sessionId, playerId));
   }
 

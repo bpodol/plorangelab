@@ -39,7 +39,7 @@ function makeNestedTree(): FilterTree {
     top_pair: {
       type: 'filter',
       name: 'top_pair',
-      expression: 'TP',
+      expression: 'A',
       coverage: 0.4,
       active: true,
     },
@@ -58,7 +58,7 @@ function makeNestedTree(): FilterTree {
             nut_fd: {
               type: 'filter',
               name: 'nut_fd',
-              expression: 'NFD',
+              expression: 'Ass',
               coverage: 0.15,
               active: false,
             },
@@ -85,11 +85,11 @@ describe('usePlayerRanges filter operations', () => {
     });
 
     await act(async () => {
-      await result.current.addFilter(2, 'NFD', 'nut_fd', ['draws', 'nut_draws']);
+      await result.current.addFilter(2, 'Ass', 'nut_fd', ['draws', 'nut_draws']);
     });
 
     expect(createFilter).toHaveBeenCalledWith(SESSION_ID, 2, {
-      expression: 'NFD',
+      expression: 'Ass',
       name: 'nut_fd',
       path: ['draws', 'nut_draws'],
     });
@@ -301,7 +301,7 @@ describe('usePlayerRanges filter operations', () => {
     const updated = makeSnapshot(20);
     vi.mocked(createFilter).mockResolvedValue(updated);
     await act(async () => {
-      await result.current.addFilter(4, 'TP');
+      await result.current.addFilter(4, 'A');
     });
     expect(result.current.players[4]).toMatchObject({
       filterSnapshot: updated,
@@ -319,7 +319,7 @@ describe('usePlayerRanges filter operations', () => {
     });
 
     await act(async () => {
-      await result.current.addFilter(0, 'TP');
+      await result.current.addFilter(0, 'A');
       await result.current.addGroup(0, 'draws');
       await result.current.toggleFilterActive(0, 'filters', 'top_pair');
       await result.current.removeFilter(0, 'filters', 'top_pair');
@@ -341,10 +341,10 @@ describe('usePlayerRanges filter operations', () => {
     vi.mocked(createFilter).mockReturnValue(pendingRequest);
 
     const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
-    let operation!: Promise<void>;
+    let operation!: Promise<boolean>;
 
     act(() => {
-      operation = result.current.addFilter(2, 'TP');
+      operation = result.current.addFilter(2, 'A');
     });
 
     expect(result.current.players[2].isLoading).toBe(true);

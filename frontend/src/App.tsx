@@ -5,6 +5,7 @@ import { PlayerRangeInput } from './components/PlayerRangeInput';
 import { EquityPanel } from './components/EquityPanel';
 import { useEquitySocket } from './hooks/useEquitySocket';
 import { usePlayerRanges } from './hooks/usePlayerRanges';
+import { FilterPanel } from './components/FilterPanel';
 
 /**
  * Coordinate the frontend's session, player, board, and equity workflows.
@@ -32,8 +33,18 @@ function App() {
   const [mode, setMode] = useState<4 | 5>(4);
   const { equityStatus, isConnected, equityMessage, startEquity, cancelEquity } =
     useEquitySocket(sessionId);
-  const { players, applyBoardSnapshots, updatePlayer, handleAddRange, handleDeleteRange } =
-    usePlayerRanges(sessionId, mode);
+  const {
+    players,
+    applyBoardSnapshots,
+    updatePlayer,
+    handleAddRange,
+    handleDeleteRange,
+    addFilter,
+    addGroup,
+    toggleFilterActive,
+    removeFilter,
+    clearAllFilters,
+  } = usePlayerRanges(sessionId, mode);
 
   /**
    * Create a backend session and store its identifier.
@@ -134,19 +145,43 @@ function App() {
         <h2>Players</h2>
 
         {players.map((player, index) => (
-          <PlayerRangeInput
+          <div
             key={index}
-            playerId={index}
-            range={player.range}
-            numberOfHands={player.numberOfHands}
-            onRangeChange={(value) => updatePlayer(index, { range: value })}
-            onAdd={() => handleAddRange(index)}
-            onDelete={() => handleDeleteRange(index)}
-            disabled={sessionId === null || player.isLoading}
-            isLoading={player.isLoading}
-            error={player.error}
-            hasAppliedRange={player.hasAppliedRange}
-          />
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '24px',
+              marginBottom: '16px',
+            }}
+          >
+            <PlayerRangeInput
+              playerId={index}
+              range={player.range}
+              numberOfHands={player.numberOfHands}
+              onRangeChange={(value) => updatePlayer(index, { range: value })}
+              onAdd={() => handleAddRange(index)}
+              onDelete={() => handleDeleteRange(index)}
+              disabled={sessionId === null || player.isLoading}
+              isLoading={player.isLoading}
+              error={player.error}
+              hasAppliedRange={player.hasAppliedRange}
+            />
+
+            {player.hasAppliedRange && (
+              <FilterPanel
+                playerId={index}
+                filterSnapshot={player.filterSnapshot}
+                disabled={
+                  sessionId === null || !player.hasAppliedRange || player.isLoading || isLoading
+                }
+                onAddFilter={addFilter}
+                onAddGroup={addGroup}
+                onToggleFilterActive={toggleFilterActive}
+                onRemoveFilter={removeFilter}
+                onClearAllFilters={clearAllFilters}
+              />
+            )}
+          </div>
         ))}
       </section>
 

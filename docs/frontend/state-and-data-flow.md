@@ -23,7 +23,7 @@ and application workflows, see [Frontend Architecture](README.md).
 | `src/api/equity.ts` | Equity WebSocket message types and connection creation. |
 | `src/types.ts` | Shared mode, recursive filter-tree types, and `PlayerFilterSnapshot`. |
 
-The current UI consists of `BoardInput`, `PlayerRangeInput`, and `EquityPanel`, coordinated by `App.tsx`. Their internal rendering and props will be covered in the frontend architecture overview.
+The current UI consists of `BoardInput`, `PlayerRangeInput`, `FilterPanel`, and `EquityPanel`, coordinated by `App.tsx`. Their internal rendering and props will be covered in the frontend architecture overview.
 
 ## Dependency and data-flow map
 
@@ -50,6 +50,9 @@ App.tsx
 └── UI components (props + event callbacks)
     ├── BoardInput
     ├── PlayerRangeInput × 6
+    ├── FilterPanel × up to 6
+    │   ├── AddNodeControl (root and nested groups)
+    │   └── FilterTreeView (recursive filter hierarchy)
     └── EquityPanel
 
 REST clients ────> FastAPI REST routes
@@ -67,6 +70,7 @@ The **backend owns the authoritative session, applied ranges, board, and equity 
 | `App` | `mode` | User chooses PLO4 or PLO5; the selector is disabled while any player has an applied range or is loading. |
 | `App` | `isLoading`, `error`, `boardMessage` | Session creation and board-request feedback. |
 | `usePlayerRanges` | `players: PlayerState[6]` | Local edits, range-request results, and board-returned snapshots (effective hand counts and current-street filter state). |
+| `AddNodeControl` | `open`, `type`, `name`, `expression`, `submitting` | Local form state updated through user interactions; inputs are reset and the form closes only after successful creation. |
 | `useEquitySocket` | `equityStatus`, `equityMessage`, `isConnected` | WebSocket lifecycle events and incoming messages. |
 | `useEquitySocket` | `socketRef`, `jobRef` | Mutable connection and job identifiers that persist across renders without triggering renders. |
 
@@ -149,7 +153,13 @@ Errors are stored in the player's state rather than propagated. The previous fil
 
 Filter mutations do not refetch the entire tree because their responses already include the updated `PlayerFilterSnapshot`.
 
-These operations are implemented at the hook level but are not yet connected to filter-management UI components.
+`FilterPanel` is integrated into `App.tsx` and rendered alongside each player's range input once a range has been applied.
+
+The component displays the effective hand count, filtered coverage, and complete nested filter tree. `FilterTreeView` recursively renders filters and groups, including their coverage and activation states.
+
+`AddNodeControl` provides reusable creation forms at the root and within nested groups. Each instance derives its parent path from its position in the tree.
+
+All mutations are delegated to `usePlayerRanges()` through callbacks. Creation callbacks return a success boolean, allowing the form to close and reset only after a successful operation. Errors remain managed by the hook and are displayed in `PlayerRangeInput`.
 
 ### Shared REST helper and errors
 
@@ -222,7 +232,6 @@ For the server-side behavior, see the [WebSocket protocol](../api/websocket.md) 
 
 These are **current behavior**, not promises about planned features:
 
-- **Filter UI is not yet integrated.** Filter mutation operations are available through `usePlayerRanges()`, but dedicated UI controls are still pending.
 - **No automatic range-state rehydration.** `usePlayerRanges` initializes six empty slots locally and does not load the existing session's player state or reset automatically when `sessionId` changes.
 - **No stale-response protection in the range hook.** Overlapping operations for one player can complete out of order; no request versioning or abort mechanism is implemented there.
 - **No automatic filter-state recovery.** The hook does not refetch filter snapshots after failed or interrupted mutation responses. The backend may have completed an operation even if its response was not received.
@@ -242,4 +251,4 @@ These are **current behavior**, not promises about planned features:
 | A disconnected equity job does not resume | `useEquitySocket.ts` (`jobRef`, `onopen`, `onclose`) and [WebSocket contract](../api/websocket.md) |
 | Cancellation displays the wrong status | `useEquitySocket.ts` message switch and [WebSocket contract](../api/websocket.md) |
 | A filter mutation fails or returns unexpected state | `usePlayerRanges.runFilterMutation()`, then `src/api/filters.ts` and the REST contract |
-
+| A filter control behaves incorrectly or generates the wrong parent path | `src/components/FilterPanel.tsx`, particularly `AddNodeControl()` and `FilterTreeView()` |
