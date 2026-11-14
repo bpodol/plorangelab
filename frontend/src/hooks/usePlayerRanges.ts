@@ -1,16 +1,24 @@
 import { useState } from 'react';
 import { addRange, deleteRange } from '../api/players.ts';
-import type { Mode } from '../types.ts';
+import {
+  createFilter,
+  createGroup,
+  setFilterActive,
+  deleteFilter,
+  clearFilters,
+  type FilterResource,
+} from '../api/filters.ts';
+import type { Mode, FilterTree, FilterNode } from '../types.ts';
 import type { PlayerFilterSnapshot } from '../types.ts';
 
 /**
  * Represent the frontend state of one player slot.
  *
- * Tracks the editable range expression, the last reported
- * hand count, whether a range has been applied successfully,
- * and the loading/error state of range operations.
+ * Tracks the editable range expression, effective hand count,
+ * current-street filter snapshot, applied-range status,
+ * and loading/error states for range and filter operations.
  *
- * The range expression may differ from the range currently
+ * The editable range expression may differ from the range currently
  * stored on the backend until the user applies it.
  */
 export interface PlayerState {
@@ -26,20 +34,24 @@ export interface PlayerState {
 /**
  * Manage frontend state and REST operations for six player slots.
  *
- * Maintains editable range expressions, hand counts, applied-range
- * flags, loading indicators, and per-player errors.
+ * Maintains editable range expressions, hand counts, filter snapshots,
+ * applied-range flags, loading indicators, and per-player errors.
  *
- * Provides handlers for adding, replacing, and deleting ranges,
- * along with utilities for updating individual player state
- * and synchronizing hand counts after board changes.
+ * Provides operations for creating, replacing, and deleting player ranges,
+ * as well as adding, removing, activating, and clearing filters and groups.
+ * Synchronizes hand counts and filter snapshots after board changes.
  *
  * @param sessionId - Active backend session ID, or null when absent.
  * @param mode - PLO variant used when submitting player ranges.
  *
  * @remarks
- * Range operations are sent to the backend through the players
- * API client. The hook does not automatically fetch player state
- * from the backend or reset its state when sessionId changes.
+ * The backend is the source of truth for filter state. Successful filter
+ * mutations replace the player's snapshot with the backend response.
+ * Filter mutations are skipped when the session is unavailable or the
+ * player is loading.
+ *
+ * The hook does not automatically fetch player state from the backend
+ * or reset its state when sessionId changes.
  */
 export function usePlayerRanges(sessionId: string | null, mode: Mode) {
   const [players, setPlayers] = useState<PlayerState[]>(
@@ -136,6 +148,191 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
   }
 
   /**
+   * Execute a filter mutation and synchronize the player's frontend state.
+   *
+   * Handles loading, errors, and updates the player's hand count and
+   * filter snapshot using the backend response.
+   *
+   * Skips execution if no session exists or the player is loading.
+   * Errors are stored in player state rather than rethrown.
+   *
+   * @param playerId - Zero-based player slot index (0-5).
+   * @param operation - Async mutation that receives the session ID
+   *                    and returns an updated player filter snapshot.
+   */
+  async function runFilterMutation(
+    playerId: number,
+    operation: (sessionId: string) => Promise<PlayerFilterSnapshot>,
+  ): Promise<boolean> {
+    if (sessionId === null) return false;
+    if (players[playerId].isLoading) return false;
+
+    updatePlayer(playerId, { isLoading: true, error: null });
+
+    try {
+      const filterSnapshot = await operation(sessionId);
+
+      updatePlayer(playerId, {
+        numberOfHands: filterSnapshot.filtered_hands,
+        filterSnapshot,
+      });
+
+      return true;
+    } catch (err) {
+      updatePlayer(playerId, {
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+      return false;
+    } finally {
+      updatePlayer(playerId, { isLoading: false });
+    }
+  }
+
+  /**
+   * Retrieve a filter or group from a nested filter tree.
+   *
+   * @param tree - Root filter tree.
+   * @param name - Name of the target filter or group.
+   * @param path - Names of parent groups, ordered from root to parent.
+   * @returns The matching node, or undefined if the path or node is invalid.
+   */
+  function getFilterNode(
+    tree: FilterTree,
+    name: string,
+    path: string[] = [],
+  ): FilterNode | undefined {
+    let currentTree = tree;
+
+    for (const groupName of path) {
+      const group = currentTree[groupName];
+
+      if (group?.type !== 'group') {
+        return undefined;
+      }
+
+      currentTree = group.filters;
+    }
+
+    return currentTree[name];
+  }
+
+  /**
+   * Add a filter to the specified player's filter tree.
+   *
+   * Sends the filter definition and path to the backend and updates the player's
+   * hand count and filter snapshot on success.
+   *
+   * Skips the operation if no session exists or the player is loading.
+   * API errors are stored in the player's state rather than rethrown.
+   *
+   * @param playerId - Zero-based player slot index (0-5).
+   * @param expression - Filter expression to evaluate.
+   * @param name - Optional custom name for the filter.
+   * @param path - Optional path to the parent filter group.
+   */
+  function addFilter(
+    playerId: number,
+    expression: string,
+    name?: string,
+    path?: string[],
+  ): Promise<boolean> {
+    return runFilterMutation(playerId, (sessionId) =>
+      createFilter(sessionId, playerId, { expression, name, path }),
+    );
+  }
+
+  /**
+   * Create a filter group in the specified player's filter tree.
+   *
+   * Sends the group definition to the backend and updates the player's
+   * hand count and filter snapshot on success.
+   *
+   * Skips the operation if no session exists or the player is loading.
+   * API errors are stored in the player's state rather than rethrown.
+   *
+   * @param playerId - Zero-based player slot index (0-5).
+   * @param name - Name of the new filter group.
+   * @param path - Optional path to the parent group.
+   */
+  function addGroup(playerId: number, name: string, path?: string[]): Promise<boolean> {
+    return runFilterMutation(playerId, (sessionId) =>
+      createGroup(sessionId, playerId, { name, path }),
+    );
+  }
+
+  /**
+   * Toggle the activation state of a filter or group.
+   *
+   * Reads the current activation state from the player's filter tree
+   * and requests the opposite state from the backend.
+   *
+   * Skips execution if the target node does not exist.
+   * Loading, errors, and snapshot updates are handled by runFilterMutation.
+   *
+   * @param playerId - Zero-based player slot index (0-5).
+   * @param resource - Resource type (filter or group).
+   * @param name - Name of the target node.
+   * @param path - Optional path to its parent group.
+   */
+  function toggleFilterActive(
+    playerId: number,
+    resource: FilterResource,
+    name: string,
+    path?: string[],
+  ): Promise<boolean> {
+    const tree = players[playerId]?.filterSnapshot?.filters;
+
+    if (!tree) return Promise.resolve(false);
+
+    const node = getFilterNode(tree, name, path);
+
+    if (!node) return Promise.resolve(false);
+
+    return runFilterMutation(playerId, (sessionId) =>
+      setFilterActive(sessionId, playerId, resource, name, !node.active, path),
+    );
+  }
+
+  /**
+   * Remove a filter or group from the specified player's filter tree.
+   *
+   * Sends the deletion request to the backend and synchronizes the
+   * player's filter snapshot and hand count on success.
+   *
+   * Loading, errors, and state updates are handled by runFilterMutation.
+   *
+   * @param playerId - Zero-based player slot index (0-5).
+   * @param resource - Type of resource to remove (filter or group).
+   * @param name - Name of the target filter or group.
+   * @param path - Optional path to the parent group.
+   */
+  function removeFilter(
+    playerId: number,
+    resource: FilterResource,
+    name: string,
+    path?: string[],
+  ): Promise<boolean> {
+    return runFilterMutation(playerId, (sessionId) =>
+      deleteFilter(sessionId, playerId, resource, name, path),
+    );
+  }
+
+  /**
+   * Deactivate all filters and groups for the specified player.
+   *
+   * Preserves filter definitions and hierarchy while restoring the
+   * effective hand count to the unfiltered base range.
+   *
+   * Loading, errors, and snapshot synchronization are handled
+   * by runFilterMutation.
+   *
+   * @param playerId - Zero-based player slot index (0-5).
+   */
+  function clearAllFilters(playerId: number): Promise<boolean> {
+    return runFilterMutation(playerId, (sessionId) => clearFilters(sessionId, playerId));
+  }
+
+  /**
    * Synchronize player hand counts after a community board change.
    *
    * Updates each slot's count using the backend response while
@@ -183,5 +380,10 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     updatePlayer,
     handleAddRange,
     handleDeleteRange,
+    addFilter,
+    addGroup,
+    toggleFilterActive,
+    removeFilter,
+    clearAllFilters,
   };
 }
