@@ -208,10 +208,6 @@ class FilterManager:
         The active selection and current range are recalculated after
         a successful state change.
 
-        Group activation may enable descendants with zero coverage.
-        An active group does not necessarily contribute hands to the
-        effective range.
-
         Args:
             address: Name and parent-group path identifying the target node.
             value: Desired activation state.
