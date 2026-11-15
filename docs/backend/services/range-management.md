@@ -116,7 +116,10 @@ For example, `FilterAddress(name="flushes", path=("draws", "flop"))` identifies 
 
 A zero-match filter can be saved, but direct activation of a zero-membership node is rejected. New groups start empty and inactive, including when created inside active groups.
 
-Deleting a filter removes its definition. Deleting a group also removes its entire subtree. Membership coverage and the current effective selection are refreshed where necessary.
+Deleting a filter removes its definition. Deleting a group also removes its entire subtree. If the deletion leaves an ancestor without any active descendant filters, that ancestor is automatically deactivated. Ancestors with active filters in other branches remain active.
+
+Membership coverage and the current effective selection are refreshed
+after deletion.
 
 ### Activation rules
 
@@ -125,11 +128,12 @@ Activation determines which saved selections contribute to the street's current 
 - **Root-level contributions are ORed together.** Filter groups are organizational gates, not intersections of sibling selections.
 - **Inactive group = inactive contribution.** No descendant of an inactive group contributes, regardless of the stored descendant flags.
 - Activating a **leaf** also activates all ancestor groups, but does not activate its siblings.
-- Activating a **group** recursively activates all of its descendants; deactivating a group recursively deactivates them.
+- Activating a **group** recursively activates descendants that match at least one hand. Zero-selection filters remain inactive, as do groups without any active descendant filters. Deactivating a group recursively deactivates its entire subtree.
 - Asking for the same activation state again is a no-op. In particular, reactivating an already-active group does not reset individually disabled children.
 - `clear_all_filters()` deactivates every node while preserving definitions and groups.
+- Deactivating a filter or group automatically deactivates its ancestors when they no longer contain any active descendant filters. Ancestors with active filters in other branches remain active.
 
-An activation request for a node with no membership is rejected. A nuance of the current implementation is that activating a *nonempty group* recursively sets all descendants active, including any zero-match leaves it contains; such leaves still contribute no hands.
+Direct activation of a node with no membership is rejected. Recursive group activation applies the same nonempty-selection requirement to descendant filters, keeping zero-match leaves and empty groups inactive.
 
 ### Membership versus effective selection
 

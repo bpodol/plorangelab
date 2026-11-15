@@ -49,6 +49,7 @@ class FilterGroup:
     filters: dict[str, Filter | FilterGroup] = field(default_factory=dict)
     coverage: float = 0.0
     active: bool = False
+    partialy_active: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +189,7 @@ class FilterManager:
         if address.name not in children:
             raise ValueError(f"Unknown filter or group: {address!r}")
         del children[address.name]
+        self._deactivate_empty_ancestors(ancestors)
         # No separate address list exists, so deleting a group cannot leave
         # dangling references to its descendants.
         self._refresh(update_group_coverage=bool(ancestors))
@@ -206,6 +208,10 @@ class FilterManager:
 
         The active selection and current range are recalculated after
         a successful state change.
+
+        Group activation may enable descendants with zero coverage.
+        An active group does not necessarily contribute hands to the
+        effective range.
 
         Args:
             address: Name and parent-group path identifying the target node.
@@ -228,6 +234,7 @@ class FilterManager:
             for group in ancestors:
                 group.active = True
         self._set_subtree_active(node, value)
+        self._deactivate_empty_ancestors(ancestors)
         self._refresh()
 
     def clear_all_filters(self) -> None:
@@ -370,11 +377,27 @@ class FilterManager:
         return node, ancestors
 
     @classmethod
-    def _set_subtree_active(cls, node: Filter | FilterGroup, value: bool) -> None:
-        node.active = value
-        if isinstance(node, FilterGroup):
-            for child in node.filters.values():
-                cls._set_subtree_active(child, value)
+    def _set_subtree_active(
+        cls,
+        node: Filter | FilterGroup,
+        value: bool,
+    ) -> bool:
+        """Set subtree activation, enabling only nodes with matching hands.
+
+        Returns whether the node is active after the operation.
+        """
+        if isinstance(node, Filter):
+            node.active = value and bool(node.selection.any())
+            return node.active
+
+        has_active_child = False
+
+        for child in node.filters.values():
+            if cls._set_subtree_active(child, value):
+                has_active_child = True
+
+        node.active = value and has_active_child
+        return node.active
 
     @classmethod
     def _union_into(
@@ -391,6 +414,35 @@ class FilterManager:
         else:
             for child in node.filters.values():
                 cls._union_into(destination, child, active_only=active_only)
+
+    @classmethod
+    def _has_active_filter(cls, group: FilterGroup) -> bool:
+        """Return whether the group contains any active descendant filter.
+
+        Activation is independent of coverage: an active filter counts
+        even if its selection matches zero hands.
+        """
+        for child in group.filters.values():
+            if isinstance(child, Filter):
+                if child.active:
+                    return True
+            elif child.active and cls._has_active_filter(child):
+                return True
+
+        return False
+
+    def _deactivate_empty_ancestors(
+        self,
+        ancestors: list[FilterGroup],
+    ) -> None:
+        """Deactivate ancestors that have no active descendant filters.
+
+        Process groups from the innermost to the outermost, preserving
+        ancestors that still contain active filters in other branches.
+        """
+        for group in reversed(ancestors):
+            if not self._has_active_filter(group):
+                group.active = False
 
     def _membership_selection(self, node: Filter | FilterGroup) -> NDArray[np.bool_]:
         result = np.zeros(len(self.base_range.masks), dtype=np.bool_)

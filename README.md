@@ -139,7 +139,6 @@ npm run build
 
 ## Roadmap
 
-- Connect filter-management UI components to the existing frontend operations.
 - Generate board-dependent filter groups automatically.
 - Implement database persistence.
 - Finalize the MVP interface.
