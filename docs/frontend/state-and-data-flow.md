@@ -49,10 +49,10 @@ App.tsx
 │   └── equity API: connectEquityWebSocket()
 └── UI components (props + event callbacks)
     ├── BoardInput
-    ├── PlayerRangeInput × 6
-    ├── FilterPanel × up to 6
-    │   ├── AddNodeControl (root and nested groups)
-    │   └── FilterTreeView (recursive filter hierarchy)
+    ├── PlayerRangeInput × 6 (left column)
+    ├── FilterPanel × 0–6 (right column, applied players only)
+    │   ├── AddNodeControl (local creation form state)
+    │   └── FilterTreeView (local group expansion state)
     └── EquityPanel
 
 REST clients ────> FastAPI REST routes
@@ -70,7 +70,8 @@ The **backend owns the authoritative session, applied ranges, board, and equity 
 | `App` | `mode` | User chooses PLO4 or PLO5; the selector is disabled while any player has an applied range or is loading. |
 | `App` | `isLoading`, `error`, `boardMessage` | Session creation and board-request feedback. |
 | `usePlayerRanges` | `players: PlayerState[6]` | Local edits, range-request results, and board-returned snapshots (effective hand counts and current-street filter state). |
-| `AddNodeControl` | `open`, `type`, `name`, `expression`, `submitting` | Local form state updated through user interactions; inputs are reset and the form closes only after successful creation. |
+| `AddNodeControl` | `type`, `name`, `expression`, `submitting` | Manages the creation form. `type` is `null` when closed, or `'filter'` / `'group'` when open. |
+| `FilterTreeView` | `expandedGroups` | Tracks expanded direct child groups using their names. Expansion is local to each recursive component instance. |
 | `useEquitySocket` | `equityStatus`, `equityMessage`, `isConnected` | WebSocket lifecycle events and incoming messages. |
 | `useEquitySocket` | `socketRef`, `jobRef` | Mutable connection and job identifiers that persist across renders without triggering renders. |
 
@@ -153,11 +154,13 @@ Errors are stored in the player's state rather than propagated. The previous fil
 
 Filter mutations do not refetch the entire tree because their responses already include the updated `PlayerFilterSnapshot`.
 
-`FilterPanel` is integrated into `App.tsx` and rendered alongside each player's range input once a range has been applied.
+`App.tsx` renders `FilterPanel` only for players with applied ranges, independently of the six player range inputs.
 
-The component displays the effective hand count, filtered coverage, and complete nested filter tree. `FilterTreeView` recursively renders filters and groups, including their coverage and activation states.
+`FilterTreeView` recursively renders filters and groups. Groups are collapsed by default, and their children are mounted only when expanded. Each recursive instance manages the expansion state of its direct child groups. Collapsing a parent unmounts its descendants, resetting their expansion state.
 
-`AddNodeControl` provides reusable creation forms at the root and within nested groups. Each instance derives its parent path from its position in the tree.
+`AddNodeControl` provides separate buttons for creating filters and groups. Clicking a button opens the corresponding form. Each instance derives its parent path from its position in the tree.
+
+All mutations are delegated to `usePlayerRanges()` through callbacks. Creation callbacks return a success boolean, allowing the form to close and reset only after a successful operation. Errors remain managed by the hook and are displayed in `PlayerRangeInput`.
 
 All mutations are delegated to `usePlayerRanges()` through callbacks. Creation callbacks return a success boolean, allowing the form to close and reset only after a successful operation. Errors remain managed by the hook and are displayed in `PlayerRangeInput`.
 

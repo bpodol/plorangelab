@@ -74,7 +74,8 @@ afterEach(() => {
 });
 
 describe('FilterPanel', () => {
-  test('renders the supplied hand count, coverage and entire nested tree', () => {
+  test('renders the supplied stats and reveals the nested tree when expanded', async () => {
+    const user = userEvent.setup();
     renderPanel();
 
     const panel = screen.getByRole('region', { name: 'Player 3 filters' });
@@ -92,6 +93,15 @@ describe('FilterPanel', () => {
     expect(
       within(panel).getByText(formatPercent.format(0.1255), { selector: 'strong' }),
     ).toBeInTheDocument();
+
+    expect(within(panel).queryByText('nut-fd')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Draws' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    await user.click(within(panel).getByRole('button', { name: 'Draws' }));
+    await user.click(within(panel).getByRole('button', { name: 'Backdoors' }));
 
     for (const nodeName of ['top-pair', 'Draws', 'nut-fd', 'Backdoors', 'bdfd']) {
       expect(within(panel).getByText(nodeName)).toBeInTheDocument();
@@ -111,6 +121,25 @@ describe('FilterPanel', () => {
     expect(within(panel).getByRole('checkbox', { name: 'Activate group Draws' })).toBeChecked();
     expect(within(panel).getByRole('checkbox', { name: 'Activate filter nut-fd' })).toBeChecked();
     expect(within(panel).getByRole('checkbox', { name: 'Activate filter bdfd' })).not.toBeChecked();
+  });
+
+  test('collapsing a parent unmounts nested groups and resets their expansion state', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole('button', { name: 'Draws' }));
+    await user.click(screen.getByRole('button', { name: 'Backdoors' }));
+    expect(screen.getByText('bdfd')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Draws' }));
+    expect(screen.queryByText('Backdoors')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Draws' }));
+    expect(screen.getByRole('button', { name: 'Backdoors' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByText('bdfd')).not.toBeInTheDocument();
   });
 
   test('distinguishes a missing snapshot from an empty filter tree', () => {
@@ -140,7 +169,7 @@ describe('FilterPanel', () => {
     const user = userEvent.setup();
     const { props } = renderPanel();
 
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter at root' }));
     await user.type(screen.getByRole('textbox', { name: 'Filter expression' }), '  AA  ');
     await user.type(screen.getByRole('textbox', { name: 'Name (optional)' }), '  Aces  ');
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
@@ -148,16 +177,14 @@ describe('FilterPanel', () => {
     expect(props.onAddFilter).toHaveBeenCalledTimes(1);
     expect(props.onAddFilter).toHaveBeenCalledWith(2, 'AA', 'Aces', []);
     expect(props.onAddGroup).not.toHaveBeenCalled();
-    expect(
-      await screen.findByRole('button', { name: 'Add filter or group at root' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Add filter at root' })).toBeInTheDocument();
   });
 
   test('uses undefined when an optional filter name is left blank', async () => {
     const user = userEvent.setup();
     const { props } = renderPanel();
 
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter at root' }));
     await user.type(screen.getByRole('textbox', { name: 'Filter expression' }), 'NFD');
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
 
@@ -165,12 +192,11 @@ describe('FilterPanel', () => {
     expect(props.onAddFilter).toHaveBeenCalledWith(2, 'NFD', undefined, []);
   });
 
-  test('switches to group input fields and creates a group at the root', async () => {
+  test('opens the group form and creates a group at the root', async () => {
     const user = userEvent.setup();
     const { props } = renderPanel();
 
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Type' }), 'group');
+    await user.click(screen.getByRole('button', { name: 'Add group at root' }));
 
     expect(screen.queryByRole('textbox', { name: 'Filter expression' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add group' })).toBeDisabled();
@@ -187,11 +213,9 @@ describe('FilterPanel', () => {
     const user = userEvent.setup();
     const { props } = renderPanel();
 
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Add filter or group inside Draws / Backdoors',
-      }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Draws' }));
+    await user.click(screen.getByRole('button', { name: 'Backdoors' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter inside Draws / Backdoors' }));
     await user.type(screen.getByRole('textbox', { name: 'Filter expression' }), 'BDSD');
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
 
@@ -204,7 +228,7 @@ describe('FilterPanel', () => {
     const onAddFilter = vi.fn().mockResolvedValue(false);
     renderPanel({ onAddFilter });
 
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter at root' }));
     await user.type(screen.getByRole('textbox', { name: 'Filter expression' }), 'INVALID');
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
 
@@ -224,7 +248,7 @@ describe('FilterPanel', () => {
     const onAddFilter = vi.fn().mockReturnValue(pending);
     renderPanel({ onAddFilter });
 
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter at root' }));
     await user.type(screen.getByRole('textbox', { name: 'Filter expression' }), 'AA');
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
 
@@ -237,20 +261,19 @@ describe('FilterPanel', () => {
       await pending;
     });
 
-    expect(screen.getByRole('button', { name: 'Add filter or group at root' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add filter at root' })).toBeInTheDocument();
   });
 
   test('cancel discards draft input and resets the selected node type', async () => {
     const user = userEvent.setup();
     const { props } = renderPanel();
 
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Type' }), 'group');
+    await user.click(screen.getByRole('button', { name: 'Add group at root' }));
     await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Draft');
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter at root' }));
 
-    expect(screen.getByRole('combobox', { name: 'Type' })).toHaveValue('filter');
+    expect(screen.queryByRole('textbox', { name: 'Group name' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Name (optional)' })).toHaveValue('');
     expect(screen.getByRole('textbox', { name: 'Filter expression' })).toHaveValue('');
     expect(props.onAddGroup).not.toHaveBeenCalled();
@@ -260,6 +283,8 @@ describe('FilterPanel', () => {
     const user = userEvent.setup();
     const { props } = renderPanel();
 
+    await user.click(screen.getByRole('button', { name: 'Draws' }));
+    await user.click(screen.getByRole('button', { name: 'Backdoors' }));
     await user.click(screen.getByRole('checkbox', { name: 'Activate filter top-pair' }));
     await user.click(screen.getByRole('checkbox', { name: 'Activate group Backdoors' }));
     await user.click(screen.getByRole('checkbox', { name: 'Activate filter bdfd' }));
@@ -281,6 +306,8 @@ describe('FilterPanel', () => {
     const confirm = vi.spyOn(window, 'confirm');
     const { props } = renderPanel();
 
+    await user.click(screen.getByRole('button', { name: 'Draws' }));
+    await user.click(screen.getByRole('button', { name: 'Backdoors' }));
     await user.click(screen.getByRole('button', { name: 'Delete filter bdfd' }));
 
     expect(confirm).not.toHaveBeenCalled();
@@ -318,11 +345,12 @@ describe('FilterPanel', () => {
     const user = userEvent.setup();
     const { props } = renderPanel({ disabled: true });
 
-    expect(screen.getByRole('button', { name: 'Add filter or group at root' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add filter at root' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add group at root' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Draws' }));
+    await user.click(screen.getByRole('button', { name: 'Backdoors' }));
     expect(
-      screen.getByRole('button', {
-        name: 'Add filter or group inside Draws / Backdoors',
-      }),
+      screen.getByRole('button', { name: 'Add filter inside Draws / Backdoors' }),
     ).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Deactivate all' })).toBeDisabled();
 
@@ -333,8 +361,8 @@ describe('FilterPanel', () => {
       expect(button).toBeDisabled();
     }
 
-    await user.click(screen.getByRole('button', { name: 'Add filter or group at root' }));
-    expect(screen.queryByRole('combobox', { name: 'Type' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add filter at root' }));
+    expect(screen.queryByRole('textbox', { name: 'Filter expression' })).not.toBeInTheDocument();
     expect(props.onAddFilter).not.toHaveBeenCalled();
   });
 });

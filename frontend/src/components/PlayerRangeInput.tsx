@@ -74,7 +74,7 @@ export function PlayerRangeInput({
   }
 
   return (
-    <section>
+    <section className="player-range">
       <label htmlFor={`range-${playerId}`}>Player {playerId + 1}</label>
       {/* Display only a preview of large ranges while preserving
           the complete expression in parent state. */}

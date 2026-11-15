@@ -97,9 +97,11 @@ Supported operations include creating filters and groups, toggling activation, d
 
 Activation toggles determine the desired state using the locally stored filter tree. The backend remains responsible for validating and applying mutations.
 
-`FilterPanel` provides the user interface for managing filters and groups. It renders the complete nested filter tree recursively, displaying each node's coverage and activation state.
+`FilterPanel` provides the user interface for managing filters and groups. It renders a recursive filter tree with collapsible groups. Each node displays its coverage and activation state.
 
-Reusable creation controls allow users to add filters or groups at the root or within existing groups. Parent paths are derived automatically from the tree hierarchy.
+Groups are collapsed by default. Expanding a group renders its children. Expansion state is maintained locally and does not affect filter activation.
+
+Separate `+ Filter` and `+ Group` buttons open creation forms at the root or within existing groups. Parent paths are derived automatically from the tree hierarchy.
 
 All mutation callbacks are provided by `usePlayerRanges()` through `App.tsx`. The component does not maintain a separate copy of the filter tree.
 
@@ -138,7 +140,9 @@ The frontend supports session creation, player range management, board applicati
 
 The filter REST client and hook-level mutation operations are implemented. `usePlayerRanges()` maintains filter snapshots using backend mutation responses and board-change responses.
 
-`FilterPanel` is integrated into `App.tsx` and displayed alongside each player's range input once a range has been applied.
+`App.tsx` renders player range inputs and filter panels in two independent columns. All six range inputs are always displayed, while filter panels are rendered only for players with applied ranges.
+
+Filter panels are ordered by their original player slot, independently of the positions of the range inputs. Each panel has a scrollable filter tree with a maximum height controlled by CSS.
 
 The component supports nested filter and group creation, activation toggles, individual node deletion, and bulk deactivation. Filter operations are connected to `usePlayerRanges()` and covered by component tests.
 

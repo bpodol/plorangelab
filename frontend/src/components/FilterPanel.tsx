@@ -47,13 +47,11 @@ const handCount = new Intl.NumberFormat(undefined, {
 });
 
 /**
- * Render a reusable form for creating a filter or filter group.
+ * Render controls for adding filters or groups.
  *
- * Displays input fields based on the selected node type and delegates
- * creation to the provided callbacks using the parent group's path.
- *
- * Maintains local form state, including input values, submission
- * status, and errors.
+ * Each button opens the corresponding creation form.
+ * The form closes after successful submission and preserves
+ * its inputs if the operation fails.
  *
  * @param playerId - Zero-based player slot index (0-5).
  * @param path - Parent group hierarchy, or an empty array for the root.
@@ -68,15 +66,13 @@ function AddNodeControl({
   onAddFilter,
   onAddGroup,
 }: AddNodeControlProps) {
-  const [open, setOpen] = useState(false);
-  const [type, setType] = useState<'filter' | 'group'>('filter');
+  const [type, setType] = useState<'filter' | 'group' | null>(null);
   const [name, setName] = useState('');
   const [expression, setExpression] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   function reset() {
-    setOpen(false);
-    setType('filter');
+    setType(null);
     setName('');
     setExpression('');
   }
@@ -94,52 +90,51 @@ function AddNodeControl({
    */
   async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (disabled || submitting) return;
+
+    if (disabled || submitting || type === null) return;
 
     setSubmitting(true);
 
     try {
-      let success: boolean;
+      const success =
+        type === 'filter'
+          ? await onAddFilter(playerId, expression.trim(), name.trim() || undefined, path)
+          : await onAddGroup(playerId, name.trim(), path);
 
-      if (type === 'filter') {
-        success = await onAddFilter(playerId, expression.trim(), name.trim() || undefined, path);
-      } else {
-        success = await onAddGroup(playerId, name.trim(), path);
-      }
       if (success) reset();
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (!open) {
+  if (type === null) {
     return (
-      <button
-        type="button"
-        className="filter-panel__button"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-        aria-label={`Add filter or group ${path.length ? `inside ${path.join(' / ')}` : 'at root'}`}
-      >
-        + Add
-      </button>
+      <div className="filter-panel__actions">
+        <button
+          type="button"
+          className="filter-panel__button"
+          onClick={() => setType('filter')}
+          disabled={disabled}
+          aria-label={`Add filter ${path.length ? `inside ${path.join(' / ')}` : 'at root'}`}
+        >
+          + Filter
+        </button>
+
+        <button
+          type="button"
+          className="filter-panel__button"
+          onClick={() => setType('group')}
+          disabled={disabled}
+          aria-label={`Add group ${path.length ? `inside ${path.join(' / ')}` : 'at root'}`}
+        >
+          + Group
+        </button>
+      </div>
     );
   }
 
   return (
     <form className="filter-panel__add-form" onSubmit={(event) => void handleSubmit(event)}>
-      <label>
-        Type
-        <select
-          value={type}
-          onChange={(event) => setType(event.target.value as 'filter' | 'group')}
-          disabled={disabled || submitting}
-        >
-          <option value="filter">Filter</option>
-          <option value="group">Group</option>
-        </select>
-      </label>
-
       <label>
         {type === 'filter' ? 'Name (optional)' : 'Group name'}
         <input
@@ -199,13 +194,10 @@ interface TreeProps {
 }
 
 /**
- * Recursively render a filter tree and its nested groups.
+ * Recursively render a filter tree with collapsible groups.
  *
- * Displays each filter or group's name, coverage, activation checkbox,
- * and optional deletion control.
- *
- * Each group renders its children recursively and provides an add
- * control with the path extended by the group's name.
+ * Each group maintains its expansion state locally.
+ * Child nodes are rendered only when their parent group is expanded.
  *
  * @param props - Filter tree, current parent path, player ID,
  * disabled state, and mutation callbacks.
@@ -222,6 +214,15 @@ function FilterTreeView(props: TreeProps) {
     onRemoveFilter,
   } = props;
 
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  function toggleGroup(name: string) {
+    setExpandedGroups((previous) => ({
+      ...previous,
+      [name]: !previous[name],
+    }));
+  }
+
   if (Object.keys(tree).length === 0) {
     return <p className="filter-panel__empty">No filters in this group.</p>;
   }
@@ -231,18 +232,25 @@ function FilterTreeView(props: TreeProps) {
       {Object.entries(tree).map(([name, node]) => {
         const resource: FilterResource = node.type === 'filter' ? 'filters' : 'groups';
         const childPath = [...path, name];
+        const isExpanded = expandedGroups[name] ?? false;
 
         return (
           <li className="filter-panel__item" key={name}>
             <div className="filter-panel__node">
               <div className="filter-panel__node-details">
-                <span className="filter-panel__kind">{node.type} </span>
-                <span className="filter-panel__name">{node.name} </span>
-                {/* {node.type === 'filter' && (
-                  <span className="filter-panel__expression" title={node.expression}>
-                    {node.expression}
-                  </span>
-                )} */}
+                {node.type === 'group' ? (
+                  <button
+                    type="button"
+                    className="filter-panel__expand-button"
+                    onClick={() => toggleGroup(name)}
+                    aria-expanded={isExpanded}
+                  >
+                    <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
+                    <span className="filter-panel__name">{node.name}</span>
+                  </button>
+                ) : (
+                  <span className="filter-panel__name">{node.name}</span>
+                )}
                 <span className="filter-panel__coverage">{percent.format(node.coverage)}</span>
               </div>
 
@@ -292,7 +300,7 @@ function FilterTreeView(props: TreeProps) {
               </div>
             </div>
 
-            {node.type === 'group' && (
+            {node.type === 'group' && isExpanded && (
               <div className="filter-panel__children">
                 <FilterTreeView {...props} tree={node.filters} path={childPath} />
               </div>
@@ -360,22 +368,24 @@ export function FilterPanel({
         </span>
       </div>
 
-      {hasFilters ? (
-        <FilterTreeView
-          tree={filters}
-          path={[]}
-          playerId={playerId}
-          disabled={disabled}
-          onAddFilter={onAddFilter}
-          onAddGroup={onAddGroup}
-          onToggleFilterActive={onToggleFilterActive}
-          onRemoveFilter={onRemoveFilter}
-        />
-      ) : (
-        <p className="filter-panel__empty">
-          {filterSnapshot ? 'No filters yet.' : 'No filter snapshot available yet.'}
-        </p>
-      )}
+      <div className="filter-panel__scroll">
+        {hasFilters ? (
+          <FilterTreeView
+            tree={filters}
+            path={[]}
+            playerId={playerId}
+            disabled={disabled}
+            onAddFilter={onAddFilter}
+            onAddGroup={onAddGroup}
+            onToggleFilterActive={onToggleFilterActive}
+            onRemoveFilter={onRemoveFilter}
+          />
+        ) : (
+          <p className="filter-panel__empty">
+            {filterSnapshot ? 'No filters yet.' : 'No filter snapshot available yet.'}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

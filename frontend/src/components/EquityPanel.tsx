@@ -58,7 +58,7 @@ export function EquityPanel({
     validMoes.length > 0 && validMoes.every(Number.isFinite) ? Math.max(...validMoes) : null;
 
   return (
-    <section aria-label="Equity calculation">
+    <section className="equity-panel" aria-label="Equity calculation">
       <h2>Equity Calculation</h2>
 
       <label htmlFor="target-moe">Target MOE</label>

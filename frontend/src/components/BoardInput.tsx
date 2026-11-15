@@ -27,7 +27,7 @@ export function BoardInput({
   isLoading,
 }: BoardInputProps) {
   return (
-    <section>
+    <section className="board-input">
       <label htmlFor="board">Board</label>
 
       <input
