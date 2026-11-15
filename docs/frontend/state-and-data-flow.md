@@ -23,13 +23,18 @@ and application workflows, see [Frontend Architecture](README.md).
 | `src/api/equity.ts` | Equity WebSocket message types and connection creation. |
 | `src/types.ts` | Shared mode, recursive filter-tree types, and `PlayerFilterSnapshot`. |
 
-The current UI consists of `BoardInput`, `PlayerRangeInput`, `FilterPanel`, and `EquityPanel`, coordinated by `App.tsx`. Their internal rendering and props will be covered in the frontend architecture overview.
+The UI consists of `BoardInput`, `PlayerRangeInput`, `FilterPanel`, and `EquityPanel`, coordinated by `App.tsx`.
+
+See [Frontend Architecture](README.md#ui-components) for component responsibilities and their role in the application.
 
 ## Dependency and data-flow map
 
 ```text
 App.tsx
-├── local state: sessionId, board input, mode, loading/errors, board message
+├── local state:
+│   ├── sessionId, board input, mode
+│   ├── isCreatingSession, isApplyingBoard
+│   └── error, boardMessage
 ├── sessions API: createSession(), changeBoard()
 ├── usePlayerRanges(sessionId, mode)
 │   ├── six PlayerState entries (including filterSnapshot)
@@ -68,7 +73,8 @@ The **backend owns the authoritative session, applied ranges, board, and equity 
 | `App` | `sessionId` | Set after `createSession()` succeeds; initially `null`. |
 | `App` | `board` | Updated as the user types; sent to the backend only when applied. |
 | `App` | `mode` | User chooses PLO4 or PLO5; the selector is disabled while any player has an applied range or is loading. |
-| `App` | `isLoading`, `error`, `boardMessage` | Session creation and board-request feedback. |
+| `App` | `isCreatingSession` | Tracks automatic session initialization and manual retries. Initially `true`. |
+| `App` | `isApplyingBoard`, `error`, `boardMessage` | Tracks board application loading and feedback. `error` is also used for session creation failures. |
 | `usePlayerRanges` | `players: PlayerState[6]` | Local edits, range-request results, and board-returned snapshots (effective hand counts and current-street filter state). |
 | `AddNodeControl` | `type`, `name`, `expression`, `submitting` | Manages the creation form. `type` is `null` when closed, or `'filter'` / `'group'` when open. |
 | `FilterTreeView` | `expandedGroups` | Tracks expanded direct child groups using their names. Expansion is local to each recursive component instance. |
@@ -81,20 +87,29 @@ Each `PlayerState` contains `range`, `numberOfHands`, `filterSnapshot`, `hasAppl
 
 The **editable `range` string is not necessarily the range applied on the backend**: changing input text alone does not make a network request. Similarly, editing the `board` string does not change the server board until the Apply action succeeds.
 
-`updatePlayer()` makes immutable per-slot updates using a functional React state setter. Range and filter operations update the corresponding player's loading and error state. Filter mutations share runFilterMutation(), which also synchronizes the effective hand count and filter snapshot using the backend response; `App` maintains a separate loading flag for session and board operations.
+`updatePlayer()` makes immutable per-slot updates using a functional React state setter. Range and filter operations update the corresponding player's loading and error state.
+
+Filter mutations share `runFilterMutation()`, which synchronizes the effective hand count and filter snapshot using the backend response.
+
+`App` maintains two independent loading states: `isCreatingSession` for session initialization and retries, and `isApplyingBoard` for board updates. This prevents one operation from incorrectly affecting the loading indicator of the other.
 
 ## REST request flows
 
 ### 1. Create a session
 
-1. The user requests session creation in `App`.
-2. `App` clears its error and sets `isLoading`.
-3. `createSession()` sends `POST /api/sessions` through `apiRequest()`.
-4. On success, `App` stores the returned `session_id`.
-5. `useEquitySocket(sessionId)` reacts to the new session ID by opening a WebSocket.
-6. `App` clears its loading flag in `finally`; on failure it displays the error.
+1. When `App` mounts, a `useEffect` automatically calls `handleCreateSession()`.
+2. A `useRef` guard prevents duplicate initialization requests when React Strict Mode re-runs the effect.
+3. `App` sets `isCreatingSession` to `true` and clears the previous error.
+4. `createSession()` sends `POST /api/sessions` through `apiRequest()`.
+5. On success, `App` stores the returned `session_id`.
+6. `useEquitySocket(sessionId)` reacts to the new session ID by opening a WebSocket connection.
+7. `App` resets `isCreatingSession` in `finally`.
 
-Creating a session does not fetch saved player state: `usePlayerRanges` starts with six empty local slots.
+On failure, the application displays an error message and a **Retry** button. Clicking Retry calls `handleCreateSession()` again without remounting the application.
+
+Session creation does not block the UI with a loading indicator, but session-dependent actions remain disabled until a session exists.
+
+Creating a session does not fetch saved player state: `usePlayerRanges()` starts with six empty local slots.
 
 ### 2. Add or replace a player range
 
@@ -123,15 +138,23 @@ Updating the local input string without applying it leaves the backend range unc
 
 ### 4. Apply or clear the board
 
-1. `App` takes the trimmed board input; an empty string becomes `null` (clear board).
-2. `changeBoard(sessionId, boardValue)` sends the request.
-3. On success, the backend returns `players`, an array of six current-street player snapshots or `null` values in player-slot order.
-4. `App` calls `usePlayerRanges.applyBoardSnapshots(result.players)` and displays a success message.
-5. The hook updates each player's `numberOfHands` from `snapshot.filtered_hands` and stores the complete `filterSnapshot` in the same React state update. Empty slots receive a count of `0` and a `null` snapshot. Range input text and applied flags are preserved.
+1. `App` sets `isApplyingBoard` to `true` and clears previous feedback.
+2. The board input is trimmed; an empty string becomes `null` (clear board).
+3. `changeBoard(sessionId, boardValue)` sends the request to the backend.
+4. On success, the backend returns `players`, an array of six current-street player snapshots or `null` values in player-slot order.
+5. `App` calls `usePlayerRanges.applyBoardSnapshots(result.players)` and displays a success message.
+6. The hook updates each player's `numberOfHands` from `snapshot.filtered_hands` and stores the complete `filterSnapshot` in the same React state update. Empty slots receive a count of `0` and a `null` snapshot. Range input text and applied flags are preserved.
+7. In `finally`, `App` resets `isApplyingBoard` to `false`.
+
+While the request is pending, `BoardInput` displays "Applying..." and disables its Apply Board button. Filter operations are also disabled.
+
+If the request fails, the error is displayed and the existing player snapshots are preserved.
 
 The backend is responsible for board validation, card blockers, street transitions, and restoring compatible cached street states.
 
 The frontend applies the returned snapshots **only after a successful response**. It does not reconstruct or carry over filter trees between streets itself.
+
+Board application and session creation use independent loading states.
 
 ### 5. Filter mutations
 
@@ -159,8 +182,6 @@ Filter mutations do not refetch the entire tree because their responses already 
 `FilterTreeView` recursively renders filters and groups. Groups are collapsed by default, and their children are mounted only when expanded. Each recursive instance manages the expansion state of its direct child groups. Collapsing a parent unmounts its descendants, resetting their expansion state.
 
 `AddNodeControl` provides separate buttons for creating filters and groups. Clicking a button opens the corresponding form. Each instance derives its parent path from its position in the tree.
-
-All mutations are delegated to `usePlayerRanges()` through callbacks. Creation callbacks return a success boolean, allowing the form to close and reset only after a successful operation. Errors remain managed by the hook and are displayed in `PlayerRangeInput`.
 
 All mutations are delegated to `usePlayerRanges()` through callbacks. Creation callbacks return a success boolean, allowing the form to close and reset only after a successful operation. Errors remain managed by the hook and are displayed in `PlayerRangeInput`.
 
@@ -238,6 +259,7 @@ These are **current behavior**, not promises about planned features:
 - **No automatic range-state rehydration.** `usePlayerRanges` initializes six empty slots locally and does not load the existing session's player state or reset automatically when `sessionId` changes.
 - **No stale-response protection in the range hook.** Overlapping operations for one player can complete out of order; no request versioning or abort mechanism is implemented there.
 - **No automatic filter-state recovery.** The hook does not refetch filter snapshots after failed or interrupted mutation responses. The backend may have completed an operation even if its response was not received.
+- **No session persistence or restoration.** `App` automatically creates a new backend session on mount, but does not persist the session ID or reconnect to an existing session after a page reload. Previous session state is not automatically restored.
 - **Draft inputs are distinct from applied state.** `hasAppliedRange` indicates a successful prior application, not necessarily that the current editable text equals the backend range.
 - **Job resume is in-memory only.** The hook tracks a known job across reconnects within the current mount, not across page reloads.
 - **WebSocket messages are only partially validated at runtime.** TypeScript assertions do not check arbitrary incoming JSON fields.

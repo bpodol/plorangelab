@@ -71,10 +71,14 @@ These components receive application state and callbacks through props. They do 
 
 ### Session creation
 
-1. The user requests a new session.
-2. `App.tsx` calls the sessions API.
-3. The returned session ID is stored in application state.
+1. `App.tsx` automatically requests a backend session when the application mounts.
+2. The request is sent through the sessions API.
+3. On success, the returned session ID is stored in application state.
 4. Session-dependent hooks use that ID to communicate with the backend.
+5. On failure, the application displays an error message and a Retry button.
+
+Session creation and board application maintain independent loading states.
+The session ID is not displayed in the UI.
 
 ### Player range management
 
