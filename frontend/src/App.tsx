@@ -110,26 +110,26 @@ function App() {
   return (
     <main>
       <h1>PLO RangeLab</h1>
+      <section className="session-panel">
+        <button onClick={handleCreateSession} disabled={isLoading || sessionId !== null}>
+          {isLoading && sessionId === null ? 'Creating...' : 'Create Session'}
+        </button>
 
-      <button onClick={handleCreateSession} disabled={isLoading || sessionId !== null}>
-        {isLoading && sessionId === null ? 'Creating...' : 'Create Session'}
-      </button>
+        <p>Session: {sessionId ?? 'Not created'}</p>
 
-      <p>Session: {sessionId ?? 'Not created'}</p>
-
-      <label htmlFor="mode">Game mode</label>
-      {/* Prevent switching PLO modes while player ranges exist
-          or a player range operation is in progress. */}
-      <select
-        id="mode"
-        value={mode}
-        onChange={(event) => setMode(Number(event.target.value) as 4 | 5)}
-        disabled={players.some((player) => player.hasAppliedRange || player.isLoading)}
-      >
-        <option value={4}>PLO4</option>
-        <option value={5}>PLO5</option>
-      </select>
-
+        <label htmlFor="mode">Game mode</label>
+        {/* Prevent switching PLO modes while player ranges exist
+            or a player range operation is in progress. */}
+        <select
+          id="mode"
+          value={mode}
+          onChange={(event) => setMode(Number(event.target.value) as 4 | 5)}
+          disabled={players.some((player) => player.hasAppliedRange || player.isLoading)}
+        >
+          <option value={4}>PLO4</option>
+          <option value={5}>PLO5</option>
+        </select>
+      </section>
       <BoardInput
         board={board}
         onBoardChange={setBoard}
@@ -141,20 +141,23 @@ function App() {
       {error && <p role="alert">{error}</p>}
       {boardMessage && <p>{boardMessage}</p>}
 
-      <section>
-        <h2>Players</h2>
+      <EquityPanel
+        mode={mode}
+        status={equityStatus}
+        message={equityMessage}
+        isConnected={isConnected}
+        onCalculate={startEquity}
+        onCancel={cancelEquity}
+      />
 
-        {players.map((player, index) => (
-          <div
-            key={index}
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '24px',
-              marginBottom: '16px',
-            }}
-          >
+      <section className="players-layout">
+        {/* Left column: all player range inputs */}
+        <div className="players-layout__ranges">
+          <h2>Players</h2>
+
+          {players.map((player, index) => (
             <PlayerRangeInput
+              key={index}
               playerId={index}
               range={player.range}
               numberOfHands={player.numberOfHands}
@@ -166,33 +169,30 @@ function App() {
               error={player.error}
               hasAppliedRange={player.hasAppliedRange}
             />
+          ))}
+        </div>
 
-            {player.hasAppliedRange && (
+        {/* Right column: only players with applied ranges */}
+        <div className="players-layout__filters">
+          <h2>Filters</h2>
+
+          {players.map((player, index) =>
+            player.hasAppliedRange ? (
               <FilterPanel
+                key={index}
                 playerId={index}
                 filterSnapshot={player.filterSnapshot}
-                disabled={
-                  sessionId === null || !player.hasAppliedRange || player.isLoading || isLoading
-                }
+                disabled={sessionId === null || player.isLoading || isLoading}
                 onAddFilter={addFilter}
                 onAddGroup={addGroup}
                 onToggleFilterActive={toggleFilterActive}
                 onRemoveFilter={removeFilter}
                 onClearAllFilters={clearAllFilters}
               />
-            )}
-          </div>
-        ))}
+            ) : null,
+          )}
+        </div>
       </section>
-
-      <EquityPanel
-        mode={mode}
-        status={equityStatus}
-        message={equityMessage}
-        isConnected={isConnected}
-        onCalculate={startEquity}
-        onCancel={cancelEquity}
-      />
     </main>
   );
 }

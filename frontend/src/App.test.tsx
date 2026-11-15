@@ -184,6 +184,35 @@ test('adds and deletes a player range through the UI', async () => {
   expect(deleteRange).toHaveBeenCalledWith('session-123', 0);
 });
 
+test('renders filter panels only for applied players without renumbering them', async () => {
+  vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
+  vi.mocked(addRange).mockResolvedValue({ hands: 1 });
+
+  const user = userEvent.setup();
+  render(<App />);
+
+  expect(screen.queryByRole('region', { name: /Player [1-6] filters/ })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: /create session/i }));
+  await screen.findByText('Session: session-123');
+
+  for (const [playerId, range] of [
+    [1, 'AsAhQcJd'],
+    [5, 'KsKhQdJc'],
+  ] as const) {
+    await user.type(screen.getByRole('textbox', { name: `Player ${playerId + 1}` }), range);
+    await user.click(screen.getAllByRole('button', { name: /add range/i })[playerId]);
+    expect(addRange).toHaveBeenCalledWith('session-123', playerId, range, 4);
+    await screen.findByRole('region', { name: `Player ${playerId + 1} filters` });
+  }
+
+  const panels = screen.getAllByRole('region', { name: /Player [1-6] filters/ });
+  expect(panels).toHaveLength(2);
+  expect(panels[0]).toHaveAttribute('aria-label', 'Player 2 filters');
+  expect(panels[1]).toHaveAttribute('aria-label', 'Player 6 filters');
+  expect(screen.getAllByRole('textbox', { name: /^Player [1-6]$/ })).toHaveLength(6);
+});
+
 test('displays an error when session creation fails', async () => {
   vi.mocked(createSession).mockRejectedValue(new Error('Server unavailable'));
 
