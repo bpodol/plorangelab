@@ -398,3 +398,93 @@ def test_filter_tree_serialization(manager):
 
     assert not manager.get_node(FilterAddress("aces", ("g",))).active
     assert "aces" in manager.get_tree()["g"]["filters"]
+
+
+def test_deactivating_last_filter_deactivates_ancestors(manager, base):
+    manager.create_group("outer")
+    manager.create_group("inner", path=("outer",))
+    manager.create_filter("A", path=("outer", "inner"))
+
+    outer = FilterAddress("outer")
+    inner = FilterAddress("inner", ("outer",))
+    leaf = FilterAddress("A", ("outer", "inner"))
+
+    manager.set_active(leaf, True)
+
+    assert manager.get_node(outer).active
+    assert manager.get_node(inner).active
+    assert manager.get_node(leaf).active
+
+    manager.set_active(leaf, False)
+
+    assert not manager.get_node(leaf).active
+    assert not manager.get_node(inner).active
+    assert not manager.get_node(outer).active
+    assert manager.current_range is base
+    assert manager.active_selection is None
+
+
+def test_deactivating_branch_preserves_active_siblings(manager, base):
+    manager.create_group("outer")
+    manager.create_group("left", path=("outer",))
+    manager.create_group("right", path=("outer",))
+
+    manager.create_filter("A", path=("outer", "left"))
+    manager.create_filter("K", path=("outer", "right"))
+
+    outer = FilterAddress("outer")
+    left = FilterAddress("left", ("outer",))
+    right = FilterAddress("right", ("outer",))
+    leaf = FilterAddress("A", ("outer", "left"))
+
+    manager.set_active(outer, True)
+    manager.set_active(leaf, False)
+
+    assert manager.get_node(outer).active
+    assert not manager.get_node(left).active
+    assert manager.get_node(right).active
+    assert indices(base, manager.current_range) == {0, 1, 3}
+
+
+def test_group_activation_skips_nonmatching_descendants(manager, base):
+    manager.create_group("outer")
+    manager.create_group("empty", path=("outer",))
+    manager.create_group("zero_only", path=("outer",))
+
+    manager.create_filter("TT", path=("outer", "zero_only"))
+    manager.create_filter("A", path=("outer",))
+
+    outer = FilterAddress("outer")
+    empty = FilterAddress("empty", ("outer",))
+    zero_only = FilterAddress("zero_only", ("outer",))
+    zero_leaf = FilterAddress("TT", ("outer", "zero_only"))
+    matching_leaf = FilterAddress("A", ("outer",))
+
+    manager.set_active(outer, True)
+
+    assert manager.get_node(outer).active
+    assert manager.get_node(matching_leaf).active
+
+    assert not manager.get_node(empty).active
+    assert not manager.get_node(zero_only).active
+    assert not manager.get_node(zero_leaf).active
+
+    assert indices(base, manager.current_range) == {0, 1, 2}
+
+
+def test_deleting_last_active_filter_deactivates_ancestors(manager, base):
+    manager.create_group("outer")
+    manager.create_group("inner", path=("outer",))
+    manager.create_filter("A", path=("outer", "inner"))
+
+    outer = FilterAddress("outer")
+    inner = FilterAddress("inner", ("outer",))
+    leaf = FilterAddress("A", ("outer", "inner"))
+
+    manager.set_active(outer, True)
+    manager.delete(leaf)
+
+    assert not manager.get_node(inner).active
+    assert not manager.get_node(outer).active
+    assert manager.current_range is base
+    assert manager.active_selection is None
