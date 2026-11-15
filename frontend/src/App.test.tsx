@@ -48,21 +48,40 @@ beforeEach(() => {
   vi.mocked(connectEquityWebSocket).mockReturnValue(socket as unknown as WebSocket);
 });
 
-test('renders six players and disables actions before session creation', () => {
+test('automatically creates a session on mount', async () => {
+  let resolveSession!: (value: { session_id: string }) => void;
+
+  vi.mocked(createSession).mockImplementation(
+    () =>
+      new Promise<{ session_id: string }>((resolve) => {
+        resolveSession = resolve;
+      }),
+  );
+
   render(<App />);
 
   expect(screen.getByRole('heading', { name: 'PLO RangeLab' })).toBeInTheDocument();
-
   expect(screen.getAllByRole('textbox', { name: /^Player [1-6]$/ })).toHaveLength(6);
+  expect(createSession).toHaveBeenCalledOnce();
 
+  // Session-dependent actions must remain disabled until initialization finishes.
   expect(screen.getByRole('button', { name: /apply board/i })).toBeDisabled();
-
   expect(screen.getByRole('button', { name: /calculate equity/i })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
 
-  expect(createSession).not.toHaveBeenCalled();
+  await act(async () => {
+    resolveSession({ session_id: 'session-123' });
+  });
+
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
+
+  expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
+  expect(screen.queryByText(/Session:/i)).not.toBeInTheDocument();
 });
 
-test('creates a session and starts an equity calculation', async () => {
+test('starts an equity calculation after automatic session creation', async () => {
   vi.mocked(createSession).mockResolvedValue({
     session_id: 'session-123',
   });
@@ -71,13 +90,11 @@ test('creates a session and starts an equity calculation', async () => {
 
   render(<App />);
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-
-  expect(await screen.findByText('Session: session-123')).toBeInTheDocument();
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
   expect(createSession).toHaveBeenCalledOnce();
-
-  expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
 
   // Simulate the WebSocket connection opening.
   act(() => {
@@ -95,12 +112,12 @@ test('creates a session and starts an equity calculation', async () => {
   );
 });
 
-test('updates displayed hand counts after changing the board', async () => {
+test('updates hand counts and shows loading state while applying the board', async () => {
   vi.mocked(createSession).mockResolvedValue({
     session_id: 'session-123',
   });
 
-  vi.mocked(changeBoard).mockResolvedValue({
+  const boardResponse: Awaited<ReturnType<typeof changeBoard>> = {
     players: [
       {
         base_hands: 100,
@@ -127,24 +144,39 @@ test('updates displayed hand counts after changing the board', async () => {
       null,
       null,
     ],
-  });
+  };
+
+  let resolveBoard!: (value: Awaited<ReturnType<typeof changeBoard>>) => void;
+
+  vi.mocked(changeBoard).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveBoard = resolve;
+      }),
+  );
 
   const user = userEvent.setup();
 
   render(<App />);
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-
-  await screen.findByText('Session: session-123');
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
   await user.type(screen.getByRole('textbox', { name: 'Board' }), 'AsKd2c');
 
-  await user.click(screen.getByRole('button', { name: /apply board/i }));
+  await user.click(screen.getByRole('button', { name: 'Apply Board' }));
 
   expect(changeBoard).toHaveBeenCalledWith('session-123', 'AsKd2c');
+  expect(screen.getByRole('button', { name: 'Applying...' })).toBeDisabled();
 
-  expect(await screen.findByText('Hands: 100')).toBeInTheDocument();
+  await act(async () => {
+    resolveBoard(boardResponse);
+  });
+
+  expect(screen.getByText('Hands: 100')).toBeInTheDocument();
   expect(screen.getByText('Hands: 50')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Apply Board' })).toBeEnabled();
 });
 
 test('adds and deletes a player range through the UI', async () => {
@@ -159,8 +191,9 @@ test('adds and deletes a player range through the UI', async () => {
 
   render(<App />);
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-  await screen.findByText('Session: session-123');
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
   const input = screen.getByRole('textbox', { name: 'Player 1' });
   const modeSelector = screen.getByRole('combobox', { name: 'Game mode' });
@@ -193,8 +226,9 @@ test('renders filter panels only for applied players without renumbering them', 
 
   expect(screen.queryByRole('region', { name: /Player [1-6] filters/ })).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-  await screen.findByText('Session: session-123');
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
   for (const [playerId, range] of [
     [1, 'AsAhQcJd'],
@@ -213,21 +247,38 @@ test('renders filter panels only for applied players without renumbering them', 
   expect(screen.getAllByRole('textbox', { name: /^Player [1-6]$/ })).toHaveLength(6);
 });
 
-test('displays an error when session creation fails', async () => {
+test('displays an error and retry button when session creation fails', async () => {
   vi.mocked(createSession).mockRejectedValue(new Error('Server unavailable'));
+
+  render(<App />);
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Server unavailable');
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+  expect(createSession).toHaveBeenCalledOnce();
+  expect(connectEquityWebSocket).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: /apply board/i })).toBeDisabled();
+});
+
+test('retries session creation and clears the error after success', async () => {
+  vi.mocked(createSession)
+    .mockRejectedValueOnce(new Error('Server unavailable'))
+    .mockResolvedValueOnce({ session_id: 'session-123' });
 
   const user = userEvent.setup();
   render(<App />);
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-
   expect(await screen.findByRole('alert')).toHaveTextContent('Server unavailable');
 
-  expect(screen.getByText('Session: Not created')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
 
-  expect(screen.getByRole('button', { name: /create session/i })).toBeEnabled();
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
-  expect(connectEquityWebSocket).not.toHaveBeenCalled();
+  expect(createSession).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
 });
 
 test('displays an error when board update fails', async () => {
@@ -242,8 +293,9 @@ test('displays an error when board update fails', async () => {
   const user = userEvent.setup();
   render(<App />);
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-  await screen.findByText('Session: session-123');
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
   await user.type(screen.getByRole('textbox', { name: 'Board' }), 'invalid');
 
@@ -273,9 +325,9 @@ test('enables cancellation only while connected and running', async () => {
   // No session or running job.
   expect(cancelButton).toBeDisabled();
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-
-  await screen.findByText('Session: session-123');
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
   act(() => {
     socket.open();
@@ -325,8 +377,9 @@ test('submits the complete large range instead of its preview', async () => {
   const user = userEvent.setup();
   render(<App />);
 
-  await user.click(screen.getByRole('button', { name: /create session/i }));
-  await screen.findByText('Session: session-123');
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
 
   const fullRange = 'AsAhKdQc,'.repeat(150);
   const input = screen.getByRole('textbox', { name: 'Player 1' });

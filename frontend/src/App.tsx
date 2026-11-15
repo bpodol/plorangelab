@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createSession, changeBoard } from './api/sessions';
 import { BoardInput } from './components/BoardInput';
 import { PlayerRangeInput } from './components/PlayerRangeInput';
@@ -20,16 +20,22 @@ import { FilterPanel } from './components/FilterPanel';
  * operations that affect multiple parts of the application.
  *
  * @remarks
- * Session creation and board changes are handled directly through
- * REST API clients. Individual components receive state and actions
- * through props rather than communicating with the backend.
+ * Automatically creates a backend session on mount and allows
+ * manual retries if initialization fails.
+ *
+ * Session creation and board application use independent loading
+ * states and communicate through REST API clients.
+ *
+ * Child components receive state and callbacks through props
+ * rather than communicating directly with the backend.
  */
 function App() {
   const [board, setBoard] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isCreatingSession, setIsCreatingSession] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [boardMessage, setBoardMessage] = useState<string | null>(null);
+  const [isApplyingBoard, setIsApplyingBoard] = useState(false);
   const [mode, setMode] = useState<4 | 5>(4);
   const { equityStatus, isConnected, equityMessage, startEquity, cancelEquity } =
     useEquitySocket(sessionId);
@@ -47,18 +53,14 @@ function App() {
   } = usePlayerRanges(sessionId, mode);
 
   /**
-   * Create a backend session and store its identifier.
+   * Create a backend session on application startup or manual retry.
    *
-   * Updates the application loading and error states while the
-   * request is pending.
-   *
-   * A successful response updates sessionId, allowing the
-   * session-dependent hooks to establish backend communication.
-   *
-   * Errors are displayed through application-level state.
+   * Tracks session creation independently of board updates.
+   * On success, stores the session ID to enable backend communication.
+   * On failure, stores the error for display with a Retry button.
    */
-  async function handleCreateSession() {
-    setIsLoading(true);
+  const handleCreateSession = useCallback(async () => {
+    setIsCreatingSession(true);
     setError(null);
 
     try {
@@ -67,9 +69,25 @@ function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setIsLoading(false);
+      setIsCreatingSession(false);
     }
-  }
+  }, []);
+
+  /**
+   * Automatically create a session when the app mounts.
+   *
+   * The ref prevents duplicate requests caused by React Strict Mode
+   * re-running effects in development. Failed requests can still
+   * be retried manually through handleCreateSession().
+   */
+  const sessionRequested = useRef(false);
+
+  useEffect(() => {
+    if (sessionRequested.current) return;
+
+    sessionRequested.current = true;
+    void handleCreateSession();
+  }, [handleCreateSession]);
 
   /**
    * Apply the current board input to the backend session.
@@ -90,7 +108,7 @@ function App() {
   async function handleApplyBoard() {
     if (sessionId === null) return;
 
-    setIsLoading(true);
+    setIsApplyingBoard(true);
     setError(null);
     setBoardMessage(null);
 
@@ -103,20 +121,23 @@ function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setIsLoading(false);
+      setIsApplyingBoard(false);
     }
   }
 
   return (
     <main>
       <h1>PLO RangeLab</h1>
-      <section className="session-panel">
-        <button onClick={handleCreateSession} disabled={isLoading || sessionId !== null}>
-          {isLoading && sessionId === null ? 'Creating...' : 'Create Session'}
-        </button>
+      {sessionId === null && !isCreatingSession && error && (
+        <section className="session-panel">
+          <p role="alert">{error}</p>
 
-        <p>Session: {sessionId ?? 'Not created'}</p>
-
+          <button type="button" onClick={() => void handleCreateSession()}>
+            Retry
+          </button>
+        </section>
+      )}
+      <section>
         <label htmlFor="mode">Game mode</label>
         {/* Prevent switching PLO modes while player ranges exist
             or a player range operation is in progress. */}
@@ -134,11 +155,11 @@ function App() {
         board={board}
         onBoardChange={setBoard}
         onApply={handleApplyBoard}
-        disabled={isLoading || sessionId === null}
-        isLoading={isLoading}
+        disabled={isApplyingBoard || sessionId === null}
+        isLoading={isApplyingBoard}
       />
 
-      {error && <p role="alert">{error}</p>}
+      {sessionId !== null && error && <p role="alert">{error}</p>}
       {boardMessage && <p>{boardMessage}</p>}
 
       <EquityPanel
@@ -182,7 +203,7 @@ function App() {
                 key={index}
                 playerId={index}
                 filterSnapshot={player.filterSnapshot}
-                disabled={sessionId === null || player.isLoading || isLoading}
+                disabled={sessionId === null || player.isLoading || isApplyingBoard}
                 onAddFilter={addFilter}
                 onAddGroup={addGroup}
                 onToggleFilterActive={toggleFilterActive}
