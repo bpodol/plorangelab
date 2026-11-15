@@ -49,7 +49,6 @@ class FilterGroup:
     filters: dict[str, Filter | FilterGroup] = field(default_factory=dict)
     coverage: float = 0.0
     active: bool = False
-    partialy_active: bool = False
 
 
 @dataclass(frozen=True, slots=True)
