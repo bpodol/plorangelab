@@ -7,7 +7,10 @@ from itertools import combinations
 import numpy as np
 from numpy.typing import NDArray
 
-from plorangelab.encoder import RANKS_DECODE, RANKS_ENCODE
+from plorangelab.encoder import RANKS_DECODE, RANKS_ENCODE, SUITS_DECODE
+
+SUITED_RANK_NAMES = ("nut", "2nd nut", "3rd nut", "low")
+DOUBLE_DRAW_NAMES = ("nut+nut", "nut+noNut", "noNut+noNut")
 
 
 @dataclass
@@ -28,7 +31,7 @@ def _rank_order(ranks: Counter[str]) -> list[str]:
 
 
 def _can_hold(token: str, board_ranks: Counter[str]) -> bool:
-    """Check whether the required hole-card ranks are available in the deck."""
+    """Check rank availability in a real deck (not a player hand)."""
     return all(board_ranks[rank] + count <= 4 for rank, count in Counter(token).items())
 
 
@@ -39,20 +42,15 @@ def _contains_token(token: str, other: str) -> bool:
 
 
 def _add_patterns(
-    result: list[FilterNode | GroupNode],
+    result: list[GroupNode],
     higher: list[str],
     category: str,
     tokens: list[str],
 ) -> None:
-    """Append a group of mutually exclusive rank filters.
+    """Add mutually exclusive rank expressions in descending priority order.
 
-    Tokens are processed in descending priority order. Each expression
-    excludes previously accepted tokens to prevent overlapping matches.
-
-    The ``higher`` list is updated in place and may be shared across
-    categories to maintain their exclusion priority.
-
-    Empty groups are omitted.
+    A hand may contain multiple qualifying patterns (particularly in PLO5).
+    Earlier patterns win: later expressions exclude them with `!` tokens.
     """
     nodes: list[FilterNode] = []
     for token in tokens:
@@ -149,32 +147,142 @@ def _overpair_patterns(board_ranks: Counter[str], ordered: list[str]) -> list[st
     ]
 
 
+def _suits_by_board_strength(board: NDArray[np.uint8]) -> list[str]:
+    """Distinct board suits ordered by their highest board card.
+
+    Sorting the encoded cards keeps OR-branch ordering independent of the
+    original board-card order.
+    """
+    return list(
+        dict.fromkeys(
+            SUITS_DECODE[card & 3]
+            for card in sorted((int(card) for card in board), reverse=True)
+        )
+    )
+
+
+def _available_suited_ranks(board: NDArray[np.uint8], suit: str) -> list[str]:
+    """Highest three ranks still available in ``suit`` after board blockers."""
+    blocked = {
+        RANKS_DECODE[int(card) >> 2]
+        for card in board
+        if SUITS_DECODE[int(card) & 3] == suit
+    }
+    return [rank for rank in reversed(RANKS_DECODE) if rank not in blocked][:3]
+
+
+def _single_suit_expressions(suit: str, ranks: list[str]) -> list[str]:
+    """Generate nut, second-nut, third-nut, and low suited expressions."""
+    base = suit * 2
+    expressions: list[str] = []
+    excluded: list[str] = []
+
+    for rank in ranks:
+        expressions.append(f"{rank}{base}" + "".join(f"!{card}" for card in excluded))
+        excluded.append(f"{rank}{suit}")
+
+    expressions.append(base + "".join(f"!{card}" for card in excluded))
+    return expressions
+
+
+def _add_suited_group(
+    result: list[GroupNode],
+    category: str,
+    suits: list[str],
+    available: dict[str, list[str]],
+) -> None:
+    """Generate suited-strength filters, excluding double draws from single draws.
+
+    For FD and BDFD, exclude hands containing two cards of another
+    eligible suit. This keeps single and double draw categories disjoint.
+    """
+
+    if not suits:
+        return
+
+    expressions_by_suit = []
+
+    for suit in suits:
+        expressions = _single_suit_expressions(suit, available[suit])
+
+        if category in ("fd", "bdfd"):
+            exclusions = "".join(f"!{other * 2}" for other in suits if other != suit)
+            expressions = [expr + exclusions for expr in expressions]
+
+        expressions_by_suit.append(expressions)
+
+    result.append(
+        GroupNode(
+            category,
+            [
+                FilterNode(
+                    name,
+                    "|".join(parts[index] for parts in expressions_by_suit),
+                )
+                for index, name in enumerate(SUITED_RANK_NAMES)
+            ],
+        )
+    )
+
+
+def _add_double_draw_group(
+    result: list[GroupNode | FilterNode],
+    category: str,
+    suits: list[str],
+    available: dict[str, list[str]],
+) -> None:
+    """Generate double-draw patterns for all pairs of eligible suits.
+
+    Two cards of each suit are required, with branches partitioned by
+    whether each suit contains its highest available card.
+
+    Double-draw groups are mutually exclusive with their corresponding
+    single-draw groups.
+    """
+    if len(suits) < 2:
+        return
+
+    branches: dict[str, list[str]] = {name: [] for name in DOUBLE_DRAW_NAMES}
+    for first, second in combinations(suits, 2):
+        first_base = first * 2
+        second_base = second * 2
+        first_nut = f"{available[first][0]}{first}"
+        second_nut = f"{available[second][0]}{second}"
+
+        branches["nut+nut"].append(f"{first_nut}{first}{second_nut}{second}")
+        branches["nut+noNut"].extend(
+            (
+                f"{first_nut}{first}{second_base}!{second_nut}",
+                f"{first_base}{second_nut}{second}!{first_nut}",
+            )
+        )
+        branches["noNut+noNut"].append(
+            f"{first_base}{second_base}!{first_nut}!{second_nut}"
+        )
+
+    result.append(
+        GroupNode(
+            category,
+            [FilterNode(name, "|".join(branches[name])) for name in DOUBLE_DRAW_NAMES],
+        )
+    )
+
+
 def generate_filters(board: NDArray[np.uint8]) -> list[GroupNode]:
-    """Generate rank-based filter groups for the given board.
+    """Generate rank-based and suit-based filters for a flop, turn, or river.
 
-    Generate expressions for rank-based made-hand categories, including
-    quads, full houses, sets, two pairs, trips, overpairs, and board pairs.
+    Rank categories preserve their existing priority exclusions.
+    Suited categories are independent of rank categories. Single FD and
+    BDFD filters exclude their corresponding double-draw categories.
 
-    Expressions are ordered by priority, with exclusions preventing
-    overlapping matches across categories. Overpairs are independent
-    of other rank categories.
+    Each suited category contains four strength filters. Double draws are
+    divided into nut+nut, nut+noNut, and noNut+noNut.
 
-    The generated patterns follow Omaha's requirement to use exactly
-    two hole cards and three board cards.
+    The two-hole-card/three-board-card Omaha rule determines flush and draw
+    eligibility. Only expressions are generated; no hands are evaluated and
+    no filters are parsed, compiled, or executed. Straight logic is omitted.
 
-    Only expressions are generated; no hands are evaluated, and no
-    filters are parsed, compiled, or executed. Straight and flush
-    categories are not supported.
-
-    Args:
-        board: Encoded flop, turn, or river containing 3, 4, or 5 cards.
-            Cards are expected to be valid and unique.
-
-    Returns:
-        Non-empty groups containing generated filter expressions.
-
-    Raises:
-        ValueError: If the board contains an unsupported number of cards.
+    The caller must supply a validated board of unique encoded cards.
     """
     if len(board) not in (3, 4, 5):
         raise ValueError("board must contain 3, 4, or 5 cards")
@@ -216,5 +324,27 @@ def generate_filters(board: NDArray[np.uint8]) -> list[GroupNode]:
         # the board pair. On unpaired boards it produces one pair.
         singles = [rank for rank in ordered if is_unpaired or board_ranks[rank] == 1]
         _add_patterns(filters, higher, "board pair", singles)
+
+    suit_counts = Counter(SUITS_DECODE[int(card) & 3] for card in board)
+    ordered_suits = _suits_by_board_strength(board)
+    available = {suit: _available_suited_ranks(board, suit) for suit in ordered_suits}
+
+    flush_suits = [suit for suit in ordered_suits if suit_counts[suit] >= 3]
+    fd_suits = (
+        [suit for suit in ordered_suits if suit_counts[suit] == 2]
+        if len(board) < 5
+        else []
+    )
+    bdfd_suits = (
+        [suit for suit in ordered_suits if suit_counts[suit] == 1]
+        if len(board) == 3
+        else []
+    )
+
+    _add_suited_group(filters, "flush", flush_suits, available)
+    _add_double_draw_group(filters, "2fd", fd_suits, available)
+    _add_double_draw_group(filters, "2bdfd", bdfd_suits, available)
+    _add_suited_group(filters, "fd", fd_suits, available)
+    _add_suited_group(filters, "bdfd", bdfd_suits, available)
 
     return filters

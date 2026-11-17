@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from plorangelab.encoder import RANKS_ENCODE
+from plorangelab.encoder import RANKS_ENCODE, SUITS_DECODE
 from plorangelab.filters.filter_generator import FilterNode, GroupNode, generate_filters
 
 
@@ -28,15 +28,40 @@ def _board(ranks: str, *, suit_offset: int = 0) -> NDArray[np.uint8]:
     return np.array(cards, dtype=np.uint8)
 
 
-def _groups(ranks: str) -> dict[str, list[FilterNode]]:
+SUITED_CATEGORIES = {"flush", "fd", "bdfd", "2fd", "2bdfd"}
+
+
+def _cards(*cards: str) -> NDArray[np.uint8]:
+    """Encode concrete rank/suit card literals, e.g. ``As``, ``Kh``."""
+    suit_index = {SUITS_DECODE[index]: index for index in range(4)}
+    return np.array(
+        [((RANKS_ENCODE[card[0]] << 2) | suit_index[card[1]]) for card in cards],
+        dtype=np.uint8,
+    )
+
+
+def _all_groups(board: NDArray[np.uint8]) -> dict[str, list[FilterNode]]:
     result: dict[str, list[FilterNode]] = {}
-    for node in generate_filters(_board(ranks)):
+    for node in generate_filters(board):
         assert isinstance(node, GroupNode), "Every category must be a group"
         assert node.name not in result, "Category names must be unique"
         assert node.filters, "Empty categories must not be returned"
         assert all(isinstance(child, FilterNode) for child in node.filters)
         result[node.name] = node.filters
     return result
+
+
+def _rank_groups(board: NDArray[np.uint8]) -> dict[str, list[FilterNode]]:
+    return {
+        name: nodes
+        for name, nodes in _all_groups(board).items()
+        if name not in SUITED_CATEGORIES
+    }
+
+
+def _groups(ranks: str) -> dict[str, list[FilterNode]]:
+    """Preserve the existing rank-only assertions independently of suits."""
+    return _rank_groups(_board(ranks))
 
 
 def _names(nodes: list[FilterNode]) -> list[str]:
@@ -279,7 +304,7 @@ def test_exclusions_follow_priority_without_self_contradictions(ranks: str) -> N
 def test_suits_do_not_affect_generated_expressions() -> None:
     first = _board("AAKQJ")
     different_suits = _board("AAKQJ", suit_offset=2)
-    assert generate_filters(first) == generate_filters(different_suits)
+    assert _rank_groups(first) == _rank_groups(different_suits)
 
 
 def test_board_card_order_does_not_affect_generated_expressions() -> None:
@@ -298,3 +323,168 @@ def test_generate_filters_does_not_modify_input_board() -> None:
 def test_invalid_board_length_raises_value_error(size: int) -> None:
     with pytest.raises(ValueError, match="3, 4, or 5"):
         generate_filters(np.arange(size, dtype=np.uint8))
+
+
+@pytest.mark.parametrize(
+    ("cards", "expected_categories"),
+    [
+        (("As", "Kh", "Qc"), {"bdfd", "2bdfd"}),  # rainbow flop
+        (("As", "Qs", "7h"), {"fd", "bdfd"}),  # two-tone flop
+        (("As", "Qs", "7s"), {"flush"}),  # monotone flop
+        (("As", "Qs", "Kh", "Jh"), {"fd", "2fd"}),  # two FDs on turn
+        (("As", "Qs", "7h", "2c"), {"fd"}),
+        (("As", "Qs", "7s", "2c"), {"flush"}),
+        (("As", "Qs", "7s", "2s"), {"flush"}),
+        (("As", "Kh", "Qc", "2d"), set()),  # rainbow turn
+        (("As", "Qs", "7s", "2h", "3c"), {"flush"}),
+        (("As", "Qs", "Kh", "Jh", "2c"), set()),
+        (("As", "Qs", "7s", "2s", "3s"), {"flush"}),
+        (("As", "Kh", "Qc", "2d", "3s"), set()),
+    ],
+)
+def test_suit_categories_by_texture(
+    cards: tuple[str, ...], expected_categories: set[str]
+) -> None:
+    groups = _all_groups(_cards(*cards))
+    assert set(groups) & SUITED_CATEGORIES == expected_categories
+
+
+@pytest.mark.parametrize("category", ["flush", "fd", "bdfd"])
+def test_single_suit_categories_contain_four_strengths(category: str) -> None:
+    board = {
+        "flush": _cards("As", "Qs", "7s"),
+        "fd": _cards("As", "Qs", "7h"),
+        "bdfd": _cards("As", "Kh", "Qc"),
+    }[category]
+    assert _names(_all_groups(board)[category]) == ["nut", "2nd nut", "3rd nut", "low"]
+
+
+def test_flop_fd_accounts_for_all_board_suited_cards() -> None:
+    groups = _all_groups(_cards("As", "Qs", "7h"))
+    assert _expressions(groups["fd"]) == [
+        "Kss",
+        "Jss!Ks",
+        "Tss!Ks!Js",
+        "ss!Ks!Js!Ts",
+    ]
+    assert _expressions(groups["bdfd"]) == [
+        "Ahh",
+        "Khh!Ah",
+        "Qhh!Ah!Kh",
+        "hh!Ah!Kh!Qh",
+    ]
+
+
+def test_monotone_flop_flush_has_nut_ranks_excluding_board_cards() -> None:
+    groups = _all_groups(_cards("As", "Qs", "7s"))
+    assert _expressions(groups["flush"]) == [
+        "Kss",
+        "Jss!Ks",
+        "Tss!Ks!Js",
+        "ss!Ks!Js!Ts",
+    ]
+
+
+def test_rainbow_flop_merges_three_bdfd_suits_by_or() -> None:
+    groups = _all_groups(_cards("As", "Kh", "Qc"))
+
+    assert _expressions(groups["bdfd"]) == [
+        "Kss!hh!cc|Ahh!ss!cc|Acc!ss!hh",
+        "Qss!Ks!hh!cc|Qhh!Ah!ss!cc|Kcc!Ac!ss!hh",
+        "Jss!Ks!Qs!hh!cc|Jhh!Ah!Qh!ss!cc|Jcc!Ac!Kc!ss!hh",
+        "ss!Ks!Qs!Js!hh!cc|hh!Ah!Qh!Jh!ss!cc|cc!Ac!Kc!Jc!ss!hh",
+    ]
+
+
+def test_turn_2fd_combines_both_suit_draws() -> None:
+    groups = _all_groups(_cards("As", "Qs", "Kh", "Jh"))
+
+    assert _expressions(groups["fd"]) == [
+        "Kss!hh|Ahh!ss",
+        "Jss!Ks!hh|Qhh!Ah!ss",
+        "Tss!Ks!Js!hh|Thh!Ah!Qh!ss",
+        "ss!Ks!Js!Ts!hh|hh!Ah!Qh!Th!ss",
+    ]
+
+    assert _names(groups["2fd"]) == [
+        "nut+nut",
+        "nut+noNut",
+        "noNut+noNut",
+    ]
+
+    assert _expressions(groups["2fd"]) == [
+        "KssAhh",
+        "Ksshh!Ah|ssAhh!Ks",
+        "sshh!Ks!Ah",
+    ]
+
+
+def test_rainbow_flop_2bdfd_has_three_suit_pairs() -> None:
+    groups = _all_groups(_cards("As", "Kh", "Qc"))
+    assert _names(groups["2bdfd"]) == ["nut+nut", "nut+noNut", "noNut+noNut"]
+    assert _expressions(groups["2bdfd"]) == [
+        "KssAhh|KssAcc|AhhAcc",
+        ("Ksshh!Ah|ssAhh!Ks|Ksscc!Ac|ssAcc!Ks|Ahhcc!Ac|hhAcc!Ah"),
+        "sshh!Ks!Ah|sscc!Ks!Ac|hhcc!Ah!Ac",
+    ]
+
+
+def test_four_suited_board_still_generates_flush_not_fd() -> None:
+    groups = _all_groups(_cards("As", "Ks", "Qs", "Js"))
+    assert _expressions(groups["flush"]) == [
+        "Tss",
+        "9ss!Ts",
+        "8ss!Ts!9s",
+        "ss!Ts!9s!8s",
+    ]
+    assert "fd" not in groups
+
+
+def test_five_suited_board_still_generates_flush() -> None:
+    groups = _all_groups(_cards("As", "Ks", "Qs", "Js", "Ts"))
+    assert _expressions(groups["flush"]) == [
+        "9ss",
+        "8ss!9s",
+        "7ss!9s!8s",
+        "ss!9s!8s!7s",
+    ]
+
+
+def test_suit_specific_categories_do_not_affect_rank_patterns() -> None:
+    rainbow = _cards("As", "Kh", "Qc")
+    monochrome = _cards("As", "Ks", "Qs")
+    assert _rank_groups(rainbow) == _rank_groups(monochrome)
+    assert "bdfd" in _all_groups(rainbow)
+    assert "flush" in _all_groups(monochrome)
+
+
+def test_suited_expressions_are_invariant_to_board_order() -> None:
+    board = _cards("As", "Kh", "Qc")
+    assert generate_filters(board) == generate_filters(board[[2, 0, 1]])
+    board = _cards("As", "Qs", "Kh", "Jh")
+    assert generate_filters(board) == generate_filters(board[::-1])
+
+
+def test_generator_does_not_mutate_suited_board() -> None:
+    board = _cards("As", "Qs", "Kh", "Jh")
+    original = board.copy()
+    generate_filters(board)
+    np.testing.assert_array_equal(board, original)
+
+
+@pytest.mark.parametrize(
+    "cards",
+    [
+        ("As", "Ah", "Ks"),
+        ("As", "Ah", "Qs", "Kh"),
+        ("As", "Ah", "Qs", "Kh", "Jc"),
+    ],
+)
+def test_suited_categories_support_paired_ranks(cards: tuple[str, ...]) -> None:
+    groups = _all_groups(_cards(*cards))
+    if len(cards) == 3:
+        assert _expressions(groups["fd"])[0] == "Qss"  # As and Ks blocked.
+    elif len(cards) == 4:
+        assert _expressions(groups["fd"])[0] == "Kss!hh|Qhh!ss"
+    else:
+        assert "fd" not in groups
