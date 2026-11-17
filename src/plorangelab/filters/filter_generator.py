@@ -9,9 +9,6 @@ from numpy.typing import NDArray
 
 from plorangelab.encoder import RANKS_DECODE, RANKS_ENCODE, SUITS_DECODE
 
-SUITED_RANK_NAMES = ("nut", "2nd nut", "3rd nut", "low")
-DOUBLE_DRAW_NAMES = ("nut+nut", "nut+noNut", "noNut+noNut")
-
 
 @dataclass
 class FilterNode:
@@ -147,6 +144,95 @@ def _overpair_patterns(board_ranks: Counter[str], ordered: list[str]) -> list[st
     ]
 
 
+# All ten straights, strongest first. Ace is low only in the wheel window.
+# Each window is a set of five distinct ranks (suits are irrelevant here).
+STRAIGHT_WINDOWS = (
+    "AKQJT",
+    "KQJT9",
+    "QJT98",
+    "JT987",
+    "T9876",
+    "98765",
+    "87654",
+    "76543",
+    "65432",
+    "5432A",
+)
+
+
+def _straight_patterns(
+    board_ranks: Counter[str],
+) -> list[tuple[str, list[str]]]:
+    """Group possible two-hole-rank tokens by their best straight strength.
+
+    For each five-rank straight, select three distinct ranks from the board;
+    the remaining two must come from the hole cards (Omaha's 3+2 rule).
+    Account for rank blockers, and retain only the strongest straight window
+    when the same two-card token can complete more than one straight.
+    """
+    best_by_token: dict[str, int] = {}
+
+    for strength, window in enumerate(STRAIGHT_WINDOWS):
+        for board_three in combinations(window, 3):
+            if not all(rank in board_ranks for rank in board_three):
+                continue
+
+            token = "".join(rank for rank in window if rank not in board_three)
+            token = "".join(sorted(token, key=RANKS_ENCODE.__getitem__, reverse=True))
+            if _can_hold(token, board_ranks):
+                # Windows are visited strongest first, so the first wins.
+                best_by_token.setdefault(token, strength)
+
+    strengths: list[tuple[str, list[str]]] = []
+    for strength, window in enumerate(STRAIGHT_WINDOWS):
+        tokens = sorted(
+            (token for token, best in best_by_token.items() if best == strength),
+            key=lambda token: tuple(RANKS_ENCODE[rank] for rank in token),
+            reverse=True,
+        )
+        if tokens:
+            strengths.append((f"{window[0]}-high", tokens))
+
+    return strengths
+
+
+def _add_straight_group(
+    result: list[GroupNode],
+    higher: list[str],
+    board_ranks: Counter[str],
+) -> None:
+    """Add one OR-combined filter per achievable straight strength.
+
+    Each straight strength excludes previously generated stronger straight
+    patterns. Equal-strength requirements are combined using OR without
+    excluding one another.
+
+    The exclusion list is independent of rank-based and suited categories.
+    """
+    nodes: list[FilterNode] = []
+
+    for name, tokens in _straight_patterns(board_ranks):
+        accepted = [
+            token
+            for token in tokens
+            if not any(_contains_token(token, prior) for prior in higher)
+        ]
+        if not accepted:
+            continue
+
+        exclusions = "".join(f"!{prior}" for prior in higher)
+        expression = "|".join(token + exclusions for token in accepted)
+        nodes.append(FilterNode(name, expression))
+        higher.extend(accepted)
+
+    if nodes:
+        result.append(GroupNode("straight", nodes))
+
+
+SUITED_RANK_NAMES = ("nut", "2nd nut", "3rd nut", "low")
+DOUBLE_DRAW_NAMES = ("nut+nut", "nut+noNut", "noNut+noNut")
+
+
 def _suits_by_board_strength(board: NDArray[np.uint8]) -> list[str]:
     """Distinct board suits ordered by their highest board card.
 
@@ -216,8 +302,7 @@ def _add_suited_group(
             category,
             [
                 FilterNode(
-                    name,
-                    "|".join(parts[index] for parts in expressions_by_suit),
+                    name, "|".join(parts[index] for parts in expressions_by_suit)
                 )
                 for index, name in enumerate(SUITED_RANK_NAMES)
             ],
@@ -269,18 +354,16 @@ def _add_double_draw_group(
 
 
 def generate_filters(board: NDArray[np.uint8]) -> list[GroupNode]:
-    """Generate rank-based and suit-based filters for a flop, turn, or river.
+    """Generate rank-based, straight, and suited filters for a flop, turn, or river.
 
-    Rank categories preserve their existing priority exclusions.
-    Suited categories are independent of rank categories. Single FD and
-    BDFD filters exclude their corresponding double-draw categories.
+    Rank categories share priority exclusions, while straights and suited
+    categories are independent. Straight filters exclude stronger straight
+    patterns only.
 
-    Each suited category contains four strength filters. Double draws are
-    divided into nut+nut, nut+noNut, and noNut+noNut.
-
-    The two-hole-card/three-board-card Omaha rule determines flush and draw
-    eligibility. Only expressions are generated; no hands are evaluated and
-    no filters are parsed, compiled, or executed. Straight logic is omitted.
+    The two-hole-card/three-board-card Omaha rule determines straight, flush,
+    and flush-draw eligibility. Only expressions are generated; no hands are
+    evaluated and no filters are parsed, compiled, or executed. Straight-draw
+    generation is not yet supported.
 
     The caller must supply a validated board of unique encoded cards.
     """
@@ -295,10 +378,29 @@ def generate_filters(board: NDArray[np.uint8]) -> list[GroupNode]:
     filters: list[GroupNode] = []
     higher: list[str] = []
 
+    suit_counts = Counter(SUITS_DECODE[int(card) & 3] for card in board)
+    ordered_suits = _suits_by_board_strength(board)
+    available = {suit: _available_suited_ranks(board, suit) for suit in ordered_suits}
+
+    flush_suits = [suit for suit in ordered_suits if suit_counts[suit] >= 3]
+    fd_suits = (
+        [suit for suit in ordered_suits if suit_counts[suit] == 2]
+        if len(board) < 5
+        else []
+    )
+    bdfd_suits = (
+        [suit for suit in ordered_suits if suit_counts[suit] == 1]
+        if len(board) == 3
+        else []
+    )
+
     _add_patterns(filters, higher, "quad", _quad_patterns(board_ranks, ordered))
     _add_patterns(
         filters, higher, "full house", _full_house_patterns(board_ranks, ordered)
     )
+
+    _add_suited_group(filters, "flush", flush_suits, available)
+    _add_straight_group(filters, [], board_ranks)
 
     if is_unpaired:
         _add_patterns(filters, higher, "set", _set_patterns(ordered))
@@ -325,23 +427,6 @@ def generate_filters(board: NDArray[np.uint8]) -> list[GroupNode]:
         singles = [rank for rank in ordered if is_unpaired or board_ranks[rank] == 1]
         _add_patterns(filters, higher, "board pair", singles)
 
-    suit_counts = Counter(SUITS_DECODE[int(card) & 3] for card in board)
-    ordered_suits = _suits_by_board_strength(board)
-    available = {suit: _available_suited_ranks(board, suit) for suit in ordered_suits}
-
-    flush_suits = [suit for suit in ordered_suits if suit_counts[suit] >= 3]
-    fd_suits = (
-        [suit for suit in ordered_suits if suit_counts[suit] == 2]
-        if len(board) < 5
-        else []
-    )
-    bdfd_suits = (
-        [suit for suit in ordered_suits if suit_counts[suit] == 1]
-        if len(board) == 3
-        else []
-    )
-
-    _add_suited_group(filters, "flush", flush_suits, available)
     _add_double_draw_group(filters, "2fd", fd_suits, available)
     _add_double_draw_group(filters, "2bdfd", bdfd_suits, available)
     _add_suited_group(filters, "fd", fd_suits, available)

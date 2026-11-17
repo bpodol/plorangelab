@@ -1,4 +1,4 @@
-"""Unit tests for rank-only automatic filter-expression generation.
+"""Unit tests for automatic rank, straight, and suited filter generation.
 
 These tests inspect the generated tree and strings directly. They deliberately
 avoid the filter parser, hand evaluator, and range/coverage calculations.
@@ -6,42 +6,47 @@ avoid the filter parser, hand evaluator, and range/coverage calculations.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
+from itertools import combinations
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from plorangelab.encoder import RANKS_ENCODE, SUITS_DECODE
-from plorangelab.filters.filter_generator import FilterNode, GroupNode, generate_filters
+from plorangelab.encoder import RANKS_DECODE, SUITS_DECODE, encode_board
+from plorangelab.filters.filter_generator import (
+    STRAIGHT_WINDOWS,
+    FilterNode,
+    GroupNode,
+    _straight_patterns,
+    generate_filters,
+)
 
 
 def _board(ranks: str, *, suit_offset: int = 0) -> NDArray[np.uint8]:
-    """Encode ranks as distinct physical cards; suits do not affect the tests."""
-    used_suits: defaultdict[str, int] = defaultdict(int)
-    cards: list[int] = []
+    """Build a valid board from rank-only notation using the production encoder.
+
+    Assign different suits to repeated ranks; rotate suits when requested.
+    """
+    used_suits: dict[str, int] = {}
+    cards: list[str] = []
+
     for rank in ranks:
-        suit = used_suits[rank]
-        assert suit < 4, "Test boards must contain physically possible cards"
-        cards.append((RANKS_ENCODE[rank] << 2) | ((suit + suit_offset) % 4))
-        used_suits[rank] += 1
-    return np.array(cards, dtype=np.uint8)
+        index = used_suits.get(rank, 0)
+        if index >= len(SUITS_DECODE):
+            raise ValueError(f"Too many cards of rank {rank!r}")
+
+        cards.append(rank + SUITS_DECODE[(index + suit_offset) % len(SUITS_DECODE)])
+        used_suits[rank] = index + 1
+
+    return encode_board("".join(cards))
 
 
 SUITED_CATEGORIES = {"flush", "fd", "bdfd", "2fd", "2bdfd"}
 
 
-def _cards(*cards: str) -> NDArray[np.uint8]:
-    """Encode concrete rank/suit card literals, e.g. ``As``, ``Kh``."""
-    suit_index = {SUITS_DECODE[index]: index for index in range(4)}
-    return np.array(
-        [((RANKS_ENCODE[card[0]] << 2) | suit_index[card[1]]) for card in cards],
-        dtype=np.uint8,
-    )
-
-
-def _all_groups(board: NDArray[np.uint8]) -> dict[str, list[FilterNode]]:
-    result: dict[str, list[FilterNode]] = {}
+def _all_groups(board: NDArray[np.uint8]) -> dict[str, list[FilterNode | GroupNode]]:
+    result: dict[str, list[FilterNode | GroupNode]] = {}
     for node in generate_filters(board):
         assert isinstance(node, GroupNode), "Every category must be a group"
         assert node.name not in result, "Category names must be unique"
@@ -52,11 +57,24 @@ def _all_groups(board: NDArray[np.uint8]) -> dict[str, list[FilterNode]]:
 
 
 def _rank_groups(board: NDArray[np.uint8]) -> dict[str, list[FilterNode]]:
-    return {
-        name: nodes
-        for name, nodes in _all_groups(board).items()
-        if name not in SUITED_CATEGORIES
-    }
+    groups: dict[str, list[FilterNode]] = {}
+    for name, nodes in _all_groups(board).items():
+        if name not in SUITED_CATEGORIES | {"straight"}:
+            assert all(isinstance(node, FilterNode) for node in nodes)
+            groups[name] = nodes  # type: ignore[assignment]
+    return groups
+
+
+def _straight_groups(board: NDArray[np.uint8]) -> dict[str, FilterNode]:
+    """Return the single OR-combined filter for each straight strength."""
+    children = _all_groups(board).get("straight", [])
+    assert all(isinstance(child, FilterNode) for child in children)
+    return {child.name: child for child in children}
+
+
+def _required_straight_tokens(node: FilterNode) -> list[str]:
+    """Extract each required hole-card pair without parsing expressions."""
+    return [branch.split("!", 1)[0] for branch in node.expression.split("|")]
 
 
 def _groups(ranks: str) -> dict[str, list[FilterNode]]:
@@ -195,6 +213,7 @@ def test_unpaired_river_generates_all_rank_pairs() -> None:
     groups = _groups("AKQJT")
 
     assert _names(groups["set"]) == ["AA", "KK", "QQ", "JJ", "TT"]
+    # Straights no longer suppress rank-based two-pair filters.
     assert _names(groups["two pair"]) == [
         "AK",
         "AQ",
@@ -275,30 +294,46 @@ def test_overpairs_also_exist_on_paired_boards() -> None:
     ],
 )
 def test_exclusions_follow_priority_without_self_contradictions(ranks: str) -> None:
-    """Each category except overpairs excludes every previously emitted token."""
+    """Rank/straight categories keep separate exclusion histories."""
     seen: list[str] = []
     board_count = Counter(ranks)
-    for category, nodes in _groups(ranks).items():
-        local_seen = [] if category == "overpair" else seen
-        for node in nodes:
-            required, *excluded = node.expression.split("!")
-            assert required == node.name
-            assert excluded == local_seen
-            assert node.name not in excluded
-            assert node.name not in local_seen
+    for category in generate_filters(_board(ranks)):
+        if category.name in SUITED_CATEGORIES:
+            continue
 
-            # A generated token must leave enough cards of every rank in deck.
-            for rank, count in Counter(required).items():
-                assert board_count[rank] + count <= 4
+        local_seen = [] if category.name in ("overpair", "straight") else seen
+        assert category.filters
+        assert all(isinstance(child, FilterNode) for child in category.filters)
 
-            # A requirement must never entail one of its own exclusions.
-            required_count = Counter(required)
-            for token in excluded:
-                assert not all(
-                    required_count[rank] >= count
-                    for rank, count in Counter(token).items()
-                )
-            local_seen.append(required)
+        for node in category.filters:
+            # All OR branches in one straight-strength filter have the same
+            # exclusions. Tokens within the strength never exclude siblings.
+            required_tokens: list[str] = []
+            branches = node.expression.split("|")
+            if category.name != "straight":
+                assert len(branches) == 1
+
+            for branch in branches:
+                required, *excluded = branch.split("!")
+                if category.name != "straight":
+                    assert required == node.name
+                assert excluded == local_seen
+                assert required not in excluded
+                assert required not in local_seen
+
+                for rank, count in Counter(required).items():
+                    assert board_count[rank] + count <= 4
+
+                required_count = Counter(required)
+                for token in excluded:
+                    assert not all(
+                        required_count[rank] >= count
+                        for rank, count in Counter(token).items()
+                    )
+                required_tokens.append(required)
+
+            # Update exclusions only after finishing this OR filter.
+            local_seen.extend(required_tokens)
 
 
 def test_suits_do_not_affect_generated_expressions() -> None:
@@ -325,42 +360,222 @@ def test_invalid_board_length_raises_value_error(size: int) -> None:
         generate_filters(np.arange(size, dtype=np.uint8))
 
 
+# Straight generation (no evaluation or expression parsing).
 @pytest.mark.parametrize(
-    ("cards", "expected_categories"),
+    ("ranks", "expected"),
     [
-        (("As", "Kh", "Qc"), {"bdfd", "2bdfd"}),  # rainbow flop
-        (("As", "Qs", "7h"), {"fd", "bdfd"}),  # two-tone flop
-        (("As", "Qs", "7s"), {"flush"}),  # monotone flop
-        (("As", "Qs", "Kh", "Jh"), {"fd", "2fd"}),  # two FDs on turn
-        (("As", "Qs", "7h", "2c"), {"fd"}),
-        (("As", "Qs", "7s", "2c"), {"flush"}),
-        (("As", "Qs", "7s", "2s"), {"flush"}),
-        (("As", "Kh", "Qc", "2d"), set()),  # rainbow turn
-        (("As", "Qs", "7s", "2h", "3c"), {"flush"}),
-        (("As", "Qs", "Kh", "Jh", "2c"), set()),
-        (("As", "Qs", "7s", "2s", "3s"), {"flush"}),
-        (("As", "Kh", "Qc", "2d", "3s"), set()),
+        ("T98", ["Q-high", "J-high", "T-high"]),
+        ("JT98", ["K-high", "Q-high", "J-high", "T-high"]),
+        ("AKQ", ["A-high"]),
+        ("A23", ["5-high"]),
+        ("A234", ["6-high", "5-high"]),
+        ("A2345", ["7-high", "6-high", "5-high"]),
+        ("AAKQJ", ["A-high", "K-high"]),
+        ("AAAKQ", ["A-high"]),
+        ("AAAAK", []),
+        ("AAKK", []),
+        ("AKQJT", ["A-high", "K-high", "Q-high"]),
     ],
 )
-def test_suit_categories_by_texture(
-    cards: tuple[str, ...], expected_categories: set[str]
-) -> None:
-    groups = _all_groups(_cards(*cards))
+def test_straight_strengths_by_board(ranks: str, expected: list[str]) -> None:
+    assert list(_straight_groups(_board(ranks))) == expected
+
+
+def test_straight_flop_uses_two_hole_and_three_board_cards() -> None:
+    groups = _straight_groups(_board("T98"))
+    assert groups["Q-high"].expression == "QJ"
+    assert groups["J-high"].expression == "J7!QJ"
+    assert groups["T-high"].expression == "76!QJ!J7"
+
+
+def test_turn_multiple_hole_pairs_form_same_straight_strength() -> None:
+    groups = _straight_groups(_board("JT98"))
+
+    assert groups["K-high"].expression == "KQ"
+    assert groups["Q-high"].expression == ("QJ!KQ|QT!KQ|Q9!KQ|Q8!KQ")
+    assert _required_straight_tokens(groups["J-high"]) == ["J7", "T7", "97", "87"]
+    assert groups["T-high"].expression == ("76!KQ!QJ!QT!Q9!Q8!J7!T7!97!87")
+
+
+def test_same_hole_pair_is_assigned_to_its_strongest_straight() -> None:
+    # KJT98: QJ makes K-high and Q-high via different board triples.
+    # Keep the QJ requirement only in the K-high strength filter.
+    groups = _straight_groups(_board("KJT98"))
+    assert "QJ" in _required_straight_tokens(groups["K-high"])
+    assert "QJ" not in _required_straight_tokens(groups["Q-high"])
+
+
+@pytest.mark.parametrize(
+    "ranks",
+    [
+        "T98",
+        "A23",
+        "543",
+        "AKQ",
+        "JT98",
+        "A234",
+        "KKQJ",
+        "A2345",
+        "KJT98",
+        "AAKQJ",
+        "AAAKQ",
+        "AAAAK",
+        "KKKAA",
+    ],
+)
+def test_straight_windows_match_independent_pair_first_enumeration(ranks: str) -> None:
+    """Cross-check window-first enumeration against two-hole-ranks-first logic.
+
+    The reference enumerates every distinct hole-rank pair and all ways to
+    choose three distinct ranks from the board, then compares five-rank sets
+    to the ten possible straights. No parser or hand evaluator is involved.
+    """
+    board_ranks = Counter(ranks)
+    expected: dict[str, set[str]] = {}
+    for first, second in combinations(reversed(RANKS_DECODE), 2):
+        # Do not require a hole card whose entire rank is on the board.
+        if board_ranks[first] == 4 or board_ranks[second] == 4:
+            continue
+
+        pair = {first, second}
+        strengths = [
+            index
+            for board_three in combinations(board_ranks, 3)
+            for index, window in enumerate(STRAIGHT_WINDOWS)
+            if pair | set(board_three) == set(window)
+        ]
+        if not strengths:
+            continue
+
+        strength_name = f"{STRAIGHT_WINDOWS[min(strengths)][0]}-high"
+        expected.setdefault(strength_name, set()).add(first + second)
+
+    actual = {
+        strength_name: set(tokens)
+        for strength_name, tokens in _straight_patterns(board_ranks)
+    }
+    assert actual == expected
+
+
+def test_straight_strengths_are_single_filter_nodes() -> None:
+    root = generate_filters(_board("JT98"))
+    straight = next(group for group in root if group.name == "straight")
+
+    assert isinstance(straight, GroupNode)
+    assert straight.filters
+    assert all(isinstance(node, FilterNode) for node in straight.filters)
+    assert [node.name for node in straight.filters] == [
+        "K-high",
+        "Q-high",
+        "J-high",
+        "T-high",
+    ]
+    assert "|" in straight.filters[1].expression
+
+
+def test_straight_wheel_treats_ace_as_low_only() -> None:
+    groups = _straight_groups(_board("A23"))
+    assert _required_straight_tokens(groups["5-high"]) == ["54"]
+    assert "A-high" not in groups
+
+
+def test_paired_river_can_provide_three_distinct_straight_ranks() -> None:
+    groups = _straight_groups(_board("AAKQJ"))
+    assert _required_straight_tokens(groups["A-high"]) == ["AT", "KT", "QT", "JT"]
+    assert _required_straight_tokens(groups["K-high"]) == ["T9"]
+    assert sum(len(_required_straight_tokens(node)) for node in groups.values()) == 5
+
+
+def test_tripled_board_can_make_straight_using_distinct_board_ranks() -> None:
+    groups = _straight_groups(_board("AAAKQ"))
+    assert _required_straight_tokens(groups["A-high"]) == ["JT"]
+    # With four of a kind plus a kicker, the board has too few distinct ranks.
+    assert not _straight_groups(_board("AAAAK"))
+
+
+def test_straights_are_independent_of_rank_filters() -> None:
+    # Rank filters exclude other rank patterns, not straight requirements.
+    assert _expressions(_groups("AKQ")["set"]) == [
+        "AA",
+        "KK!AA",
+        "QQ!AA!KK",
+    ]
+
+    # Straight filters do not exclude set, full-house or other rank tokens.
+    assert _straight_groups(_board("AKQ"))["A-high"].expression == "JT"
+    assert _straight_groups(_board("AAKQJ"))["A-high"].expression == ("AT|KT|QT|JT")
+
+
+def test_straight_strengths_still_exclude_stronger_straights() -> None:
+    groups = _straight_groups(_board("T98"))
+    assert groups["Q-high"].expression == "QJ"
+    assert groups["J-high"].expression == "J7!QJ"
+    assert groups["T-high"].expression == "76!QJ!J7"
+
+
+def test_straights_are_independent_of_suited_filters() -> None:
+    rainbow = encode_board("AsKhQc")
+    monotone = encode_board("AsKsQs")
+    assert _straight_groups(rainbow) == _straight_groups(monotone)
+    assert _straight_groups(rainbow)["A-high"].expression == "JT"
+    assert "bdfd" in _all_groups(rainbow)
+    assert "flush" in _all_groups(monotone)
+
+
+def test_straight_strengths_ignore_suits_and_board_order() -> None:
+    board = encode_board("JsTh9c8d")
+    swapped = encode_board("JhTc9d8s")
+    assert _straight_groups(board) == _straight_groups(swapped)
+    assert _straight_groups(board) == _straight_groups(board[::-1])
+
+
+def test_straight_generation_does_not_mutate_board() -> None:
+    board = _board("AAKQJ")
+    original = board.copy()
+    _straight_groups(board)
+    np.testing.assert_array_equal(board, original)
+
+
+def test_straight_draw_group_is_not_generated() -> None:
+    assert "sd" not in _all_groups(_board("JT98"))
+    assert "straight draw" not in _all_groups(_board("JT98"))
+
+
+# Suit-based filter generation (no evaluation or expression parsing).
+@pytest.mark.parametrize(
+    ("board", "expected_categories"),
+    [
+        ("AsKhQc", {"bdfd", "2bdfd"}),  # rainbow flop
+        ("AsQs7h", {"fd", "bdfd"}),  # two-tone flop
+        ("AsQs7s", {"flush"}),  # monotone flop
+        ("AsQsKhJh", {"fd", "2fd"}),  # two FDs on turn
+        ("AsQs7h2c", {"fd"}),
+        ("AsQs7s2c", {"flush"}),
+        ("AsQs7s2s", {"flush"}),
+        ("AsKhQc2d", set()),  # rainbow turn
+        ("AsQs7s2h3c", {"flush"}),
+        ("AsQsKhJh2c", set()),
+        ("AsQs7s2s3s", {"flush"}),
+        ("AsKhQc2d3s", set()),
+    ],
+)
+def test_suit_categories_by_texture(board: str, expected_categories: set[str]) -> None:
+    groups = _all_groups(encode_board(board))
     assert set(groups) & SUITED_CATEGORIES == expected_categories
 
 
 @pytest.mark.parametrize("category", ["flush", "fd", "bdfd"])
 def test_single_suit_categories_contain_four_strengths(category: str) -> None:
     board = {
-        "flush": _cards("As", "Qs", "7s"),
-        "fd": _cards("As", "Qs", "7h"),
-        "bdfd": _cards("As", "Kh", "Qc"),
+        "flush": encode_board("AsQs7s"),
+        "fd": encode_board("AsQs7h"),
+        "bdfd": encode_board("AsKhQc"),
     }[category]
     assert _names(_all_groups(board)[category]) == ["nut", "2nd nut", "3rd nut", "low"]
 
 
 def test_flop_fd_accounts_for_all_board_suited_cards() -> None:
-    groups = _all_groups(_cards("As", "Qs", "7h"))
+    groups = _all_groups(encode_board("AsQs7h"))
     assert _expressions(groups["fd"]) == [
         "Kss",
         "Jss!Ks",
@@ -376,7 +591,7 @@ def test_flop_fd_accounts_for_all_board_suited_cards() -> None:
 
 
 def test_monotone_flop_flush_has_nut_ranks_excluding_board_cards() -> None:
-    groups = _all_groups(_cards("As", "Qs", "7s"))
+    groups = _all_groups(encode_board("AsQs7s"))
     assert _expressions(groups["flush"]) == [
         "Kss",
         "Jss!Ks",
@@ -386,8 +601,7 @@ def test_monotone_flop_flush_has_nut_ranks_excluding_board_cards() -> None:
 
 
 def test_rainbow_flop_merges_three_bdfd_suits_by_or() -> None:
-    groups = _all_groups(_cards("As", "Kh", "Qc"))
-
+    groups = _all_groups(encode_board("AsKhQc"))
     assert _expressions(groups["bdfd"]) == [
         "Kss!hh!cc|Ahh!ss!cc|Acc!ss!hh",
         "Qss!Ks!hh!cc|Qhh!Ah!ss!cc|Kcc!Ac!ss!hh",
@@ -397,21 +611,14 @@ def test_rainbow_flop_merges_three_bdfd_suits_by_or() -> None:
 
 
 def test_turn_2fd_combines_both_suit_draws() -> None:
-    groups = _all_groups(_cards("As", "Qs", "Kh", "Jh"))
-
+    groups = _all_groups(encode_board("AsQsKhJh"))
     assert _expressions(groups["fd"]) == [
         "Kss!hh|Ahh!ss",
         "Jss!Ks!hh|Qhh!Ah!ss",
         "Tss!Ks!Js!hh|Thh!Ah!Qh!ss",
         "ss!Ks!Js!Ts!hh|hh!Ah!Qh!Th!ss",
     ]
-
-    assert _names(groups["2fd"]) == [
-        "nut+nut",
-        "nut+noNut",
-        "noNut+noNut",
-    ]
-
+    assert _names(groups["2fd"]) == ["nut+nut", "nut+noNut", "noNut+noNut"]
     assert _expressions(groups["2fd"]) == [
         "KssAhh",
         "Ksshh!Ah|ssAhh!Ks",
@@ -420,7 +627,7 @@ def test_turn_2fd_combines_both_suit_draws() -> None:
 
 
 def test_rainbow_flop_2bdfd_has_three_suit_pairs() -> None:
-    groups = _all_groups(_cards("As", "Kh", "Qc"))
+    groups = _all_groups(encode_board("AsKhQc"))
     assert _names(groups["2bdfd"]) == ["nut+nut", "nut+noNut", "noNut+noNut"]
     assert _expressions(groups["2bdfd"]) == [
         "KssAhh|KssAcc|AhhAcc",
@@ -430,7 +637,7 @@ def test_rainbow_flop_2bdfd_has_three_suit_pairs() -> None:
 
 
 def test_four_suited_board_still_generates_flush_not_fd() -> None:
-    groups = _all_groups(_cards("As", "Ks", "Qs", "Js"))
+    groups = _all_groups(encode_board("AsKsQsJs"))
     assert _expressions(groups["flush"]) == [
         "Tss",
         "9ss!Ts",
@@ -441,7 +648,7 @@ def test_four_suited_board_still_generates_flush_not_fd() -> None:
 
 
 def test_five_suited_board_still_generates_flush() -> None:
-    groups = _all_groups(_cards("As", "Ks", "Qs", "Js", "Ts"))
+    groups = _all_groups(encode_board("AsKsQsJsTs"))
     assert _expressions(groups["flush"]) == [
         "9ss",
         "8ss!9s",
@@ -451,40 +658,45 @@ def test_five_suited_board_still_generates_flush() -> None:
 
 
 def test_suit_specific_categories_do_not_affect_rank_patterns() -> None:
-    rainbow = _cards("As", "Kh", "Qc")
-    monochrome = _cards("As", "Ks", "Qs")
+    rainbow = encode_board("AsKhQc")
+    monochrome = encode_board("AsKsQs")
     assert _rank_groups(rainbow) == _rank_groups(monochrome)
     assert "bdfd" in _all_groups(rainbow)
     assert "flush" in _all_groups(monochrome)
 
 
 def test_suited_expressions_are_invariant_to_board_order() -> None:
-    board = _cards("As", "Kh", "Qc")
+    board = encode_board("AsKhQc")
     assert generate_filters(board) == generate_filters(board[[2, 0, 1]])
-    board = _cards("As", "Qs", "Kh", "Jh")
+    board = encode_board("AsQsKhJh")
     assert generate_filters(board) == generate_filters(board[::-1])
 
 
 def test_generator_does_not_mutate_suited_board() -> None:
-    board = _cards("As", "Qs", "Kh", "Jh")
+    board = encode_board("AsQsKhJh")
     original = board.copy()
     generate_filters(board)
     np.testing.assert_array_equal(board, original)
 
 
 @pytest.mark.parametrize(
-    "cards",
+    "board",
     [
-        ("As", "Ah", "Ks"),
-        ("As", "Ah", "Qs", "Kh"),
-        ("As", "Ah", "Qs", "Kh", "Jc"),
+        "AsAhKs",
+        "AsAhQsKh",
+        "AsAhQsKhJc",
     ],
 )
-def test_suited_categories_support_paired_ranks(cards: tuple[str, ...]) -> None:
-    groups = _all_groups(_cards(*cards))
-    if len(cards) == 3:
-        assert _expressions(groups["fd"])[0] == "Qss"  # As and Ks blocked.
-    elif len(cards) == 4:
-        assert _expressions(groups["fd"])[0] == "Kss!hh|Qhh!ss"
+def test_suited_categories_support_paired_ranks(board: str) -> None:
+    groups = _all_groups(encode_board(board))
+
+    if len(board) == 6:
+        assert _expressions(groups["fd"])[0] == "Qss"
+    elif len(board) == 8:
+        # Both aces have the same rank; suit tie ordering is not significant.
+        assert set(_expressions(groups["fd"])[0].split("|")) == {
+            "Kss!hh",
+            "Qhh!ss",
+        }
     else:
         assert "fd" not in groups
