@@ -187,12 +187,7 @@ def generate_filters(board: NDArray[np.uint8]) -> list[GroupNode]:
     filters: list[GroupNode] = []
     higher: list[str] = []
 
-    _add_patterns(
-        filters,
-        higher,
-        "quad",
-        _quad_patterns(board_ranks, ordered)
-    )
+    _add_patterns(filters, higher, "quad", _quad_patterns(board_ranks, ordered))
     _add_patterns(
         filters, higher, "full house", _full_house_patterns(board_ranks, ordered)
     )

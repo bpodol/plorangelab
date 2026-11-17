@@ -1,4 +1,3 @@
-
 """Unit tests for rank-only automatic filter-expression generation.
 
 These tests inspect the generated tree and strings directly. They deliberately
@@ -110,8 +109,18 @@ def test_tripled_flop_only_generates_quads_and_pocket_pair_full_houses() -> None
 
     assert _expressions(groups["quad"]) == ["A"]
     assert _names(groups["full house"]) == [
-        "KK", "QQ", "JJ", "TT", "99", "88",
-        "77", "66", "55", "44", "33", "22",
+        "KK",
+        "QQ",
+        "JJ",
+        "TT",
+        "99",
+        "88",
+        "77",
+        "66",
+        "55",
+        "44",
+        "33",
+        "22",
     ]
     assert _expressions(groups["full house"])[0] == "KK!A"
 
@@ -162,7 +171,16 @@ def test_unpaired_river_generates_all_rank_pairs() -> None:
 
     assert _names(groups["set"]) == ["AA", "KK", "QQ", "JJ", "TT"]
     assert _names(groups["two pair"]) == [
-        "AK", "AQ", "AJ", "AT", "KQ", "KJ", "KT", "QJ", "QT", "JT",
+        "AK",
+        "AQ",
+        "AJ",
+        "AT",
+        "KQ",
+        "KJ",
+        "KT",
+        "QJ",
+        "QT",
+        "JT",
     ]
     assert _names(groups["board pair"]) == ["A", "K", "Q", "J", "T"]
 
@@ -214,8 +232,22 @@ def test_overpairs_also_exist_on_paired_boards() -> None:
 
 @pytest.mark.parametrize(
     "ranks",
-    ["AKQ", "KK2", "AAA", "KQJ2", "KK23", "AAKK", "AAAK", "AAAA",
-     "AKQJT", "AAKQJ", "AAKKQ", "KKKQJ", "KKKAA", "AAAAK"],
+    [
+        "AKQ",
+        "KK2",
+        "AAA",
+        "KQJ2",
+        "KK23",
+        "AAKK",
+        "AAAK",
+        "AAAA",
+        "AKQJT",
+        "AAKQJ",
+        "AAKKQ",
+        "KKKQJ",
+        "KKKAA",
+        "AAAAK",
+    ],
 )
 def test_exclusions_follow_priority_without_self_contradictions(ranks: str) -> None:
     """Each category except overpairs excludes every previously emitted token."""
