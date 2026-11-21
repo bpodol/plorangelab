@@ -15,7 +15,7 @@ This is the client protocol implemented by `routers/equity_ws.py` and `equity_ws
 ## Connection and session requirements
 
 1. Create a session with `POST /api/sessions`.
-2. Populate at least **two** player slots with ranges matching the desired PLO `mode` (4 or 5). Prepare the optional board and filters through REST.
+2. Configure the session-wide PLO mode using `PUT /api/sessions/{session_id}/mode` before adding player ranges, if PLO5 is required. The default is PLO4. Populate at least two player slots and prepare optional board and filters through REST.
 3. Open `WS /api/sessions/{session_id}/equity/ws`.
 4. Send `start`, or `resume` to attach to a previously submitted session job.
 
@@ -30,7 +30,6 @@ There is no dedicated application-level ping/heartbeat message in these handlers
 ```json
 {
   "type": "start",
-  "mode": 4,
   "target_moe": 0.002
 }
 ```
@@ -38,10 +37,13 @@ There is no dedicated application-level ping/heartbeat message in these handlers
 | Field | Required | Constraint |
 | --- | --- | --- |
 | `type` | Yes | `"start"`. |
-| `mode` | Yes | `4` or `5`. |
 | `target_moe` | No | Number **greater than 0 and at most 0.005**; defaults to **0.002** when omitted. |
 
-A calculation is accepted only if the session is open, there is **no unfinished job**, at least two player slots are occupied, and **all occupied player modes match** the requested mode. Submission uses the application-owned equity executor.
+A calculation is accepted only if the session is open, there is no unfinished job, and at least two player slots are occupied on the active street.
+
+The PLO mode is taken from the session's `RangeManager`, not from the WebSocket request. An extra `mode` field, if sent by an older client, is not used to select the calculation mode.
+
+Submission uses the application-owned equity executor.
 
 **Immediate success acknowledgment:**
 
@@ -184,7 +186,7 @@ The `details` object always has these field names, though several values may be 
 { "type": "error", "detail": "Calculation already running" }
 ```
 
-Examples of other command errors from the router/runtime include `"No calculation to resume"`, `"Job ID does not match"`, `"No running calculation"`, `"Invalid player count or equity mode"`, `"Session expired"`, `"Previous result still being delivered"`, `"Expected a JSON object"`, and `"Unknown command"`. Invalid `start` fields return Pydantic validation error text in `detail`.
+Examples of other command errors from the router/runtime include `"No calculation to resume"`, `"Job ID does not match"`, `"No running calculation"`, `"Invalid player count"`, `"Session expired"`, `"Previous result still being delivered"`, `"Expected a JSON object"`, and `"Unknown command"`. Invalid `start` fields return Pydantic validation error text in `detail`.
 
 **Terminal job error:**
 
@@ -203,9 +205,9 @@ Unexpected calculation exceptions are logged server-side and reduced to the gene
 ## Typical client flow
 
 ```text
-1. REST: create session and configure players/board/filters
+1. REST: create session, select PLO mode if needed, and configure players/board/filters
 2. Open WebSocket for that session
-3. Send {"type":"start","mode":4,"target_moe":0.002}
+3. Send {"type":"start","target_moe":0.002}
 4. Receive {"type":"started","job_id":"..."}
 5. Receive zero or more {"type":"progress",...}
 6. Receive a terminal {"type":"result" | "cancelled" | "error",...}

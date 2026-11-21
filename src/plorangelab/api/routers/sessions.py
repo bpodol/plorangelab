@@ -10,6 +10,7 @@ from ..dependencies import SessionDep, SessionManagerDep, editable_session
 from ..schemas import (
     BoardRequest,
     BoardResponse,
+    ModeRequest,
     PlayerFilterSnapshotResponse,
     SessionResponse,
 )
@@ -30,6 +31,17 @@ def create_session(session_manager: SessionManagerDep):
 
     session_id = session_manager.create_session()
     return SessionResponse(session_id=session_id)
+
+
+@router.put("/{session_id}/mode", status_code=204)
+def change_mode(request: ModeRequest, session: SessionDep):
+    with editable_session(session):
+        try:
+            session.manager.change_mode(request.mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.put("/{session_id}/board", response_model=BoardResponse)

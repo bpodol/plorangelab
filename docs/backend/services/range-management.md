@@ -6,9 +6,9 @@ The range-management services maintain the player ranges used in a PLO4/PLO5 equ
 
 The design separates three responsibilities:
 
-1. **`RangeManager`** coordinates players, the shared board, range input, filter commands, and equity requests.
-2. **`PlayerRangeState`** owns one player's preflop, flop, turn, and river states and manages transitions between them.
-3. **`FilterManager`** owns a single street's hierarchical filter definitions and derives the selected range from their activation states.
+1. **`RangeManager`** owns the shared PLO mode, all existing street states, the active street selection, board transitions, and equity calculation coordination.
+2. **`StreetState`** represents a single street, holding its community board and up to six independent player ranges.
+3. **`PlayerRange`** owns one player's range and filter configuration for a single street, including hierarchical filters, activation states, and derived weighted selections.
 
 The services reuse the stateless [filter expression engine](../filter-engine.md) to evaluate predicates, the [range encoder](../encoding.md) to parse inputs, and the [equity engine](../equity.md) to calculate equities. They do not implement those algorithms themselves.
 
@@ -16,30 +16,47 @@ The services reuse the stateless [filter expression engine](../filter-engine.md)
 
 | File | Responsibility |
 | --- | --- |
-| `src/plorangelab/services/range_manager.py` | Six player slots, shared board, coordinated updates, and equity-engine integration. |
-| `src/plorangelab/services/player_range_state.py` | Board representation, per-street range states, filter carryover, and street invalidation. |
-| `src/plorangelab/services/filter_manager.py` | Filter trees, activation, coverage, effective selections, and cloning. |
+| `src/plorangelab/services/range_manager.py` | Shared PLO mode, street states, board transitions, player range updates, and equity-engine integration. |
+| `src/plorangelab/services/player_range.py` | `PlayerRange`, filter trees, activation, coverage, effective selections, and cloning. |
 
 ```text
 RangeManager
-├── board: Board | None
-├── players[0..5]: PlayerRangeState | None
-│   ├── preflop: StreetState ── FilterManager
-│   ├── flop:    StreetState | None ── FilterManager
-│   ├── turn:    StreetState | None ── FilterManager
-│   ├── river:   StreetState | None ── FilterManager
-│   └── active_street ── one of the states above
-├── ratings: PLO4/PLO5 starting-hand orderings
-└── rank_lookup: five-card ranking tables
+├── mode: PLO4 | PLO5
+├── _active_street: Street
+├── _streets: dict[Street, StreetState]
+│   ├── PREFLOP ── StreetState
+│   │   ├── board: None
+│   │   └── ranges[0..5]: PlayerRange | None
+│   ├── FLOP ──── StreetState (optional)
+│   │   ├── board: Board
+│   │   └── ranges[0..5]: PlayerRange | None
+│   ├── TURN ──── StreetState (optional)
+│   │   ├── board: Board
+│   │   └── ranges[0..5]: PlayerRange | None
+│   └── RIVER ─── StreetState (optional)
+│       ├── board: Board
+│       └── ranges[0..5]: PlayerRange | None
+└── resources: EngineResources
 ```
 
-Each occupied player slot has its own `PlayerRangeState`. A `StreetState` has its own `FilterManager`; it does not share a mutable filter tree with other streets or players.
+`RangeManager` owns all existing street states. The preflop state always exists, while postflop states are created on demand.
+
+Each `StreetState` owns a shared community board and six player slots. Each occupied slot contains an independent `PlayerRange` with its own filter tree and selected weighted range.
+
+`_active_street` identifies the street currently used for filter operations and equity calculations.
 
 ## Player slots and range input
 
-`RangeManager` starts with six empty slots, indexed `0` through `5`. `add_range(input_range, mode, player_index)` parses explicit weighted combinations or percentage notation using `encode_input()` and the appropriate precomputed starting-hand ordering. The result initializes a new `PlayerRangeState` with a preflop `StreetState`.
 
-If a board is already selected, the new player is advanced to that board **before** the slot is replaced. Replacing a slot discards that player's previous range and filter history; `remove_range()` clears the slot.
+`RangeManager` maintains six player slots, indexed `0` through `5`, for each existing street. All players share a single PLO mode (4 or 5), which is managed at the `RangeManager` level.
+
+`add_range(range_input, slot_index)` parses explicit weighted combinations or percentage notation using `encode_input()` and the precomputed starting-hand ordering for the current mode.
+
+The encoded range initializes a new preflop `PlayerRange`. The manager then propagates this range through all existing postflop states, removing hands blocked by each street's community board.
+
+Adding or replacing a range discards the previous range and filter configurations for that slot across all streets. `remove_range(slot_index)` clears the slot across all streets. Other players' ranges and filters remain unchanged.
+
+Updates are atomic: replacement states are prepared before being published, so a failed operation leaves the existing state unchanged.
 
 Player range data uses `EncodedRange`, with index-aligned arrays:
 
@@ -49,6 +66,16 @@ Player range data uses `EncodedRange`, with index-aligned arrays:
 
 The manager uses the same `EngineResources` instance's ratings and ranking tables across requests. It does not load or regenerate those resources itself.
 
+## Shared PLO mode
+
+`RangeManager` owns a single PLO mode shared by all players and streets. New managers default to PLO4 (`mode = 4`).
+
+`change_mode(mode)` switches between PLO4 and PLO5. A mode change is rejected while any player slot isoccupied Player-slot occupancy is consistent across all existing streets, so checking the active street is sufficient Requesting the already active mode is a no-op, even when ranges exist.
+
+Changing the mode does not clear the community board or street states. New player ranges are encoded using the manager's current mode.
+
+The mode is not specified separately when adding player ranges or starting equity calculations.
+
 ## Community board and street state
 
 ### Board representation
@@ -56,13 +83,19 @@ The manager uses the same `EngineResources` instance's ratings and ranking table
 `Board.from_string()` converts a three-, four-, or five-card board string into a `Board` containing:
 
 - `cards`: an encoded, read-only `uint8` array, preserving input card order.
-- `mask`: a `uint64` set of occupied cards, independent of input order.
+- `mask`: a `uint64` bitmask representing the occupied cards, independent of input order.
 
-The mask is used to recognize previously visited boards and test whether a newer board extends an earlier board. Board strings are validated by the shared encoder. The services assume direct callers of `PlayerRangeState.apply_board_change()` supply a valid `Board`.
+`RangeManager.change_board()` validates the input by creating a `Board` and uses its mask to determine board identity and compatibility.
+
+Boards containing the same cards in different orders are considered identical. When transitioning between streets, a previously created board is compatible if all its cards are present in the new board.
+
+Each `StreetState` holds its own `Board` reference. The preflop state has `board = None`.
 
 ### Street-local ranges
 
-Each `StreetState` owns a `FilterManager` whose `base_range` is fixed when the state is created. Its `current_range` and `filtered_coverage` are derived by the manager, not separately maintained by `PlayerRangeState`.
+Each `StreetState` contains a shared `Board | None` and six player slots. Each occupied slot holds an independent `PlayerRange` for that street.
+
+A `PlayerRange` owns its `base_range`, filter tree, current filtered range, and weighted coverage. Its base range is established when the street state or player range is created.
 
 When advancing to a newly created street, the new base range is constructed from the **current filtered range of the latest compatible earlier street**, after removing hands blocked by the new community board:
 
@@ -83,7 +116,11 @@ Only the **hands and weights** carry forward; the previous street's filter defin
 
 ### Reusing and invalidating street states
 
-`apply_board_change()` compares board masks and preserves an existing street state when its board is still applicable. Incompatible states are replaced or discarded.
+`RangeManager.change_board()` selects the target street using the number of community cards and determines state compatibility using board masks.
+
+When the target street already exists with an identical board mask, its state is reused. Later streets are discarded.
+
+For a new board, the manager preserves compatible earlier street states, creates the target state from the nearest surviving parent, and discards incompatible states. All players follow the same street transition.
 
 | Operation | Existing state behavior |
 | --- | --- |
@@ -101,7 +138,7 @@ The filtering baseline is **street-relative**: the new street's `base_range` may
 
 ## Filter trees
 
-Each `FilterManager` owns a tree of two node kinds:
+Each `PlayerRange` owns a tree of two node kinds:
 
 - **`Filter`**: a saved expression, a read-only Boolean selection aligned with the street's `base_range`, weighted membership coverage, and an `active` flag.
 - **`FilterGroup`**: a named collection of filters and/or nested groups, with its own membership coverage and `active` flag.
@@ -165,7 +202,7 @@ Consequently, a new turn can begin at `filtered_coverage == 1.0` even though its
 
 ### Derived state and read operations
 
-`FilterManager` maintains three derived values:
+`PlayerRange` maintains three derived values:
 
 | Property | Meaning |
 | --- | --- |
@@ -207,7 +244,7 @@ Filter and group mutations return the updated `PlayerFilterSnapshot` for the aff
 
 This also applies to `change_board(None)`, which returns the resulting preflop snapshots after clearing the board.
 
-Snapshots are produced from the published player state. A failed mutation does not publish a partially modified state.
+For filter mutations, snapshots are constructed from the modified clone before it is published. If mutation or snapshot construction fails, the original player state remains unchanged.
 
 ### Snapshot immutability
 
@@ -219,32 +256,46 @@ However, freezing the dataclass does not make its nested dictionaries deeply imm
 
 ### Player edits
 
-`RangeManager._edit_player()` performs a **clone–modify–publish** operation:
+`RangeManager._edit_player()` performs a **clone-modify-publish** operation for the affected player's active-street range:
 
-```text
-1. Find the existing player.
-2. Clone the player and its street-local filter managers.
-3. Apply the requested edit to the clone.
-4. Replace the player slot only after the edit succeeds.
-```
+1. Retrieve the `PlayerRange` from the active `StreetState`.
+2. Clone that `PlayerRange`, including its mutable filter-tree configuration.
+3. Apply the requested mutation and construct a `PlayerFilterSnapshot` from the clone.
+4. Publish the clone by replacing only the affected slot in the active street.
 
-A failed filter operation leaves the original player in the slot unchanged. The manager uses this mechanism for adding/deleting filters, creating groups, toggling activation, and clearing filters.
+If mutation or snapshot construction fails, the original `PlayerRange` remains unchanged.
+
+Other players and inactive street states are not cloned when editing a filter. The same mechanism handles filter creation, deletion, activation, group creation, and clearing.
 
 ### Shared-board edits
 
-`change_board()` and `clear_board()` build a new player list and update clones of **all** occupied players before publishing the replacement list and board. If any player fails board-card filtering, the previous published players and board remain in place.
+`change_board()` manages street transitions centrally.
 
-This gives the operations **failure atomicity** for ordinary exceptions during preparation. It is **not** a thread-safety or transaction-isolation mechanism: concurrent writes to the same `RangeManager` still require coordination outside these classes.
+If the requested board matches an existing state, the manager reuses that state and discards later streets. Otherwise, it constructs a new target `StreetState` and derives each occupied player's range from the nearest compatible parent state.
+
+The replacement street mapping is published only after the new state has been constructed successfully. Failed preparation leaves the previous street mapping and active street unchanged.
+
+`change_board(None)` returns to preflop and discards postflop states while preserving the preflop ranges and filters.
+
+Adding or replacing a player range also uses prepared replacement street states. It rebuilds that player's range across all existing streets before publishing the updated mapping.
+
+These operations provide failure atomicity for ordinary exceptions during preparation, not general transaction isolation or automatic thread safety.
 
 ### Copying strategy
 
-Cloning copies mutable player, street, and filter-tree configuration while reusing encoded range arrays, board objects, and read-only leaf-selection masks. Filter and group objects are reconstructed so changes to their activation flags in a clone do not mutate the original manager's tree.
+Filter mutations clone only the affected `PlayerRange` for the active street. The clone reconstructs mutable filter and group objects while sharing immutable-by-convention encoded range arrays and read-only Boolean selection masks.
 
-The design relies on callers treating shared encoded arrays and other exposed mutable-looking data as immutable by convention. The public state objects are not a comprehensive defensive-copy boundary.
+Board transitions reuse compatible `StreetState` objects. Newly created streets receive new `PlayerRange` objects derived from their parent ranges.
+
+Adding or removing a player constructs replacement `StreetState` objects with copied six-slot lists, preserving other players' existing `PlayerRange` objects.
+
+The implementation relies on callers treating shared encoded arrays and exposed data as immutable by convention. It is not a comprehensive defensive-copy boundary.
 
 ## Equity calculation integration
 
-`RangeManager.calculate_equity()` gathers the `current_range` of every occupied slot, preserving ascending slot order. It passes those ranges, the shared board, the selected PLO mode, and the shared `rank_lookup` to `compute_equity()`.
+`RangeManager.calculate_equity()` gathers the `current_range` of every occupied slot in the active `StreetState`, preserving ascending slot order.
+
+It passes those ranges, the active street's board, the manager's session-wide PLO mode, and the shared ranking resources to `compute_equity()`.
 
 The method forwards optional Monte Carlo progress callbacks, a cancellation event, and a target margin of error. It delegates sampling, exact enumeration, input validation, and statistics to the [equity engine](../equity.md).
 
@@ -256,14 +307,14 @@ Its return value is a pair:
 
 `player_indices` maps the returned equity values back to the original six slots. For example, if slots `0`, `2`, and `5` are occupied, the result indices are `[0, 2, 5]`, and the three equity values use that same order.
 
-The shared calculation mode must be compatible with all occupied ranges. A mixed PLO4/PLO5 configuration is not normalized by `RangeManager`; the delegated equity engine rejects incompatible hand dimensions. The engine also enforces its own player-count requirements.
+The calculation mode is owned by `RangeManager`. All player ranges are encoded using that shared mode, so the manager does not support mixed PLO4/PLO5 player configurations. The equity engine independently validates its input requirements, including the number of participating players.
 
 ## Boundaries and current constraints
 
 - **No persistence in this layer.** These classes maintain in-memory state; they do not save range/filter state to a database.
 - **No API or session lifecycle.** HTTP/WebSocket endpoints, session ownership, and job scheduling are handled by other components.
 - **No new filter algorithm.** Hand predicates are evaluated by `plorangelab.filters`; this layer combines and manages the returned selections.
-- **One shared board per manager.** All occupied players transition against the same community cards.
+- **Shared board per street.** Each `StreetState` stores one board shared by all players on that street. `RangeManager` owns all existing street states and selects one active street.
 - **Filter carryover is by range, not by definition.** Later streets start from the parent street's currently selected hands, with no copied filter tree.
 - **State restoration is limited.** Compatible previously held streets may be reused, but invalidated street states are discarded rather than kept in an undo/history store.
 - **No built-in concurrent-mutation protection.** Clone-based publishing protects against failed edits, not races between simultaneous requests.

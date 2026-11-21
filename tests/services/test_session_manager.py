@@ -37,8 +37,8 @@ def test_create_session(resources: SimpleNamespace, clock: dict[str, float]) -> 
     session = manager.sessions[session_id]
     assert isinstance(session.manager, RangeManager)
     assert session.last_activity == clock["now"]
-    assert session.manager.ratings is resources.ratings
-    assert session.manager.rank_lookup is resources.rank_lookup
+    assert session.manager.resources.ratings is resources.ratings
+    assert session.manager.resources.rank_lookup is resources.rank_lookup
 
 
 def test_sessions_have_independent_range_managers(resources: SimpleNamespace) -> None:
@@ -52,8 +52,8 @@ def test_sessions_have_independent_range_managers(resources: SimpleNamespace) ->
     second = manager.sessions[second_id].manager
 
     assert first is not second
-    assert first.players is not second.players
-    assert first.players == second.players == [None] * 6
+    assert first._current_state.ranges is not second._current_state.ranges
+    assert first._current_state.ranges == second._current_state.ranges == [None] * 6
 
 
 def test_get_session_refreshes_activity(

@@ -59,9 +59,9 @@ def test_http_mutations_rejected_while_calculating(
             )
             assert client.delete(f"{base}/players/0").status_code == 409
 
-            assert session.manager.board is None
-            assert session.manager.players[1] is None
-            assert session.manager.players[0] is not None
+            assert session.manager._current_state.board is None
+            assert session.manager._current_state.ranges[1] is None
+            assert session.manager._current_state.ranges[0] is not None
 
             release.set()
             assert ws.receive_json()["type"] == "result"

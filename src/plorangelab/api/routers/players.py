@@ -41,19 +41,14 @@ def add_range(player_id: PlayerId, request: RangeRequest, session: SessionDep):
 
     with editable_session(session):
         try:
-            session.manager.add_range(
+            added_hands = session.manager.add_range(
                 request.hands,
-                request.mode,
                 player_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        # Report the range after applying the existing board, if any,
-        # rather than the original number of encoded hands.
-        added_hands = session.manager.players[player_id].current_range.hands
-
-        return RangeResponse(hands=len(added_hands))
+        return RangeResponse(hands=added_hands)
 
 
 @router.delete("/{player_id}", status_code=204)

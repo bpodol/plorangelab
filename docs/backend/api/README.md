@@ -13,9 +13,9 @@ Start with this document when investigating **how an incoming request reaches ap
 | [`main.py`](../../../src/plorangelab/api/main.py) | FastAPI application, lifespan startup/shutdown, shared executor, router registration. |
 | [`dependencies.py`](../../../src/plorangelab/api/dependencies.py) | Session resolution, validated player slot indices, locked read/edit guards for REST. |
 | [`schemas.py`](../../../src/plorangelab/api/schemas.py) | Pydantic request/response shapes and basic field validation. |
-| [`routers/sessions.py`](../../../src/plorangelab/api/routers/sessions.py) | Session creation and shared board updates. |
+| [`routers/sessions.py`](../../../src/plorangelab/api/routers/sessions.py) | Session creation, session-wide PLO mode changes, and community board updates. |
 | [`routers/players.py`](../../../src/plorangelab/api/routers/players.py) | Add, replace, and remove player ranges. |
-| [`routers/filters.py`](../../../src/plorangelab/api/routers/filters.py) | Create, retrieve, toggle, clear, and delete filters/groups. |
+| [`routers/filters.py`](../../../src/plorangelab/api/routers/filters.py) | Create, activate, clear, and delete filters/groups. |
 | [`routers/equity_ws.py`](../../../src/plorangelab/api/routers/equity_ws.py) | WebSocket connection and `start` / `resume` / `cancel` command handling. |
 | [`equity_ws_runtime.py`](../../../src/plorangelab/api/equity_ws_runtime.py) | Session-job coordination, thread-to-event-loop progress bridge, terminal message creation. |
 
@@ -28,7 +28,7 @@ FastAPI app (main.py)
 │
 ├── REST routers (sessions, players, filters)
 │   └── dependencies.py → Session → RangeManager
-│       └── PlayerRangeState → FilterManager
+│       └── StreetState → PlayerRange
 │
 └── WebSocket router (equity_ws.py)
     └── equity_ws_runtime.py
@@ -51,23 +51,23 @@ The four routers are registered on the FastAPI application at **module initializ
 
 On application shutdown, the lifespan handler calls `session_manager.clear()` to close registered sessions and **request** cancellation of their unfinished jobs. It then calls `executor.shutdown(wait=True, cancel_futures=True)` through `asyncio.to_thread()`. Queued futures can be cancelled; already-running workers must finish cooperatively before shutdown returns.
 
-The session registry, equity jobs, progress snapshots, and WebSocket subscriptions are **process-local and in memory**. The uploaded code does not implement persistence or cross-process synchronization for these objects.
+The session registry, equity jobs, progress snapshots, and WebSocket subscriptions are **process-local and in memory**. The current implementation does not provide persistence or cross-process synchronization for these objects.
 
 ## REST request path
 
 A typical filter mutation follows this path:
 
 ```text
-Client → routers/filters.py
-          ↓ FastAPI parses path, query, JSON body
+Client -> routers/filters.py
+          v FastAPI parses path, query, JSON body
        dependencies.get_session()
-          ↓ SessionManager.get_session(session_id)
+          v SessionManager.get_session(session_id)
        editable_session(session)
-          ↓ acquire Session.lock; verify open and no unfinished job
+          v acquire Session.lock; verify open and no unfinished job
        session.manager.add_filter(...)
-          ↓ PlayerRangeState → FilterManager → filter evaluator
+          v active StreetState -> PlayerRange -> filter evaluator
        RangeManager returns PlayerFilterSnapshot
-          ↓ PlayerFilterSnapshotResponse validates and serializes
+          v PlayerFilterSnapshotResponse validates and serializes
        HTTP JSON
 ```
 
@@ -77,12 +77,12 @@ Client → routers/filters.py
 
 | Guard | Checks while holding `Session.lock` | REST use |
 | --- | --- | --- |
-| `locked_session(session)` | Session is not closed; otherwise 404. | Filter reads. |
-| `editable_session(session)` | Same closed check, plus no unfinished equity job; otherwise 409. | Board, range, and filter writes. |
+| `locked_session(session)` | Session is not closed; otherwise 404. | Available for protected reads; the removed filter-read routes no longer use it. |
+| `editable_session(session)` | Same closed check, plus no unfinished equity job; otherwise 409. | Mode, board, player-range, and filter mutations. |
 
 `locked_session()` rechecks `session.closed` because deletion can occur between dependency resolution and the protected operation. `editable_session()` also prevents a running equity calculation from observing concurrent **API-mediated range mutations**. This is a convention enforced at these API entry points, not an automatic thread-safety feature of `RangeManager`.
 
-`PlayerId` validates path indices **0–5**. Pydantic models validate fields and simple constraints; deeper checks such as card notation, filter expressions, invalid group paths, and range availability happen in the services. The REST routers generally convert service `ValueError` to **HTTP 422**. Read endpoints for missing filters instead convert those errors to **HTTP 404**.
+`PlayerId` validates path indices **0–5**. Pydantic models validate fields and simple constraints; deeper checks such as card notation, filter expressions, invalid group paths, and range availability happen in the services. The REST routers generally convert service `ValueError` exceptions to HTTP 422. The mode endpoint also converts the `RuntimeError` raised when attempting to change mode with active player ranges into HTTP 409.
 
 ### Snapshot responses
 
@@ -156,7 +156,7 @@ The job's `Future` can finish after submission but before the client receives `s
 
 ## Current scope and limitations
 
-- Four routers are registered: session/board REST, player REST, filter REST, and equity WebSocket. The uploaded code does **not** expose REST endpoints to delete or enumerate sessions.
+- Four routers are registered: session/board REST, player REST, filter REST, and equity WebSocket. The current implementation does **not** expose REST endpoints to delete or enumerate sessions.
 - Session expiration is lazy: `SessionManager.get_session()` checks a **30-minute** inactivity timeout, except while a job is unfinished. It does not run a periodic expiration sweep.
 - No authentication, durable storage, distributed session registry, multi-worker coordination, or general broadcast subscription implementation appears in the reviewed API modules. Do not assume they are supplied by this layer.
 - WebSocket command-level errors are JSON `error` messages; invalid JSON syntax is not explicitly caught in the router's receive loop.

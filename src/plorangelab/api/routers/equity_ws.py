@@ -128,7 +128,6 @@ async def equity_websocket(websocket: WebSocket, session_id: str) -> None:
                 try:
                     request = EquityRequest.model_validate(
                         {
-                            "mode": message.get("mode"),
                             "target_moe": message.get("target_moe", 0.002),
                         }
                     )

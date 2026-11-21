@@ -28,13 +28,7 @@ def test_websocket_validates_equity_request(client: TestClient) -> None:
         ws.send_json(start_message())
         message = ws.receive_json()
         assert message["type"] == "error"
-        assert "player count or equity mode" in message["detail"]
-
-        add_player(client, session_id, 4, "KsKhTd9c8s", mode=5)
-        ws.send_json(start_message())
-        message = ws.receive_json()
-        assert message["type"] == "error"
-        assert "player count or equity mode" in message["detail"]
+        assert "player count" in message["detail"]
 
         ws.send_json(start_message(target_moe=0))
         message = ws.receive_json()
@@ -100,8 +94,12 @@ def test_websocket_progress_and_sparse_slot_results(
     assert kwargs["board"].shape == (3,)
 
     session = client.app.state.session_manager.sessions[session_id]
-    assert kwargs["players"][0] is session.manager.players[0].current_range
-    assert kwargs["players"][1] is session.manager.players[4].current_range
+    assert (
+        kwargs["players"][0] is session.manager._current_state.ranges[0].current_range
+    )
+    assert (
+        kwargs["players"][1] is session.manager._current_state.ranges[4].current_range
+    )
     assert (
         kwargs["rank_lookup"] is client.app.state.session_manager.resources.rank_lookup
     )

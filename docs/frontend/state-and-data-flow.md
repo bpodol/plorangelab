@@ -13,11 +13,11 @@ and application workflows, see [Frontend Architecture](README.md).
 
 | Source | Responsibility |
 | --- | --- |
-| `src/App.tsx` | Owns the session ID, editable board string, selected PLO mode, board/session loading and errors; connects hooks to UI components. |
+| `src/App.tsx` | Owns the session ID, editable board string, confirmed PLO mode, mode-change state, board/session loading, and errors; connects hooks to UI components. |
 | `src/hooks/usePlayerRanges.ts` | Owns six player states, handles range and filter mutations, and applies backend-returned filter snapshots. |
 | `src/hooks/useEquitySocket.ts` | Owns the equity WebSocket connection lifecycle, latest server message, UI status, and tracked job ID. |
 | `src/api/client.ts` | Shared `fetch` helper for REST responses and FastAPI error messages. |
-| `src/api/sessions.ts` | Session creation and board-update REST calls. |
+| `src/api/sessions.ts` | Session creation, PLO mode changes, and board-update REST calls. |
 | `src/api/players.ts` | Player-range PUT and DELETE calls. |
 | `src/api/filters.ts` | Typed filter and group REST operations that return updated player snapshots after mutations. |
 | `src/api/equity.ts` | Equity WebSocket message types and connection creation. |
@@ -33,10 +33,10 @@ See [Frontend Architecture](README.md#ui-components) for component responsibilit
 App.tsx
 ├── local state:
 │   ├── sessionId, board input, mode
-│   ├── isCreatingSession, isApplyingBoard
+│   ├── isCreatingSession, isApplyingBoard, isChangingMode
 │   └── error, boardMessage
-├── sessions API: createSession(), changeBoard()
-├── usePlayerRanges(sessionId, mode)
+├── sessions API: createSession(), changeMode(), changeBoard()
+├── usePlayerRanges(sessionId)
 │   ├── six PlayerState entries (including filterSnapshot)
 │   ├── range operations: add / delete
 │   ├── filter operations:
@@ -72,7 +72,8 @@ The **backend owns the authoritative session, applied ranges, board, and equity 
 | --- | --- | --- |
 | `App` | `sessionId` | Set after `createSession()` succeeds; initially `null`. |
 | `App` | `board` | Updated as the user types; sent to the backend only when applied. |
-| `App` | `mode` | User chooses PLO4 or PLO5; the selector is disabled while any player has an applied range or is loading. |
+| `App` | `mode` | Initialized to PLO4; updated only after `changeMode()` succeeds. The backend owns the authoritative session mode. |
+| `App` | `isChangingMode` | Tracks an in-flight mode request. Disables the selector and player range inputs until the request finishes. |
 | `App` | `isCreatingSession` | Tracks automatic session initialization and manual retries. Initially `true`. |
 | `App` | `isApplyingBoard`, `error`, `boardMessage` | Tracks board application loading and feedback. `error` is also used for session creation failures. |
 | `usePlayerRanges` | `players: PlayerState[6]` | Local edits, range-request results, and board-returned snapshots (effective hand counts and current-street filter state). |
@@ -91,7 +92,7 @@ The **editable `range` string is not necessarily the range applied on the backen
 
 Filter mutations share `runFilterMutation()`, which synchronizes the effective hand count and filter snapshot using the backend response.
 
-`App` maintains two independent loading states: `isCreatingSession` for session initialization and retries, and `isApplyingBoard` for board updates. This prevents one operation from incorrectly affecting the loading indicator of the other.
+`App` maintains separate loading states for session creation (`isCreatingSession`), board application (`isApplyingBoard`), and mode changes (`isChangingMode`). These allow each workflow to display its own pending state and apply appropriate UI restrictions.
 
 ## REST request flows
 
@@ -111,13 +112,26 @@ Session creation does not block the UI with a loading indicator, but session-dep
 
 Creating a session does not fetch saved player state: `usePlayerRanges()` starts with six empty local slots.
 
-### 2. Add or replace a player range
+### 2. Change session mode
+
+1. A new session starts with PLO4 as its default mode.
+2. When the user selects a different mode, `App` calls `changeMode(sessionId, nextMode)`.
+3. The API client sends `PUT /api/sessions/{session_id}/mode` with `{ "mode": nextMode }`.
+4. While the request is pending, `isChangingMode` disables the selector and player range inputs.
+5. On HTTP 204 success, `App` updates its local `mode`.
+6. If the request fails, the previous mode is preserved and an error is displayed.
+
+The selector is unavailable while any player has an applied range or is loading. The backend separately rejects changing to a different mode when player ranges exist.
+
+Mode selection belongs to the session; subsequent player-range and equity requests use the backend's session-wide mode.
+
+### 3. Add or replace a player range
 
 ```text
 PlayerRangeInput event
     -> App callback
     -> usePlayerRanges.handleAddRange(playerId)
-    -> api/players.addRange(sessionId, playerId, range, mode)
+    -> api/players.addRange(sessionId, playerId, range)
     -> backend replaces that player's range
     -> { hands: number }
     -> update PlayerState:
@@ -126,17 +140,19 @@ PlayerRangeInput event
     -> React rerender
 ```
 
-`handleAddRange()` returns without a request if no session exists. It sets the individual player's loading state, uses the current editable range and mode, then stores the hand count returned by the backend. Errors are stored on that player rather than rethrown.
+`handleAddRange()` returns without a request if no session exists. It sets the individual player's loading state, submits the current editable range, and stores the hand count returned by the backend.
 
-A successful PUT **replaces** the backend player state, including any previous street and filter state. Consequently, `handleAddRange()` clears the local `filterSnapshot` after a successful response. The endpoint returns a hand count rather than a complete player snapshot.
+The backend interprets the range using the session-wide PLO mode; the player request does not contain a separate `mode` field. Errors are stored on the player rather than rethrown.
+
+A successful PUT replaces that player's range and filter configurations across all existing backend street states. Consequently, `handleAddRange()` clears the local `filterSnapshot` after a successful response. The endpoint returns a hand count rather than a complete player snapshot.
 
 Updating the local input string without applying it leaves the backend range unchanged.
 
-### 3. Delete a player range
+### 4. Delete a player range
 
 `handleDeleteRange()` calls the players API DELETE method. On success, it clears the local input, resets the hand count to zero, clears `filterSnapshot`, and marks the slot as not applied. On failure, it retains the previous range-related state and records an error. Empty backend slots may also be deleted successfully.
 
-### 4. Apply or clear the board
+### 5. Apply or clear the board
 
 1. `App` sets `isApplyingBoard` to `true` and clears previous feedback.
 2. The board input is trimmed; an empty string becomes `null` (clear board).
@@ -154,9 +170,9 @@ The backend is responsible for board validation, card blockers, street transitio
 
 The frontend applies the returned snapshots **only after a successful response**. It does not reconstruct or carry over filter trees between streets itself.
 
-Board application and session creation use independent loading states.
+Session creation, board application, and mode changes use separate loading states.
 
-### 5. Filter mutations
+### 6. Filter mutations
 
 `usePlayerRanges()` exposes five filter-management operations:
 
@@ -210,11 +226,13 @@ The UI receives `equityStatus`, `equityMessage`, `isConnected`, `startEquity`, a
 ### Start a calculation
 
 1. The UI calls `startEquity(mode, targetMoe)`.
-2. The hook sends a `start` JSON command **only if the socket is open**; otherwise it returns without sending.
-3. The backend validates the request and submits an equity job.
+2. The hook sends a `start` command only if the socket is open; otherwise it returns without sending.
+3. The backend uses the session's configured PLO mode and validates the calculation request.
 4. On `started`, the hook records `job_id` in `jobRef` and sets status to `running`.
 5. `progress` messages update the latest message and keep status `running`.
 6. A terminal message updates status and clears the tracked job ID where implemented.
+
+The mode argument remains part of the current frontend hook interface and is sent by the current client, but the backend does not use a WebSocket-supplied mode to configure equity. The authoritative mode is stored in `RangeManager`.
 
 Sending `start` is not the same as a server acknowledgement. The hook does not mark the calculation as running until it receives `started`.
 

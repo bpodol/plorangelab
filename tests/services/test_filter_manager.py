@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 
 from plorangelab.encoder import EncodedRange, encode_range
-from plorangelab.services.filter_manager import (
+from plorangelab.services.player_range import (
     FilterAddress,
     FilterGroup,
-    FilterManager,
+    PlayerRange,
 )
 
 HANDS = "AsKsQhJc@100,AdKhQcJd@50,AcAhQhJc@25,KsKhQhJh@80,9s8s7s6s@90,2c3d4h5s@60"
@@ -19,8 +19,8 @@ def base() -> EncodedRange:
 
 
 @pytest.fixture
-def manager(base: EncodedRange) -> FilterManager:
-    return FilterManager(base, 4)
+def manager(base: EncodedRange) -> PlayerRange:
+    return PlayerRange(base, 4)
 
 
 def indices(base: EncodedRange, current: EncodedRange) -> set[int]:
@@ -256,7 +256,7 @@ def test_active_group_allows_saving_nonmatching_filter(manager, base):
 
 def test_five_card_game_mode_filters_work_with_real_evaluator():
     base = encode_range("AsKsQsJhTc,AdKdQhJcTs,AcAhKdQdJs", 5)
-    manager = FilterManager(base, 5)
+    manager = PlayerRange(base, 5)
     manager.create_filter("Ass", name="two-spades")
     manager.set_active(FilterAddress("two-spades"), True)
     assert indices(base, manager.current_range) == {0}
@@ -275,7 +275,7 @@ def test_filter_address_value_equality_and_hashability() -> None:
 
 
 def test_get_selection_returns_independent_read_only_snapshot(
-    manager: FilterManager,
+    manager: PlayerRange,
 ) -> None:
     manager.create_filter("A")
     address = FilterAddress("A")
@@ -287,7 +287,7 @@ def test_get_selection_returns_independent_read_only_snapshot(
     assert manager.get_selection(address, active_only=True).flags.writeable is False
 
 
-def test_active_only_group_coverage_and_membership(manager: FilterManager) -> None:
+def test_active_only_group_coverage_and_membership(manager: PlayerRange) -> None:
     manager.create_group("premium")
     manager.create_filter("A", path=("premium",))
     manager.create_filter("K", path=("premium",))
@@ -305,7 +305,7 @@ def test_active_only_group_coverage_and_membership(manager: FilterManager) -> No
 
 
 def test_delete_active_root_restores_base(
-    manager: FilterManager, base: EncodedRange
+    manager: PlayerRange, base: EncodedRange
 ) -> None:
     manager.create_filter("A")
     manager.set_active(FilterAddress("A"), True)
@@ -314,7 +314,7 @@ def test_delete_active_root_restores_base(
     assert not manager.filters
 
 
-def test_root_filter_activation_is_idempotent(manager: FilterManager) -> None:
+def test_root_filter_activation_is_idempotent(manager: PlayerRange) -> None:
     manager.create_filter("A")
     address = FilterAddress("A")
     manager.set_active(address, True)

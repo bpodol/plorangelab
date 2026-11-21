@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import type { FilterTree, FilterNode, PlayerFilterSnapshot } from '../types';
+import type { PlayerFilterSnapshot } from '../types';
 
 export type FilterResource = 'filters' | 'groups';
 
@@ -43,35 +43,6 @@ function nodeUrl(
   path.forEach((group) => params.append('path', group));
 
   return `${url}?${params.toString()}`;
-}
-
-/**
- * Retrieve the complete filter hierarchy for a player's active street.
- *
- * @returns A tree keyed by root-level filter and group names.
- */
-export function getFilters(sessionId: string, playerId: number): Promise<FilterTree> {
-  return apiRequest<FilterTree>(`${baseUrl(sessionId, playerId)}/filters`);
-}
-
-/**
- * Retrieve a saved filter or group by name and parent path.
- *
- * Group responses include recursively nested descendants.
- *
- * @param resource - Filter or group URL.
- * @param name - Target node name.
- * @param path - Parent group hierarchy, or an empty array for root nodes.
- * @returns Metadata for the addressed filter or group.
- */
-export function getFilter(
-  sessionId: string,
-  playerId: number,
-  resource: FilterResource,
-  name: string,
-  path: string[] = [],
-): Promise<FilterNode> {
-  return apiRequest<FilterNode>(nodeUrl(sessionId, playerId, resource, name, path));
 }
 
 /**

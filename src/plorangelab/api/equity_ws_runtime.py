@@ -64,17 +64,16 @@ async def submit_equity_calculation(
                 return None, "Calculation already running"
 
             players = [
-                player for player in session.manager.players if player is not None
+                player
+                for player in session.manager._current_state.ranges
+                if player is not None
             ]
-            if len(players) < 2 or any(
-                player.mode != request.mode for player in players
-            ):
-                return None, "Invalid player count or equity mode"
+            if len(players) < 2:
+                return None, "Invalid player count"
 
             job = start_equity_job(
                 manager=session.manager,
                 executor=executor,
-                mode=request.mode,
                 target_moe=request.target_moe,
                 on_finished=session.touch,
             )

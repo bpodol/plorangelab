@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 test('initializes six empty players', () => {
-  const { result } = renderHook(() => usePlayerRanges('test-session', 4));
+  const { result } = renderHook(() => usePlayerRanges('test-session'));
 
   expect(result.current.players).toHaveLength(6);
 
@@ -29,7 +29,7 @@ test('initializes six empty players', () => {
 });
 
 test('updates only the selected player', () => {
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   act(() => {
     result.current.updatePlayer(2, { range: 'AsAhQcJd' });
@@ -45,7 +45,7 @@ test('updates only the selected player', () => {
 });
 
 test('updates hand counts after a board change', () => {
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   act(() => {
     result.current.updatePlayer(0, { hasAppliedRange: true });
@@ -62,7 +62,7 @@ test('updates hand counts after a board change', () => {
 test('adds a range and updates player state', async () => {
   vi.mocked(addRange).mockResolvedValue({ hands: 150 });
 
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   act(() => {
     result.current.updatePlayer(2, { range: 'AsAhQcJd' });
@@ -72,7 +72,7 @@ test('adds a range and updates player state', async () => {
     await result.current.handleAddRange(2);
   });
 
-  expect(addRange).toHaveBeenCalledWith('session-123', 2, 'AsAhQcJd', 4);
+  expect(addRange).toHaveBeenCalledWith('session-123', 2, 'AsAhQcJd');
 
   expect(result.current.players[2]).toMatchObject({
     range: 'AsAhQcJd',
@@ -88,7 +88,7 @@ test('adds a range and updates player state', async () => {
 test('stores an error when adding a range fails', async () => {
   vi.mocked(addRange).mockRejectedValue(new Error('Invalid range'));
 
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   act(() => {
     result.current.updatePlayer(1, { range: 'invalid' });
@@ -110,7 +110,7 @@ test('stores an error when adding a range fails', async () => {
 test('deletes a range and resets player state', async () => {
   vi.mocked(deleteRange).mockResolvedValue(undefined);
 
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   act(() => {
     result.current.updatePlayer(1, {
@@ -139,7 +139,7 @@ test('deletes a range and resets player state', async () => {
 test('preserves the range when deletion fails', async () => {
   vi.mocked(deleteRange).mockRejectedValue(new Error('API request failed: 409 Conflict'));
 
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   act(() => {
     result.current.updatePlayer(1, {
@@ -171,7 +171,7 @@ test('sets isLoading while adding a range', async () => {
 
   vi.mocked(addRange).mockReturnValue(pendingRequest);
 
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   // Start the request without waiting for it to finish.
   let operation!: Promise<void>;
@@ -195,7 +195,7 @@ test('sets isLoading while adding a range', async () => {
 });
 
 test('applies board snapshots to the correct player slots', () => {
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   const snapshot: PlayerFilterSnapshot = {
     base_hands: 100,
@@ -251,7 +251,7 @@ test('applies board snapshots to the correct player slots', () => {
 test('replacing a range clears the previous filter snapshot', async () => {
   vi.mocked(addRange).mockResolvedValue({ hands: 3 });
 
-  const { result } = renderHook(() => usePlayerRanges('session-123', 4));
+  const { result } = renderHook(() => usePlayerRanges('session-123'));
 
   act(() => {
     result.current.updatePlayer(0, {
@@ -271,7 +271,7 @@ test('replacing a range clears the previous filter snapshot', async () => {
     await result.current.handleAddRange(0);
   });
 
-  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'AsAhKdQc', 4);
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'AsAhKdQc');
 
   expect(result.current.players[0]).toMatchObject({
     numberOfHands: 3,
