@@ -2,21 +2,22 @@
 
 ## Overview
 
-The `plorangelab.filters` package parses card-based filter expressions, compiles them into reusable instructions, and evaluates those instructions against PLO4/PLO5 hand ranges represented by card bitmasks.
+The `plorangelab.filters` package parses card-based filter expressions, compiles them into reusable instructions, and evaluates those instructions against PLO4/PLO5 hand ranges represented by card bitmasks. It also provides `generate_filters(board)` to construct board-dependent filter definitions.
 
-It is a **stateless evaluation engine**: given an expression and an array of hand masks, it returns a Boolean selection indicating which hands match. It does **not** modify ranges or weights, manage filter groups or activation, compute coverage, or combine a player's active filters. Those tasks belong to the separate filter-management layer.
+The **expression evaluator** is stateless: given an expression and an array of hand masks, it returns a Boolean selection indicating which hands match. The generator also returns definitions rather than mutating player state. Neither component changes ranges or weights, manages activation, computes weighted coverage, or combines a player's active filters. Those tasks belong to the separate filter-management layer.
 
-The engine operates on **hole-card membership**, not on made-hand strength, board texture, or draw classification.
+The expression language operates on **hole-card membership**, not directly on made-hand strength or draws. The separate generator uses a board to produce expressions for rank-based, straight, and suited categories; the evaluator then applies those expressions to hole-card ranges.
 
 ### Source files
 
 | File | Responsibility |
 | --- | --- |
-| `src/plorangelab/filters/__init__.py` | Exposes the three main operations: `encode_filter`, `compile_filter`, and `evaluate_filter`. |
+| `src/plorangelab/filters/__init__.py` | Exposes `encode_filter`, `compile_filter`, `evaluate_filter`, and `generate_filters`. |
 | `src/plorangelab/filters/models.py` | Defines the immutable expression-tree nodes and card requirements. |
 | `src/plorangelab/filters/parser.py` | Parses card tokens and logical operators into an abstract syntax tree (AST). |
 | `src/plorangelab/filters/compiler.py` | Converts an AST into postfix instructions and NumPy-based card-requirement tables. |
 | `src/plorangelab/filters/evaluator.py` | Runs the compiled instructions against hand masks with Numba-compiled kernels. |
+| `src/plorangelab/filters/filter_generator.py` | Builds nested `GroupNode` and `FilterNode` definitions from the supplied encoded board. |
 
 ## Processing pipeline
 
@@ -43,6 +44,36 @@ Boolean array aligned with the input hands
 ```
 
 `evaluate_filter()` can also accept a string or AST and perform the preceding steps internally. Supplying a previously compiled program avoids reparsing and recompilation when evaluating the same expression repeatedly.
+
+## Board-dependent filter generation
+
+`generate_filters(board)` derives named filter expressions from a flop, turn, or river board. It accepts a `uint8` array of **3, 4, or 5 encoded cards**; the caller must provide valid, unique cards. The function checks the board length and raises `ValueError` for any other length.
+
+It returns a `list[GroupNode]`. Each `GroupNode(name, filters)` contains named `FilterNode(name, expression)` leaves (or further groups); categories with no applicable patterns are omitted. The generator creates **definitions only**: it does not parse or compile expressions, evaluate hands, compute coverage, or hold filter activation state.
+
+### Generated categories
+
+| Group | Board-dependent rules |
+| --- | --- |
+| `quad`, `full house` | Construct rank requirements from board multiplicities and feasible hole-card ranks, respecting the available cards in a deck. |
+| `set`, `two pair` | Generated for unpaired boards, using pocket pairs matching board ranks and pairs of distinct board ranks, respectively. |
+| `trips`, `board pair` | On paired boards, select applicable matching hole ranks; `board pair` also represents one-pair requirements on unpaired boards. |
+| `overpair` | Pocket pairs above the highest board rank, when no board rank appears three or more times. |
+| `straight` | Enumerate the ten five-rank straight windows, including the ace-low wheel. Exactly three ranks must be available on the board; the remaining two must be required from the hand. Group alternatives by the highest straight they can make. |
+| `flush` | For suits appearing at least three times on the board, require two suited hole cards. |
+| `fd` | On flop or turn, for suits appearing exactly twice on the board, require two suited hole cards. |
+| `bdfd` | On the flop only, for suits appearing once on the board, require two suited hole cards. |
+| `2fd`, `2bdfd` | When two eligible draw suits exist, require two hole cards in each suit. Double-draw leaves are named `nut+nut`, `nut+noNut`, and `noNut+noNut`. |
+
+The suited groups `flush`, `fd`, and `bdfd` have the leaves `nut`, `2nd nut`, `3rd nut`, and `low`. These are based on the highest suited hole-card ranks **not blocked by the board**. Expressions for different eligible suits are combined with OR (`|`).
+
+### Priority and exclusions
+
+- Rank-based made-hand categories share a descending-priority list of hole-rank patterns. Later patterns use `!` exclusions so that a hand satisfying a higher-priority pattern is not also counted in a lower-priority rank filter. `overpair` uses a separate exclusion list.
+- Straight filters have their **own** priority ordering. A two-hole-rank requirement is assigned to its strongest achievable straight, and weaker straight filters exclude stronger straight requirements. Alternatives producing the same straight strength are joined with OR.
+- Single `fd` and `bdfd` expressions exclude a second eligible two-card suit, separating them from their corresponding double-draw groups. Suited-strength expressions also exclude higher available suited ranks within their group.
+
+The priority lists are **not global across all groups**: a hand can match a rank-based, straight, and suited definition simultaneously. The generator does not classify or rank actual player hands. **Straight-draw generation is not implemented.**
 
 ## Expression language
 
@@ -174,7 +205,7 @@ For a precompiled program, `mode` may be omitted because it is stored in `Compil
 
 ## Integration boundary
 
-The filter engine's output is a **selection mask**, not a modified `EncodedRange` or a filter-management state update. The calling layer is responsible for deciding what to do with that selection, including any combination with previously active selections, application of weights, or calculation of coverage.
+The expression evaluator's output is a **selection mask**, while the generator's output is a **definition tree**. Neither is a modified `EncodedRange` or a filter-management state update. The calling layer is responsible for deciding what to do with that selection, including any combination with previously active selections, application of weights, or calculation of coverage.
 
 This keeps the parsing/compilation/evaluation logic independent of filter trees, groups, player sessions, and activation state. Those responsibilities are handled outside `plorangelab.filters`, including by the separate filter-management subsystem.
 
@@ -185,7 +216,7 @@ This keeps the parsing/compilation/evaluation logic independent of filter trees,
 - **Compact representation:** Card sets and hands use 52-bit occupancy masks stored in `uint64` arrays.
 - **Small search depth:** Atomic slot counts are limited to the four or five hole cards supported by the mode.
 - **Mode-specific compilation:** Programs store their mode; callers must supply compatible encoded hands.
-- **No board-aware classification:** The expression language tests hole-card rank, suit, and exact-card membership, not postflop made hands, draws, or board-dependent properties.
+- **Board-aware definitions, board-independent matching:** The generator constructs rank-based definitions from the board, but the expression evaluator itself tests hole-card rank, suit, and exact-card membership without receiving a board.
 - **No cumulative state:** Grouping, activation/deactivation, range coverage, and selection combination are outside this engine.
 - **Validation boundary:** Strings and AST requirements are validated during parsing/compilation, while compiled execution assumes well-formed instructions and valid hand masks.
 

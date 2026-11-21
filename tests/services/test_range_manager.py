@@ -1,7 +1,8 @@
 """Integration tests for RangeManager V2's street-centered range state.
 
-Keep the real encoder, filtering engine, and board sanitization; mock only the
-rating lookup input and the expensive equity computation.
+Keep real encoding, filtering, and board sanitization. Use a tiny deterministic
+auto-filter tree so these tests verify integration and street state, not generator
+rules (which have their own unit tests). Mock expensive equity computation.
 """
 
 from threading import Event
@@ -11,6 +12,8 @@ from unittest.mock import Mock
 import pytest
 
 from plorangelab.encoder import encode_range
+from plorangelab.filters.filter_generator import FilterNode, GroupNode
+from plorangelab.services import player_range as player_range_module
 from plorangelab.services import range_manager as manager_module
 from plorangelab.services.player_range import FilterAddress, PlayerRange
 from plorangelab.services.range_manager import RangeManager, Street
@@ -19,6 +22,20 @@ BASE_RANGE = "AsAhKdQc,KsKhJdTd,QsQhJcTc,9s9h8d8c"
 FLOP = "2c3d5h"
 TURN = "2c3d5h7s"
 RIVER = "2c3d5h7s9d"
+AUTO_GROUP = "__auto_generated__"
+AUTO_LEAF = "aces"
+
+
+def assert_auto_filters(player: PlayerRange) -> None:
+    """Generated definitions exist without automatically restricting the range."""
+    tree = player.get_tree()
+    assert AUTO_GROUP in tree
+    assert tree[AUTO_GROUP]["type"] == "group"
+    assert not tree[AUTO_GROUP]["active"]
+    assert tree[AUTO_GROUP]["filters"][AUTO_LEAF]["type"] == "filter"
+    assert not tree[AUTO_GROUP]["filters"][AUTO_LEAF]["active"]
+    assert player.current_range is player.base_range
+    assert player.filtered_coverage == pytest.approx(1.0)
 
 
 @pytest.fixture
@@ -28,6 +45,15 @@ def manager(monkeypatch: pytest.MonkeyPatch) -> RangeManager:
         manager_module,
         "encode_input",
         lambda text, mode, _rating: encode_range(text, mode),
+    )
+    # Exercise PlayerRange.autogenerate_filters() and its group/leaf wiring,
+    # without depending on the contents of the real generator.
+    monkeypatch.setattr(
+        player_range_module,
+        "generate_filters",
+        lambda _board: [
+            GroupNode(AUTO_GROUP, [FilterNode(AUTO_LEAF, "AA")]),
+        ],
     )
     resources = SimpleNamespace(
         ratings={4: object(), 5: object()},
@@ -50,7 +76,11 @@ def test_add_replace_and_remove_range(manager: RangeManager) -> None:
     assert manager._current_state.board is None
     assert manager._current_state.ranges == [None] * 6
 
-    manager.add_range(BASE_RANGE, 2)
+    snapshot = manager.add_range(BASE_RANGE, 2)
+    assert snapshot.base_hands == 4
+    assert snapshot.filtered_hands == 4
+    assert snapshot.filtered_coverage == pytest.approx(1.0)
+    assert snapshot.filters == {}  # Never generate filters preflop.
     first = player_at(manager, Street.PREFLOP, 2)
     assert first.mode == 4
     assert len(first.base_range.hands) == 4
@@ -118,7 +148,9 @@ def test_change_board_creates_shared_street_without_mutating_preflop(
     assert snapshots[0].base_hands == 4
     assert snapshots[0].filtered_hands == 4
     assert snapshots[0].filtered_coverage == pytest.approx(1.0)
-    assert snapshots[0].filters == {}
+    assert snapshots[0].filters == player_at(manager, Street.FLOP, 0).get_tree()
+    assert_auto_filters(player_at(manager, Street.FLOP, 0))
+    assert_auto_filters(player_at(manager, Street.FLOP, 5))
     assert snapshots[5].base_hands == 1
     assert snapshots[5].filtered_hands == 1
 
@@ -156,8 +188,13 @@ def test_add_range_on_active_board_and_failed_replacement_is_atomic(
     manager: RangeManager,
 ) -> None:
     manager.change_board(FLOP)
-    manager.add_range(BASE_RANGE, 2)
+    snapshot = manager.add_range(BASE_RANGE, 2)
     first_flop = player_at(manager, Street.FLOP, 2)
+    assert snapshot.filters == first_flop.get_tree()
+    assert snapshot.base_hands == 4
+    assert snapshot.filtered_hands == 4
+    assert_auto_filters(first_flop)
+    assert player_at(manager, Street.PREFLOP, 2).get_tree() == {}
     first_preflop = player_at(manager, Street.PREFLOP, 2)
     previous_streets = manager._streets
 
@@ -345,7 +382,7 @@ def test_filtered_preflop_range_carries_to_flop(manager: RangeManager) -> None:
     assert snapshots[0].filtered_coverage == pytest.approx(1.0)
     assert len(flop.base_range.hands) == 1
     assert flop.base_range is not preflop.base_range
-    assert flop.get_tree() == {}
+    assert_auto_filters(flop)
     assert preflop.get_node(FilterAddress("AA")).active
 
 
@@ -361,7 +398,7 @@ def test_board_street_progression_carries_filtered_parent_ranges(
     turn_snapshots = manager.change_board(TURN)
     turn = player_at(manager, Street.TURN, 0)
     assert turn_snapshots[0].base_hands == 1
-    assert turn.get_tree() == {}
+    assert_auto_filters(turn)
     assert len(turn.current_range.masks) == 1
 
     manager.add_group("turn-only", 0)
@@ -370,7 +407,8 @@ def test_board_street_progression_carries_filtered_parent_ranges(
     river_snapshots = manager.change_board(RIVER)
     river = player_at(manager, Street.RIVER, 0)
     assert river_snapshots[0].base_hands == 1
-    assert river.get_tree() == {}
+    assert_auto_filters(river)
+    assert "turn-only" not in river.get_tree()
     assert "turn-only" in updated_turn.get_tree()
     assert flop.get_node(FilterAddress("KK")).active
 
@@ -421,7 +459,9 @@ def test_changing_turn_card_preserves_flop_but_rebuilds_turn_and_river(
     assert manager._current_state is manager._streets[Street.TURN]
     assert manager._streets[Street.FLOP] is flop
     assert manager._streets[Street.TURN] is not old_turn
-    assert player_at(manager, Street.TURN, 0).get_tree() == {}
+    rebuilt = player_at(manager, Street.TURN, 0)
+    assert_auto_filters(rebuilt)
+    assert "old-turn-filter" not in rebuilt.get_tree()
     assert Street.RIVER not in manager._streets
 
 
@@ -454,7 +494,7 @@ def test_skip_street_uses_closest_compatible_parent(manager: RangeManager) -> No
     assert set(manager._streets) == {Street.PREFLOP, Street.FLOP, Street.RIVER}
     assert snapshots[0].base_hands == 1
     assert manager._active_street is Street.RIVER
-    assert player_at(manager, Street.RIVER, 0).get_tree() == {}
+    assert_auto_filters(player_at(manager, Street.RIVER, 0))
 
 
 def test_replace_player_updates_all_cached_streets_only_for_that_slot(
@@ -475,7 +515,10 @@ def test_replace_player_updates_all_cached_streets_only_for_that_slot(
         replacement = player_at(manager, street, 0)
         assert replacement is not old_slot[street]
         assert len(replacement.base_range.hands) == 1
-        assert replacement.get_tree() == {}
+        if street is Street.TURN:  # Only the active street generates filters.
+            assert_auto_filters(replacement)
+        else:
+            assert replacement.get_tree() == {}
         assert player_at(manager, street, 5) is old_other[street]
 
 
@@ -558,3 +601,77 @@ def test_invalid_mode_does_not_reset_state(manager: RangeManager) -> None:
         manager.change_mode(6)
     assert manager.mode == 4
     assert manager._streets is original_streets
+
+
+def test_add_range_generation_failure_does_not_publish_partial_state(
+    manager: RangeManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: range insertion and autogeneration must commit together."""
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    previous_streets = manager._streets
+    previous_flop = player_at(manager, Street.FLOP, 0)
+    previous_preflop = player_at(manager, Street.PREFLOP, 0)
+
+    def fail_generation(_self: PlayerRange, _board: object) -> None:
+        raise ValueError("synthetic generator failure")
+
+    monkeypatch.setattr(PlayerRange, "autogenerate_filters", fail_generation)
+
+    with pytest.raises(ValueError, match="synthetic generator failure"):
+        manager.add_range("JsJhTdTc", 0)
+
+    assert manager._streets is previous_streets
+    assert player_at(manager, Street.FLOP, 0) is previous_flop
+    assert player_at(manager, Street.PREFLOP, 0) is previous_preflop
+
+
+def test_replacing_player_generates_filters_only_for_current_street(
+    manager: RangeManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replacing ranges must not pay to generate filters for inactive streets."""
+    manager.add_range(BASE_RANGE, 0)
+    for board in (FLOP, TURN, RIVER):
+        manager.change_board(board)
+
+    calls: list[object] = []
+    original_generate = PlayerRange.autogenerate_filters
+
+    def track_generation(self: PlayerRange, board) -> None:
+        calls.append(board)
+        original_generate(self, board)
+
+    monkeypatch.setattr(PlayerRange, "autogenerate_filters", track_generation)
+    snapshot = manager.add_range("JsJhTdTc", 0)
+
+    assert len(calls) == 1  # River only, not existing flop/turn.
+    assert calls[0] is manager._current_state.board.cards
+    assert snapshot.base_hands == 1
+    assert snapshot.filtered_hands == 1
+    assert snapshot.filters == player_at(manager, Street.RIVER, 0).get_tree()
+    assert_auto_filters(player_at(manager, Street.RIVER, 0))
+    assert player_at(manager, Street.PREFLOP, 0).get_tree() == {}
+    assert player_at(manager, Street.FLOP, 0).get_tree() == {}
+    assert player_at(manager, Street.TURN, 0).get_tree() == {}
+
+
+def test_revisiting_compatible_street_reuses_existing_filters(
+    manager: RangeManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not regenerate existing filters when the board state is reused."""
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    manager.add_filter("KK", 0, name="manual-kings")
+    expected = manager.set_filter_active("manual-kings", 0, True)
+    saved_flop = manager._streets[Street.FLOP]
+    manager.change_board(TURN)
+
+    def fail_if_regenerated(_self: PlayerRange, _board: object) -> None:
+        raise AssertionError("compatible street should reuse generated filters")
+
+    monkeypatch.setattr(PlayerRange, "autogenerate_filters", fail_if_regenerated)
+    snapshots = manager.change_board("5h2c3d")
+
+    assert manager._current_state is saved_flop
+    assert snapshots[0] == expected
+    assert "manual-kings" in player_at(manager, Street.FLOP, 0).get_tree()

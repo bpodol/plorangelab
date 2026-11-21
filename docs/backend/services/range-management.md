@@ -10,7 +10,7 @@ The design separates three responsibilities:
 2. **`StreetState`** represents a single street, holding its community board and up to six independent player ranges.
 3. **`PlayerRange`** owns one player's range and filter configuration for a single street, including hierarchical filters, activation states, and derived weighted selections.
 
-The services reuse the stateless [filter expression engine](../filter-engine.md) to evaluate predicates, the [range encoder](../encoding.md) to parse inputs, and the [equity engine](../equity.md) to calculate equities. They do not implement those algorithms themselves.
+The services reuse the stateless [filter expression engine and generator](../filter-engine.md) to evaluate predicates and generate board-dependent definitions, the [range encoder](../encoding.md) to parse inputs, and the [equity engine](../equity.md) to calculate equities. They do not implement those algorithms themselves.
 
 ## Source files and ownership
 
@@ -52,9 +52,11 @@ Each `StreetState` owns a shared community board and six player slots. Each occu
 
 `add_range(range_input, slot_index)` parses explicit weighted combinations or percentage notation using `encode_input()` and the precomputed starting-hand ordering for the current mode.
 
-The encoded range initializes a new preflop `PlayerRange`. The manager then propagates this range through all existing postflop states, removing hands blocked by each street's community board.
+The encoded range initializes a new preflop `PlayerRange`. The manager then propagates this range through all existing postflop states, removing hands blocked by each street's community board. When the active street has a board, the new active-street `PlayerRange` receives automatically generated filters.
 
-Adding or replacing a range discards the previous range and filter configurations for that slot across all streets. `remove_range(slot_index)` clears the slot across all streets. Other players' ranges and filters remain unchanged.
+Adding or replacing a range discards the previous range and filter configurations for that slot across all streets. Automatic filters are generated **only for the active postflop street**, rather than eagerly for the other recreated cached streets. `remove_range(slot_index)` clears the slot across all streets. Other players' ranges and filters remain unchanged.
+
+`add_range()` returns the current player's `PlayerFilterSnapshot`. Its `filters` field contains the active street's generated definitions when applicable.
 
 Updates are atomic: replacement states are prepared before being published, so a failed operation leaves the existing state unchanged.
 
@@ -112,15 +114,17 @@ Turn base range → turn filters → turn current range
 River base range → river filters → river current range
 ```
 
-Only the **hands and weights** carry forward; the previous street's filter definitions are **not copied**. New street states begin with empty filter trees. This means a filter's effect can persist in the next street's starting range even though the filter itself is not present there.
+Only the **hands and weights** carry forward; the previous street's filter definitions are **not copied**. A newly created postflop state instead generates its own board-dependent filter tree for each occupied player. This means an earlier filter's effect can persist in the next street's starting range even though that specific filter definition was not carried forward.
+
+The generated filter definitions are initially inactive. Generation populates membership and coverage without narrowing the new street's effective range.
 
 ### Reusing and invalidating street states
 
 `RangeManager.change_board()` selects the target street using the number of community cards and determines state compatibility using board masks.
 
-When the target street already exists with an identical board mask, its state is reused. Later streets are discarded.
+When the target street already exists with an identical board mask, its state and already-created filter trees are reused **without regenerating filters**. Later streets are discarded.
 
-For a new board, the manager preserves compatible earlier street states, creates the target state from the nearest surviving parent, and discards incompatible states. All players follow the same street transition.
+For a new board, the manager preserves compatible earlier street states (including their filter trees), creates the target state from the nearest surviving parent, generates the target street's filters for occupied players, and discards incompatible states. All players follow the same street transition.
 
 | Operation | Existing state behavior |
 | --- | --- |
@@ -146,6 +150,14 @@ Each `PlayerRange` owns a tree of two node kinds:
 Nodes are addressed using `FilterAddress(name, path)`. The `path` is a tuple of **parent group names**, starting at the root; the target node's own name is held separately.
 
 For example, `FilterAddress(name="flushes", path=("draws", "flop"))` identifies `draws → flop → flushes`. Names must be nonempty and unique among siblings; different groups may contain children with the same name.
+
+### Automatic filter initialization
+
+`PlayerRange.autogenerate_filters(board.cards)` calls `generate_filters(board)` from the `filters` package and recursively installs the resulting definitions. `GroupNode` definitions become `FilterGroup` nodes via `create_group()`; `FilterNode` definitions become evaluated `Filter` nodes via `create_filter()`. A generated leaf is evaluated against that player's street `base_range`, so coverage reflects the player's actual weighted range.
+
+Automatic filters start inactive, including descendants of generated groups. They are ordinary saved nodes afterward: the same activation, deletion, clearing, and nesting rules apply as for user-created filters. The generator does not classify the player's hands during definition construction; `create_filter()` computes their membership.
+
+**Lazy lifecycle:** Creating a new board state initializes filters for its occupied players once; revisiting an identical compatible board reuses the existing street state without regeneration. Replacing one player's range rebuilds that player's ranges across cached streets but runs generation only for the currently active postflop street. This avoids evaluating potentially expensive generated definitions on every cached street during one replacement.
 
 ### Creating and deleting nodes
 
@@ -235,7 +247,7 @@ The base range may already incorporate filtering from earlier streets and commun
 
 ### Snapshot-producing operations
 
-Filter and group mutations return the updated `PlayerFilterSnapshot` for the affected player after the change succeeds.
+`add_range()` and filter/group mutations return the updated `PlayerFilterSnapshot` for the affected player after the change succeeds. A postflop range-add snapshot includes automatically generated filter definitions for the active street.
 
 `change_board()` returns a list of six elements in player-slot order:
 
@@ -277,7 +289,7 @@ The replacement street mapping is published only after the new state has been co
 
 `change_board(None)` returns to preflop and discards postflop states while preserving the preflop ranges and filters.
 
-Adding or replacing a player range also uses prepared replacement street states. It rebuilds that player's range across all existing streets before publishing the updated mapping.
+Adding or replacing a player range also uses prepared replacement street states. It rebuilds that player's range across all existing streets, generates filters only in the new active-street `PlayerRange` when a board exists, and constructs the response snapshot **before** publishing the updated mapping.
 
 These operations provide failure atomicity for ordinary exceptions during preparation, not general transaction isolation or automatic thread safety.
 
@@ -313,9 +325,9 @@ The calculation mode is owned by `RangeManager`. All player ranges are encoded u
 
 - **No persistence in this layer.** These classes maintain in-memory state; they do not save range/filter state to a database.
 - **No API or session lifecycle.** HTTP/WebSocket endpoints, session ownership, and job scheduling are handled by other components.
-- **No new filter algorithm.** Hand predicates are evaluated by `plorangelab.filters`; this layer combines and manages the returned selections.
+- **Definition generation is delegated.** Board-dependent definitions come from `plorangelab.filters.generate_filters`; `PlayerRange` installs them and evaluates their expressions, while the filtering service manages selections.
 - **Shared board per street.** Each `StreetState` stores one board shared by all players on that street. `RangeManager` owns all existing street states and selects one active street.
-- **Filter carryover is by range, not by definition.** Later streets start from the parent street's currently selected hands, with no copied filter tree.
+- **Filter carryover is by range, not by definition.** Later streets start from the parent street's currently selected hands and create their own generated filter trees instead of copying parent definitions.
 - **State restoration is limited.** Compatible previously held streets may be reused, but invalidated street states are discarded rather than kept in an undo/history store.
 - **No built-in concurrent-mutation protection.** Clone-based publishing protects against failed edits, not races between simultaneous requests.
 

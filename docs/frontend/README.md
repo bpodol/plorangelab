@@ -34,7 +34,7 @@ The `api/` directory contains typed clients for backend communication.
 
 - `client.ts` — Shared HTTP request handling and error processing.
 - `sessions.ts` — Session creation, session-wide mode changes, and board updates.
-- `players.ts` — Player range requests.
+- `players.ts` — Player range requests; PUT returns a complete `PlayerFilterSnapshot`.
 - `filters.ts` — Filter management requests.
 - `equity.ts` — Equity calculation message types.
 
@@ -97,9 +97,10 @@ The backend owns the authoritative session-wide PLO mode. Individual range submi
 1. The user edits a range in `PlayerRangeInput`.
 2. The change is passed to `usePlayerRanges()`.
 3. Adding or deleting a range triggers a REST request.
-4. The hook updates the corresponding player state using the backend response.
+4. The backend returns a `PlayerFilterSnapshot` containing hand counts, coverage, and the active street's filter tree (which may include automatically generated filters).
+5. The hook saves the snapshot and sets `numberOfHands` from `snapshot.base_hands`.
 
-The frontend maintains editable input state separately from whether a range has been successfully applied to the backend.
+The frontend maintains editable input state separately from whether a range has been successfully applied to the backend. Replacing a range replaces the previous filter snapshot instead of clearing it to `null`.
 
 ### Filter management
 
@@ -126,9 +127,10 @@ All mutation callbacks are provided by `usePlayerRanges()` through `App.tsx`. Th
 1. The user edits the board in `BoardInput`.
 2. The input remains local until the user applies it.
 3. `App.tsx` sends the board to the backend.
-4. After a successful response, `App.tsx` passes the six returned player snapshots to `applyBoardSnapshots()`, which updates effective hand counts and current-street filter snapshots together.
+4. When the backend creates a new postflop street, it generates filters for occupied players; selecting a compatible cached street reuses its existing filters.
+5. After a successful response, `App.tsx` passes the six returned player snapshots to `applyBoardSnapshots()`, which updates effective hand counts from `filtered_hands` and current-street filter snapshots together.
 
-Editing the board input alone does not modify the backend session.
+Editing the board input alone does not modify the backend session. The frontend does not generate or evaluate the automatic filter expressions.
 
 ### Equity calculations
 
@@ -154,7 +156,7 @@ The backend remains authoritative for the session-wide PLO mode, applied ranges,
 
 The frontend supports session creation, player range management, board application, and equity calculations.
 
-The filter REST client and hook-level mutation operations are implemented. `usePlayerRanges()` maintains filter snapshots using backend mutation responses and board-change responses.
+The filter REST client and hook-level mutation operations are implemented. `usePlayerRanges()` maintains filter snapshots using player-range PUT responses, backend filter-mutation responses, and board-change responses.
 
 `App.tsx` renders player range inputs and filter panels in two independent columns. All six range inputs are always displayed, while filter panels are rendered only for players with applied ranges.
 
