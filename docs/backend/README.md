@@ -15,7 +15,7 @@ This page is the **entry point for investigating the backend codebase**. It maps
 | Player slots, board transitions, per-street ranges, filter trees, and weighted coverage | [Range management](services/range-management.md) |
 | Session expiry, equity job status, worker execution, progress, and cancellation | [Sessions and equity jobs](services/session-and-jobs.md) |
 | Card IDs, board masks, `EncodedRange`, weighted ranges, and percentage-based ranges | [Card and range encoding](encoding.md) |
-| Filter expression grammar, compilation, and Boolean hand selections | [Filter expression engine](filter-engine.md) |
+| Filter expression grammar, compilation, Boolean hand selections, and board-dependent filter definition generation | [Filter expression engine](filter-engine.md) |
 | Five-card strength scores, ranking tables, and combinatorial lookup | [Five-card hand ranking](hand-ranking.md) |
 | PLO showdown evaluation, exact equity, Monte Carlo samplers, and diagnostics | [Equity engine](equity.md) |
 
@@ -53,7 +53,7 @@ EquityJob worker
 ## Follow an equity calculation
 
 1. **Start a session.** The REST API creates a `Session`, which owns an initially empty `RangeManager`.
-2. **Prepare the inputs.** REST calls populate player slots, set or clear the board, and create or activate filters. The services maintain each player's current weighted range for the active street.
+2. **Prepare the inputs.** REST calls populate player slots and set or clear the board. A newly constructed postflop street automatically receives filter definitions for occupied players; users can also create and activate filters. The services maintain each player's current weighted range for the active street.
 3. **Submit work.** A WebSocket `start` command validates the session and player configuration, attaches an `EquityJob`, and submits `RangeManager.calculate_equity()` to the application's thread pool.
 4. **Compute equity.** `RangeManager` collects occupied players' current ranges. The equity engine validates and evaluates them with exact enumeration or Monte Carlo, using precomputed hand-ranking resources.
 5. **Deliver updates.** The worker records progress on `EquityJob`. The WebSocket publisher reads the latest snapshot and sends progress or the terminal result through the async connection.
@@ -64,7 +64,7 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 ## Key boundaries
 
 - **Encoding versus ranking:** `encoder.py` converts card and range notation into compact representations. `rating.py` loads externally ordered *starting hands* for percentage ranges; `rank_combination.py` constructs *five-card showdown* ranking tables. These are different resources.
-- **Filter engine versus filter state:** The `filters` package evaluates expressions and returns Boolean hand selections. Each `PlayerRange` manages street-local named filters, nested groups, activation, weighted coverage, and the derived current range.
+- **Filter definitions versus filter state:** The `filters` package evaluates expressions and generates board-dependent filter definitions. Each `PlayerRange` stores and evaluates these definitions against its base range, manages nested groups and activation, and derives weighted coverage and the current range.
 - **Services versus computation:** `RangeManager` owns the shared PLO mode, street states, board transitions, and player slots. Each `PlayerRange` owns one player's filtering state for one street. Equity algorithms remain delegated to the `equity` package.
 - **API versus services:** REST and WebSocket handlers validate requests, guard access to session state, and serialize results. They rely on services for state changes and on domain modules for evaluation.
 - **Concurrency versus failure atomicity:** Clone-based range updates avoid publishing partially modified state after a failed operation. Session locks and REST mutation guards coordinate API-mediated access; they are not a general guarantee that every backend object is safe for arbitrary concurrent mutation.
@@ -76,8 +76,8 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 | A request returns HTTP 404, 409, or 422 | [API architecture](api/README.md), then [REST API contract](../api/rest.md) |
 | A WebSocket starts, disconnects, or resumes unexpectedly | [WebSocket protocol](../api/websocket.md), then [API architecture](api/README.md) |
 | A session expires or a calculation does not stop immediately | [Sessions and equity jobs](services/session-and-jobs.md) |
-| A board change resets filters or changes the range size | [Range management](services/range-management.md) |
-| A filter expression matches unexpected hands | [Filter expression engine](filter-engine.md) |
+| A board change regenerates filters, reuses cached filters, or changes the range size | [Range management](services/range-management.md) |
+| A filter expression or generated definition matches unexpected hands | [Filter expression engine](filter-engine.md) |
 | Filter activation or coverage is surprising | [Range management](services/range-management.md) |
 | Percentage range selection looks wrong | [Card and range encoding](encoding.md) |
 | Showdown strength or hand ordering looks wrong | [Five-card hand ranking](hand-ranking.md), then [Equity engine](equity.md) |
@@ -90,7 +90,7 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 | [`src/plorangelab/api/`](../../src/plorangelab/api/) | FastAPI app, dependencies, schemas, routers, and WebSocket runtime |
 | [`src/plorangelab/services/`](../../src/plorangelab/services/) | Session lifecycle, range state, filtering state, and equity jobs |
 | [`src/plorangelab/equity/`](../../src/plorangelab/equity/) | Equity calculation algorithms and results |
-| [`src/plorangelab/filters/`](../../src/plorangelab/filters/) | Stateless filter parsing, compilation, and evaluation |
+| [`src/plorangelab/filters/`](../../src/plorangelab/filters/) | Filter parsing, compilation, evaluation, and board-dependent definition generation |
 | [`src/plorangelab/encoder.py`](../../src/plorangelab/encoder.py) and [`rating.py`](../../src/plorangelab/rating.py) | Card/range encoding and preflop starting-hand orderings |
 | [`src/plorangelab/rank_combination.py`](../../src/plorangelab/rank_combination.py) and [`bootstrap.py`](../../src/plorangelab/bootstrap.py) | Five-card rank tables and shared engine resource initialization |
 

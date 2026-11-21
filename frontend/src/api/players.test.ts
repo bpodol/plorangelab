@@ -1,6 +1,7 @@
 import { addRange, deleteRange } from './players';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { apiRequest } from './client';
+import type { PlayerFilterSnapshot } from '../types';
 
 // Replace the real apiRequest with a mock.
 vi.mock('./client', () => ({
@@ -11,8 +12,30 @@ beforeEach(() => {
   vi.resetAllMocks();
 });
 
-test('adds a player range using PUT', async () => {
-  vi.mocked(apiRequest).mockResolvedValue({ hands: 1 });
+test('adds a player range using PUT and returns the full snapshot', async () => {
+  const snapshot: PlayerFilterSnapshot = {
+    base_hands: 1,
+    filtered_hands: 1,
+    filtered_coverage: 1,
+    filters: {
+      auto_ranks: {
+        type: 'group',
+        name: 'Auto-ranked hands',
+        coverage: 1,
+        active: false,
+        filters: {
+          aces: {
+            type: 'filter',
+            name: 'Aces',
+            expression: 'AA',
+            coverage: 1,
+            active: false,
+          },
+        },
+      },
+    },
+  };
+  vi.mocked(apiRequest).mockResolvedValue(snapshot);
 
   const result = await addRange('session-123', 2, 'AsAhQcJd');
 
@@ -26,7 +49,7 @@ test('adds a player range using PUT', async () => {
     }),
   });
 
-  expect(result).toEqual({ hands: 1 });
+  expect(result).toBe(snapshot);
 });
 
 test('deletes a player range using DELETE', async () => {

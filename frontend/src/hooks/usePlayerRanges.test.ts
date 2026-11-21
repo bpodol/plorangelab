@@ -4,6 +4,15 @@ import { addRange, deleteRange } from '../api/players';
 import { usePlayerRanges } from './usePlayerRanges';
 import type { PlayerFilterSnapshot } from '../types';
 
+function makeRangeSnapshot(hands: number): PlayerFilterSnapshot {
+  return {
+    base_hands: hands,
+    filtered_hands: hands,
+    filtered_coverage: 1,
+    filters: {},
+  };
+}
+
 vi.mock('../api/players', () => ({
   addRange: vi.fn(),
   deleteRange: vi.fn(),
@@ -60,7 +69,8 @@ test('updates hand counts after a board change', () => {
 });
 
 test('adds a range and updates player state', async () => {
-  vi.mocked(addRange).mockResolvedValue({ hands: 150 });
+  const snapshot = makeRangeSnapshot(150);
+  vi.mocked(addRange).mockResolvedValue(snapshot);
 
   const { result } = renderHook(() => usePlayerRanges('session-123'));
 
@@ -77,6 +87,7 @@ test('adds a range and updates player state', async () => {
   expect(result.current.players[2]).toMatchObject({
     range: 'AsAhQcJd',
     numberOfHands: 150,
+    filterSnapshot: snapshot,
     hasAppliedRange: true,
     isLoading: false,
     error: null,
@@ -163,9 +174,9 @@ test('preserves the range when deletion fails', async () => {
 });
 
 test('sets isLoading while adding a range', async () => {
-  let resolveRequest!: (value: { hands: number }) => void;
+  let resolveRequest!: (value: PlayerFilterSnapshot) => void;
 
-  const pendingRequest = new Promise<{ hands: number }>((resolve) => {
+  const pendingRequest = new Promise<PlayerFilterSnapshot>((resolve) => {
     resolveRequest = resolve;
   });
 
@@ -186,7 +197,7 @@ test('sets isLoading while adding a range', async () => {
 
   // Simulate the backend completing the request.
   await act(async () => {
-    resolveRequest({ hands: 150 });
+    resolveRequest(makeRangeSnapshot(150));
     await operation;
   });
 
@@ -248,8 +259,9 @@ test('applies board snapshots to the correct player slots', () => {
   });
 });
 
-test('replacing a range clears the previous filter snapshot', async () => {
-  vi.mocked(addRange).mockResolvedValue({ hands: 3 });
+test('replacing a range replaces the previous filter snapshot', async () => {
+  const replacementSnapshot = makeRangeSnapshot(3);
+  vi.mocked(addRange).mockResolvedValue(replacementSnapshot);
 
   const { result } = renderHook(() => usePlayerRanges('session-123'));
 
@@ -276,7 +288,7 @@ test('replacing a range clears the previous filter snapshot', async () => {
   expect(result.current.players[0]).toMatchObject({
     numberOfHands: 3,
     hasAppliedRange: true,
-    filterSnapshot: null,
+    filterSnapshot: replacementSnapshot,
     isLoading: false,
     error: null,
   });

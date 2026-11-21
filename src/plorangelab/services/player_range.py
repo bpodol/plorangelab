@@ -18,7 +18,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from plorangelab.encoder import EncodedRange
-from plorangelab.filters.evaluator import evaluate_filter
+from plorangelab.filters import evaluate_filter, generate_filters
+from plorangelab.filters.filter_generator import FilterNode, GroupNode
 from plorangelab.types import Mode
 
 
@@ -102,12 +103,26 @@ class PlayerRange:
         """Fraction of original *weighted* range currently included."""
         return self._filtered_coverage
 
+    def autogenerate_filters(self, board: NDArray[np.uint8]) -> None:
+        def add_nodes(
+            nodes: list[FilterNode | GroupNode], path: tuple[str, ...] = ()
+        ) -> None:
+            for node in nodes:
+                if isinstance(node, FilterNode):
+                    self.create_filter(node.expression, name=node.name, path=path)
+                    continue
+
+                self.create_group(node.name, path=path)
+                add_nodes(node.filters, path=(*path, node.name))
+
+        add_nodes(generate_filters(board))
+
     def create_filter(
         self,
         filter_expression: str,
         name: str | None = None,
         path: tuple[str, ...] = (),
-    ) -> float:
+    ) -> None:
         """Create a filter evaluated against the street's base range.
 
         Stores the Boolean selection and its weighted coverage. The filter
@@ -146,7 +161,6 @@ class PlayerRange:
         coverage = self._coverage(selection)
         children[key] = Filter(filter_expression, selection, coverage, active)
         self._refresh(update_group_coverage=bool(ancestors))
-        return coverage
 
     def create_group(self, name: str, path: tuple[str, ...] = ()) -> None:
         """Create an empty, inactive filter group.

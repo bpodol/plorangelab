@@ -135,7 +135,7 @@ class RangeManager:
 
             self.mode = mode
 
-    def add_range(self, range_input: str, slot_index: int) -> int:
+    def add_range(self, range_input: str, slot_index: int) -> PlayerFilterSnapshot:
         """Add or replace a player's range across all existing streets.
 
         Encodes the input range and propagates it through each existing board,
@@ -192,9 +192,14 @@ class RangeManager:
                 ranges=new_ranges,
             )
 
+        new_state = new_streets[self._active_street]
+        if new_state.board is not None:
+            new_state.ranges[slot_index].autogenerate_filters(new_state.board.cards)
+        snapshot = self._get_player_snapshot(new_state.ranges[slot_index])
+
         self._streets = new_streets
 
-        return len(self._current_state.ranges[slot_index].current_range.hands)
+        return snapshot
 
     def remove_range(self, slot_index: int) -> None:
         """Remove a player's range and filters from all existing streets.
@@ -287,18 +292,22 @@ class RangeManager:
         # Create the target street state from its parent.
         new_state = StreetState(new_board)
 
-        for slot, parent_manager in enumerate(parent_state.ranges):
-            if parent_manager is None:
+        for slot, parent_range in enumerate(parent_state.ranges):
+            if parent_range is None:
                 continue
 
-            parent_range = parent_manager.current_range
+            parent_range = parent_range.current_range
 
             sanitized_range = sanitize_range(parent_range, new_board.mask)
 
-            new_state.ranges[slot] = PlayerRange(
+            new_player = PlayerRange(
                 sanitized_range,
                 self.mode,
             )
+
+            new_player.autogenerate_filters(new_board.cards)
+
+            new_state.ranges[slot] = new_player
 
         new_streets[target_street] = new_state
 

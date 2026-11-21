@@ -1,4 +1,5 @@
 import { apiRequest } from './client.ts';
+import type { PlayerFilterSnapshot } from '../types.ts';
 
 export interface RangeResponse {
   hands: number;
@@ -21,8 +22,8 @@ export function addRange(
   sessionId: string,
   playerId: number,
   hands: string,
-): Promise<RangeResponse> {
-  return apiRequest<RangeResponse>(`/api/sessions/${sessionId}/players/${playerId}`, {
+): Promise<PlayerFilterSnapshot> {
+  return apiRequest<PlayerFilterSnapshot>(`/api/sessions/${sessionId}/players/${playerId}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',

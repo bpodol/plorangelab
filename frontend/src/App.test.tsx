@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
 import App from './App';
+import type { PlayerFilterSnapshot } from './types';
 import { createSession, changeBoard, changeMode } from './api/sessions';
 import { addRange, deleteRange } from './api/players';
 import { connectEquityWebSocket } from './api/equity';
@@ -48,6 +49,18 @@ beforeEach(() => {
 
   vi.mocked(connectEquityWebSocket).mockReturnValue(socket as unknown as WebSocket);
 });
+
+function makeRangeSnapshot(
+  baseHands: number,
+  filters: PlayerFilterSnapshot['filters'] = {},
+): PlayerFilterSnapshot {
+  return {
+    base_hands: baseHands,
+    filtered_hands: baseHands,
+    filtered_coverage: 1,
+    filters,
+  };
+}
 
 test('automatically creates a session on mount', async () => {
   let resolveSession!: (value: { session_id: string }) => void;
@@ -191,7 +204,7 @@ test('adds and deletes a player range through the UI', async () => {
     session_id: 'session-123',
   });
 
-  vi.mocked(addRange).mockResolvedValue({ hands: 1 });
+  vi.mocked(addRange).mockResolvedValue(makeRangeSnapshot(1));
   vi.mocked(deleteRange).mockResolvedValue(undefined);
 
   const user = userEvent.setup();
@@ -224,9 +237,53 @@ test('adds and deletes a player range through the UI', async () => {
   expect(deleteRange).toHaveBeenCalledWith('session-123', 0);
 });
 
+test('shows auto-generated filter groups when adding a range on an active board', async () => {
+  vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
+  vi.mocked(changeBoard).mockResolvedValue({ players: [null, null, null, null, null, null] });
+  vi.mocked(addRange).mockResolvedValue(
+    makeRangeSnapshot(2, {
+      auto_ranks: {
+        type: 'group',
+        name: 'Auto-ranked hands',
+        coverage: 0.5,
+        active: false,
+        filters: {
+          aces: {
+            type: 'filter',
+            name: 'Aces',
+            expression: 'AA',
+            coverage: 0.5,
+            active: false,
+          },
+        },
+      },
+    }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+  });
+
+  await user.type(screen.getByRole('textbox', { name: 'Board' }), 'AsKd2c');
+  await user.click(screen.getByRole('button', { name: 'Apply Board' }));
+  await waitFor(() => {
+    expect(changeBoard).toHaveBeenCalledWith('session-123', 'AsKd2c');
+  });
+
+  await user.type(screen.getByRole('textbox', { name: 'Player 1' }), 'QsQhJcTc,9s9h8d8c');
+  await user.click(screen.getAllByRole('button', { name: /add range/i })[0]);
+
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'QsQhJcTc,9s9h8d8c');
+  expect(await screen.findByText('Hands: 2')).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Player 1 filters' })).toBeInTheDocument();
+  expect(await screen.findByText(/Auto-ranked hands/)).toBeInTheDocument();
+});
+
 test('renders filter panels only for applied players without renumbering them', async () => {
   vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
-  vi.mocked(addRange).mockResolvedValue({ hands: 1 });
+  vi.mocked(addRange).mockResolvedValue(makeRangeSnapshot(1));
 
   const user = userEvent.setup();
   render(<App />);
@@ -379,7 +436,7 @@ test('submits the complete large range instead of its preview', async () => {
   vi.mocked(createSession).mockResolvedValue({
     session_id: 'session-123',
   });
-  vi.mocked(addRange).mockResolvedValue({ hands: 150 });
+  vi.mocked(addRange).mockResolvedValue(makeRangeSnapshot(150));
 
   const user = userEvent.setup();
   render(<App />);
@@ -471,10 +528,10 @@ test('retains the previous mode and displays an error when mode change fails', a
 test('disables mode changes while a player range is being added', async () => {
   vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
 
-  let resolveRange!: (value: { hands: number }) => void;
+  let resolveRange!: (value: PlayerFilterSnapshot) => void;
   vi.mocked(addRange).mockImplementation(
     () =>
-      new Promise<{ hands: number }>((resolve) => {
+      new Promise<PlayerFilterSnapshot>((resolve) => {
         resolveRange = resolve;
       }),
   );
@@ -493,7 +550,7 @@ test('disables mode changes while a player range is being added', async () => {
   expect(changeMode).not.toHaveBeenCalled();
 
   await act(async () => {
-    resolveRange({ hands: 1 });
+    resolveRange(makeRangeSnapshot(1));
   });
 
   expect(await screen.findByText('Hands: 1')).toBeInTheDocument();

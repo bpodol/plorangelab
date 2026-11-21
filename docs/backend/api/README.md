@@ -86,9 +86,11 @@ Client -> routers/filters.py
 
 ### Snapshot responses
 
-Filter and group mutations return `PlayerFilterSnapshotResponse` for the affected player.
+Adding or replacing a player range (`PUT /api/sessions/{session_id}/players/{player_id}`) returns `PlayerFilterSnapshotResponse` for the affected player, including any automatically generated filters for the active postflop street.
 
-Board changes return `BoardResponse` containing six slot-aligned player snapshots. Occupied slots contain `PlayerFilterSnapshotResponse` objects, while empty slots contain `null`.
+Filter and group mutations also return `PlayerFilterSnapshotResponse` for the affected player.
+
+Board changes return `BoardResponse` containing six slot-aligned player snapshots. Occupied slots contain `PlayerFilterSnapshotResponse` objects, while empty slots contain `null`. A newly created postflop street generates filters before its snapshot is returned; a reused compatible street retains its existing filter tree.
 
 `RangeManager` constructs the service-level `PlayerFilterSnapshot` independently of HTTP. The API layer uses Pydantic response models to validate and serialize these snapshots into JSON.
 

@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from plorangelab.encoder import EncodedRange, encode_range
+from plorangelab.filters.filter_generator import FilterNode, GroupNode
+from plorangelab.services import player_range as player_range_module
 from plorangelab.services.player_range import (
     FilterAddress,
     FilterGroup,
@@ -39,7 +41,8 @@ def test_default_has_valid_original_range(manager, base):
 
 
 def test_root_filters_start_inactive_and_can_be_activated(manager, base):
-    coverage = manager.create_filter("A", name="aces")
+    manager.create_filter("A", name="aces")
+    coverage = manager.get_node(FilterAddress("aces")).coverage
     expected = float(
         np.sum(base.weights[:3], dtype=np.float64)
         / np.sum(base.weights, dtype=np.float64)
@@ -117,7 +120,8 @@ def test_add_to_active_group_auto_activates_leaf(manager, base):
     manager.create_group("g")
     manager.create_filter("A", path=("g",))
     manager.set_active(FilterAddress("g"), True)
-    coverage = manager.create_filter("K", path=("g",))
+    manager.create_filter("K", path=("g",))
+    coverage = manager.get_node(FilterAddress("K", ("g",))).coverage
 
     assert coverage == pytest.approx(manager.get_coverage(FilterAddress("K", ("g",))))
     assert manager.filtered_coverage > coverage
@@ -134,8 +138,9 @@ def test_empty_group_rejected_without_mutation(manager, base):
 
 
 def test_zero_match_filter_stays_inactive(manager, base):
-    coverage = manager.create_filter("TT")
-    assert coverage == 0.0
+    manager.create_filter("TT")
+    new_filter = manager.get_node(FilterAddress("TT"))
+    assert new_filter.coverage == 0.0
     with pytest.raises(ValueError, match="zero hands"):
         manager.set_active(FilterAddress("TT"), True)
     assert manager.current_range is base
@@ -488,3 +493,42 @@ def test_deleting_last_active_filter_deactivates_ancestors(manager, base):
     assert not manager.get_node(outer).active
     assert manager.current_range is base
     assert manager.active_selection is None
+
+
+def test_autogenerate_imports_nested_definitions_without_activating_them(
+    manager: PlayerRange, base: EncodedRange, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the generator-to-PlayerRange adapter, not generator rules."""
+    monkeypatch.setattr(
+        player_range_module,
+        "generate_filters",
+        lambda _board: [
+            GroupNode(
+                "generated",
+                [
+                    FilterNode("aces", "A"),
+                    GroupNode("nested", [FilterNode("kings", "K")]),
+                ],
+            )
+        ],
+    )
+    board = np.array([0, 4, 8], dtype=np.uint8)
+    board.setflags(write=False)
+
+    assert manager.autogenerate_filters(board) is None
+
+    tree = manager.get_tree()
+    assert set(tree) == {"generated"}
+    assert tree["generated"]["type"] == "group"
+    assert tree["generated"]["filters"]["aces"]["expression"] == "A"
+    assert (
+        tree["generated"]["filters"]["nested"]["filters"]["kings"]["expression"] == "K"
+    )
+    assert not tree["generated"]["active"]
+    assert not tree["generated"]["filters"]["aces"]["active"]
+    assert manager.current_range is base
+    assert manager.filtered_coverage == pytest.approx(1.0)
+
+    # Generated definitions remain normal user-editable filters.
+    manager.set_active(FilterAddress("aces", ("generated",)), True)
+    assert indices(base, manager.current_range) == {0, 1, 2}

@@ -40,14 +40,14 @@ The `ThreadPoolExecutor` used for equity jobs is supplied by the caller and is n
 | Job submission, status, cancellation, progress notifications | [Sessions and equity jobs](session-and-jobs.md) | [`equity_job.py`](../../../src/plorangelab/services/equity_job.py) |
 | Adding/removing players, changing the shared board, invoking equity | [Range management](range-management.md) | [`range_manager.py`](../../../src/plorangelab/services/range_manager.py) |
 | Flop/turn/river state reuse, range carryover, board blockers | [Range management](range-management.md) | [`range_manager.py`](../../../src/plorangelab/services/range_manager.py) |
-| Filter groups, activation, weighted coverage, selected ranges | [Range management](range-management.md) | [`player_range.py`](../../../src/plorangelab/services/player_range.py) |
+| Generated filter installation, filter groups, activation, weighted coverage, selected ranges | [Range management](range-management.md) | [`player_range.py`](../../../src/plorangelab/services/player_range.py) |
 
 ## Follow a calculation through the code
 
 A useful investigation path is:
 
 1. **Find the session.** `SessionManager` returns a session with its own `RangeManager`.
-2. **Prepare ranges.** `RangeManager` manages the shared PLO mode, all existing street states, and six player slots per street. Each occupied slot holds a `PlayerRange` responsible for that street's current filtered range.
+2. **Prepare ranges.** `RangeManager` manages the shared PLO mode, all existing street states, and six player slots per street. Each occupied slot holds a `PlayerRange` responsible for that street's current filtered range. New postflop street states install automatically generated filter definitions without activating them.
 3. **Start work.** The caller invokes `start_equity_job()` with a `RangeManager` and an existing executor. The worker calls `RangeManager.calculate_equity()`.
 4. **Compute.** `calculate_equity()` gathers occupied players' current ranges and calls the equity engine.
 5. **Report results.** `EquityJob` retains the latest progress snapshot and notifies one subscriber; its `Future` holds the final result or exception.
@@ -63,7 +63,7 @@ The sequence describes the **service-level flow**. Session-job association, API 
 ## Domain algorithms used by services
 
 - [Encoding](../encoding.md) — Parsing and storing weighted PLO ranges and board card representations.
-- [Filter-expression engine](../filter-engine.md) — Parsing, compiling, and evaluating individual hand predicates.
+- [Filter-expression engine](../filter-engine.md) — Parsing, compiling, and evaluating individual hand predicates, plus board-dependent definition generation.
 - [Equity engine](../equity.md) — Exact and Monte Carlo equity calculations and stopping diagnostics.
 - [Hand ranking](../hand-ranking.md) — Ranking-table generation and five-card ranking lookup.
 

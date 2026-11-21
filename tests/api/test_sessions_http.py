@@ -45,7 +45,12 @@ def test_add_and_delete_range(client: TestClient) -> None:
         json={"hands": "AsAhQcJd,KsKhTd9c"},
     )
     assert added.status_code == 200
-    assert added.json() == {"hands": 2}
+    assert added.json() == {
+        "base_hands": 2,
+        "filtered_hands": 2,
+        "filtered_coverage": 1.0,
+        "filters": {},  # No board: no generated filters.
+    }
 
     manager = client.app.state.session_manager.sessions[session_id].manager
     assert manager._current_state.ranges[3] is not None
@@ -63,23 +68,21 @@ def test_board_updates_and_clearing_persist(client: TestClient) -> None:
 
     changed = client.put(url, json={"board": "AsKd2c"})
     assert changed.status_code == 200
-    assert changed.json() == {
-        "players": [
-            {
-                "base_hands": 1,
-                "filtered_hands": 1,
-                "filtered_coverage": 1.0,
-                "filters": {},
-            },
-            None,
-            None,
-            None,
-            None,
-            None,
-        ]
-    }
+    changed_players = changed.json()["players"]
+    assert len(changed_players) == 6
+    assert changed_players[1:] == [None] * 5
+    flop_snapshot = changed_players[0]
+    assert flop_snapshot["base_hands"] == 1
+    assert flop_snapshot["filtered_hands"] == 1
+    assert flop_snapshot["filtered_coverage"] == pytest.approx(1.0)
+    # The HTTP contract exposes the tree constructed by the backend.
+    # Its exact generated expressions are tested by the generator's own suite.
+    flop_player = manager._current_state.ranges[0]
+    assert flop_player is not None
+    assert flop_snapshot["filters"] == flop_player.get_tree()
+    assert flop_snapshot["filters"]
     assert manager._current_state.board is not None
-    assert len(manager._current_state.ranges[0].current_range.hands) == 1
+    assert len(flop_player.current_range.hands) == 1
 
     cleared = client.put(url, json={"board": None})
     assert cleared.status_code == 200
@@ -231,3 +234,27 @@ def test_change_mode_preserves_board_without_players(
     assert manager.mode == 5
     assert manager._current_state is original_state
     assert manager._current_state.board is original_board
+
+
+def test_add_range_on_board_returns_generated_filter_snapshot(
+    client: TestClient,
+) -> None:
+    session_id = create_session(client)
+    board_url = f"/api/sessions/{session_id}/board"
+    range_url = f"/api/sessions/{session_id}/players/0"
+
+    response = client.put(board_url, json={"board": "2c3d5h"})
+    assert response.status_code == 200
+
+    added = client.put(range_url, json={"hands": "AsAhQcJd,KsKhTd9c"})
+    assert added.status_code == 200
+    snapshot = added.json()
+    assert snapshot["base_hands"] == 2
+    assert snapshot["filtered_hands"] == 2
+    assert snapshot["filtered_coverage"] == pytest.approx(1.0)
+
+    manager = client.app.state.session_manager.sessions[session_id].manager
+    player = manager._current_state.ranges[0]
+    assert player is not None
+    assert snapshot["filters"] == player.get_tree()
+    assert snapshot["filters"]

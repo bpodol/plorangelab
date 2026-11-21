@@ -18,7 +18,7 @@ and application workflows, see [Frontend Architecture](README.md).
 | `src/hooks/useEquitySocket.ts` | Owns the equity WebSocket connection lifecycle, latest server message, UI status, and tracked job ID. |
 | `src/api/client.ts` | Shared `fetch` helper for REST responses and FastAPI error messages. |
 | `src/api/sessions.ts` | Session creation, PLO mode changes, and board-update REST calls. |
-| `src/api/players.ts` | Player-range PUT and DELETE calls. |
+| `src/api/players.ts` | Player-range PUT (returns `PlayerFilterSnapshot`) and DELETE calls. |
 | `src/api/filters.ts` | Typed filter and group REST operations that return updated player snapshots after mutations. |
 | `src/api/equity.ts` | Equity WebSocket message types and connection creation. |
 | `src/types.ts` | Shared mode, recursive filter-tree types, and `PlayerFilterSnapshot`. |
@@ -133,18 +133,21 @@ PlayerRangeInput event
     -> usePlayerRanges.handleAddRange(playerId)
     -> api/players.addRange(sessionId, playerId, range)
     -> backend replaces that player's range
-    -> { hands: number }
+    -> PlayerFilterSnapshot (base_hands, filtered_hands,
+                             filtered_coverage, filters)
     -> update PlayerState:
-         numberOfHands, hasAppliedRange,
-         filterSnapshot=null, isLoading/error
+         numberOfHands=snapshot.base_hands, hasAppliedRange,
+         filterSnapshot=snapshot, isLoading/error
     -> React rerender
 ```
 
-`handleAddRange()` returns without a request if no session exists. It sets the individual player's loading state, submits the current editable range, and stores the hand count returned by the backend.
+`handleAddRange()` returns without a request if no session exists. It sets the individual player's loading state, submits the current editable range, then sets `numberOfHands` from the returned snapshot's `base_hands` and saves the full `filterSnapshot`.
 
 The backend interprets the range using the session-wide PLO mode; the player request does not contain a separate `mode` field. Errors are stored on the player rather than rethrown.
 
-A successful PUT replaces that player's range and filter configurations across all existing backend street states. Consequently, `handleAddRange()` clears the local `filterSnapshot` after a successful response. The endpoint returns a hand count rather than a complete player snapshot.
+A successful PUT replaces that player's range and filter configurations across all existing backend street states. The response is a complete player snapshot, not `{ "hands": number }`. If a board is active, its new filter tree may contain automatically generated nodes. The hook replaces the previous local `filterSnapshot` with this returned snapshot, including when replacing an existing range.
+
+`numberOfHands` on range PUT comes from `base_hands`; after a board change or filter mutation, it is updated from `filtered_hands`. This distinction matters if the returned snapshot has active filtering.
 
 Updating the local input string without applying it leaves the backend range unchanged.
 
@@ -166,7 +169,7 @@ While the request is pending, `BoardInput` displays "Applying..." and disables i
 
 If the request fails, the error is displayed and the existing player snapshots are preserved.
 
-The backend is responsible for board validation, card blockers, street transitions, and restoring compatible cached street states.
+The backend is responsible for board validation, card blockers, street transitions, generating filters on new postflop states, and restoring compatible cached street states without regenerating their filters.
 
 The frontend applies the returned snapshots **only after a successful response**. It does not reconstruct or carry over filter trees between streets itself.
 
@@ -288,7 +291,7 @@ These are **current behavior**, not promises about planned features:
 | Problem or question | Start with |
 | --- | --- |
 | A REST request returns an unexpected error | `src/api/client.ts`, then the relevant `src/api/*.ts` file and [REST contract](../api/rest.md) |
-| A player hand count or filter tree is stale after changing the board | `src/App.tsx` (`handleApplyBoard`), `usePlayerRanges.applyBoardSnapshots()` |
+| A player hand count or filter tree is stale after adding a range or changing the board | `usePlayerRanges.handleAddRange()` / `applyBoardSnapshots()`, then `src/api/players.ts` / `sessions.ts` |
 | An applied range differs from the input field | `usePlayerRanges.ts` (`range` versus `hasAppliedRange`) |
 | Equity does not start or connection status is wrong | `useEquitySocket.ts`, then `src/api/equity.ts` |
 | A disconnected equity job does not resume | `useEquitySocket.ts` (`jobRef`, `onopen`, `onclose`) and [WebSocket contract](../api/websocket.md) |

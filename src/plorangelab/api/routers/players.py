@@ -12,7 +12,7 @@ from ..dependencies import (
     SessionDep,
     editable_session,
 )
-from ..schemas import RangeRequest, RangeResponse
+from ..schemas import PlayerFilterSnapshotResponse, RangeRequest
 
 router = APIRouter(
     prefix="/api/sessions/{session_id}/players",
@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 
-@router.put("/{player_id}", response_model=RangeResponse)
+@router.put("/{player_id}", response_model=PlayerFilterSnapshotResponse)
 def add_range(player_id: PlayerId, request: RangeRequest, session: SessionDep):
     """Create or replace the range assigned to a player slot.
 
@@ -31,7 +31,7 @@ def add_range(player_id: PlayerId, request: RangeRequest, session: SessionDep):
     with that board are removed from the new range.
 
     Returns:
-        HTTP 200 with the number of hands in the resulting range.
+        HTTP 200 with the added player snapshot.
 
     Raises:
         HTTPException: 404 if the session is missing or expired.
@@ -41,14 +41,14 @@ def add_range(player_id: PlayerId, request: RangeRequest, session: SessionDep):
 
     with editable_session(session):
         try:
-            added_hands = session.manager.add_range(
+            snapshot = session.manager.add_range(
                 request.hands,
                 player_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        return RangeResponse(hands=added_hands)
+        return PlayerFilterSnapshotResponse.model_validate(snapshot)
 
 
 @router.delete("/{player_id}", status_code=204)

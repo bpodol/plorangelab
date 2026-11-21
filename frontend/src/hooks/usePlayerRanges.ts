@@ -97,11 +97,11 @@ export function usePlayerRanges(sessionId: string | null) {
     updatePlayer(playerId, { isLoading: true, error: null });
 
     try {
-      const hands = await addRange(sessionId, playerId, player.range);
+      const snapshot = await addRange(sessionId, playerId, player.range);
 
       updatePlayer(playerId, {
-        numberOfHands: hands.hands,
-        filterSnapshot: null,
+        numberOfHands: snapshot.base_hands,
+        filterSnapshot: snapshot,
         hasAppliedRange: true,
       });
     } catch (err) {
