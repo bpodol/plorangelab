@@ -1,5 +1,5 @@
 import { apiRequest } from './client.ts';
-import type { PlayerFilterSnapshot } from '../types.ts';
+import type { Mode, PlayerFilterSnapshot } from '../types.ts';
 
 export interface SessionResponse {
   session_id: string;
@@ -40,5 +40,15 @@ export function changeBoard(sessionId: string, board: string | null): Promise<Bo
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ board }),
+  });
+}
+
+export function changeMode(sessionId: string, mode: Mode): Promise<void> {
+  return apiRequest<void>(`/api/sessions/${sessionId}/mode`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ mode }),
   });
 }

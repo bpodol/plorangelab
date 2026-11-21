@@ -14,12 +14,9 @@ from ..dependencies import (
     PlayerId,
     SessionDep,
     editable_session,
-    locked_session,
 )
 from ..schemas import (
     FilterCreateRequest,
-    FilterGroupInfoResponse,
-    FilterInfoResponse,
     GroupCreateRequest,
     PlayerFilterSnapshotResponse,
     SetActiveRequest,
@@ -63,7 +60,7 @@ def create_filter(
         try:
             snapshot = session.manager.add_filter(
                 expression=request.expression,
-                player_index=player_id,
+                slot_index=player_id,
                 name=request.name,
                 path=request.path,
             )
@@ -98,7 +95,7 @@ def create_group(
         try:
             snapshot = session.manager.add_group(
                 name=request.name,
-                player_index=player_id,
+                slot_index=player_id,
                 path=request.path,
             )
         except ValueError as exc:
@@ -138,7 +135,7 @@ def set_filter_active(
         try:
             snapshot = session.manager.set_filter_active(
                 name=name,
-                player_index=player_id,
+                slot_index=player_id,
                 active=request.active,
                 path=path,
             )
@@ -207,65 +204,3 @@ def delete_filter_or_group(
             raise HTTPException(422, detail=str(exc)) from exc
 
         return PlayerFilterSnapshotResponse.model_validate(snapshot)
-
-
-@router.get(
-    "/filters", response_model=dict[str, FilterInfoResponse | FilterGroupInfoResponse]
-)
-def get_filters(player_id: PlayerId, session: SessionDep):
-    """Retrieve the complete filter hierarchy for the active street.
-
-    Returns a dictionary keyed by root-level filter and group names.
-    Groups contain recursively serialized child filters and groups.
-
-    Each node includes its type, name, coverage, and activation state.
-    Individual filters also include their expressions.
-
-    Returns:
-        HTTP 200 with the serialized filter hierarchy.
-
-    Raises:
-        HTTPException: 404 if the session or player slot does not exist.
-    """
-
-    with locked_session(session):
-        try:
-            return session.manager.get_filters(player_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.get(
-    "/filters/{name}", response_model=FilterInfoResponse | FilterGroupInfoResponse
-)
-@router.get(
-    "/groups/{name}", response_model=FilterInfoResponse | FilterGroupInfoResponse
-)
-def get_filter(
-    player_id: PlayerId,
-    name: str,
-    session: SessionDep,
-    path: FilterPath = (),
-):
-    """Retrieve metadata for one saved filter or group.
-
-    The optional query path identifies the target's parent groups.
-    Group responses include their recursively nested descendants.
-
-    Returns:
-        HTTP 200 with filter or group metadata.
-
-    Raises:
-        HTTPException: 404 if the session, player slot, or target
-            filter or group does not exist.
-    """
-
-    with locked_session(session):
-        try:
-            return session.manager.get_filter(
-                name=name,
-                player_index=player_id,
-                path=path,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc

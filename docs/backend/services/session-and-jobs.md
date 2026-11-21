@@ -92,20 +92,19 @@ The identity check before removal ensures cleanup does not delete a different ob
 
 ### Submitting a calculation
 
-`start_equity_job(manager, executor, mode, target_moe, on_finished=None)` creates an `EquityJob` and submits a worker function to the supplied `ThreadPoolExecutor`.
+`start_equity_job(manager, executor, target_moe, on_finished=None)` creates an `EquityJob` and submits a worker function to the supplied `ThreadPoolExecutor`. The calculation uses the PLO mode stored in `RangeManager`.
 
 The worker calls:
 
 ```python
 manager.calculate_equity(
-    mode=mode,
     target_moe=target_moe,
     on_progress=on_progress,
     cancel_event=job.cancel_event,
 )
 ```
 
-`RangeManager.calculate_equity()` collects the current filtered ranges from occupied player slots, forwards the shared board and ranking resources, and returns `(player_indices, EquityResult)`. Details of range selection and equity algorithms belong to the [range-management](range-management.md) and [equity-engine](../equity.md) documents.
+`RangeManager.calculate_equity()` collects the current filtered ranges from occupied slots of the active street, uses the manager's shared PLO mode and active board, and returns `(player_indices, EquityResult)`. Details of range selection and equity algorithms belong to the [range-management](range-management.md) and [equity-engine](../equity.md) documents.
 
 The worker receives the **existing `RangeManager` object**, not a snapshot. The job module itself does not lock or clone the manager. The surrounding application must ensure the manager is not changed unsafely during calculation.
 

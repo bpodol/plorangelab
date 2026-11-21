@@ -27,7 +27,7 @@ class Filter:
     """A saved predicate evaluated against the street's original hand order.
 
     ``selection`` is immutable by convention and made read-only on creation.
-    ``active`` is managed exclusively by FilterManager.
+    ``active`` is managed exclusively by PlayerRange.
     """
 
     expression: str
@@ -59,7 +59,7 @@ class FilterAddress:
     path: tuple[str, ...] = ()
 
 
-class FilterManager:
+class PlayerRange:
     """Own all filtering state for exactly one street.
 
     Invariants:
@@ -328,7 +328,7 @@ class FilterManager:
         node = self.get_node(address)
         return self._serialize_node(address.name, node)
 
-    def clone(self) -> FilterManager:
+    def clone(self) -> PlayerRange:
         """Copy mutable configuration, share immutable masks and range arrays.
 
         New filtering operations only replace cached arrays; they never mutate

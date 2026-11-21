@@ -25,20 +25,21 @@ This page is the **entry point for investigating the backend codebase**. It maps
 
 ```text
 FastAPI application (api/main.py)
-├── startup: load_resources() -> EngineResources
-│   ├── PLO4/PLO5 starting-hand orderings
-│   └── five-card hand-ranking tables
-├── REST routers (sessions, players, filters)
-│   └── session dependencies and guards
-├── equity WebSocket router
-│   └── equity_ws_runtime.py
-│       └── start_equity_job() -> application-owned thread pool
-└── SessionManager (in-memory registry)
-    └── Session
-        ├── RangeManager (up to six player slots and shared board)
-        │   └── PlayerRangeState
-        │       └── StreetState -> FilterManager
-        └── EquityJob | None (future, cancellation, progress)
+|-- startup: load_resources() -> EngineResources
+|   |-- PLO4/PLO5 starting-hand orderings
+|   `-- five-card hand-ranking tables
+|-- REST routers (sessions, players, filters)
+|   `-- session dependencies and guards
+|-- equity WebSocket router
+|   `-- equity_ws_runtime.py
+|       `-- start_equity_job() -> application-owned thread pool
+`-- SessionManager (in-memory registry)
+    `-- Session
+        |-- RangeManager (shared mode, active street, street states)
+        |   `-- _streets: dict[Street, StreetState]
+        |       `-- StreetState (board + six player slots)
+        |           `-- PlayerRange | None
+        `-- EquityJob | None (future, cancellation, progress)
 
 EquityJob worker
     -> RangeManager.calculate_equity()
@@ -63,8 +64,8 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 ## Key boundaries
 
 - **Encoding versus ranking:** `encoder.py` converts card and range notation into compact representations. `rating.py` loads externally ordered *starting hands* for percentage ranges; `rank_combination.py` constructs *five-card showdown* ranking tables. These are different resources.
-- **Filter engine versus filter state:** The `filters` package evaluates expressions and returns Boolean hand selections. `FilterManager` owns named filters, nested groups, activation, weighted coverage, and the derived current range.
-- **Services versus computation:** `RangeManager` owns mutable player and board state, but delegates equity algorithms to the `equity` package. `EquityJob` schedules and observes calculations without implementing the algorithms.
+- **Filter engine versus filter state:** The `filters` package evaluates expressions and returns Boolean hand selections. Each `PlayerRange` manages street-local named filters, nested groups, activation, weighted coverage, and the derived current range.
+- **Services versus computation:** `RangeManager` owns the shared PLO mode, street states, board transitions, and player slots. Each `PlayerRange` owns one player's filtering state for one street. Equity algorithms remain delegated to the `equity` package.
 - **API versus services:** REST and WebSocket handlers validate requests, guard access to session state, and serialize results. They rely on services for state changes and on domain modules for evaluation.
 - **Concurrency versus failure atomicity:** Clone-based range updates avoid publishing partially modified state after a failed operation. Session locks and REST mutation guards coordinate API-mediated access; they are not a general guarantee that every backend object is safe for arbitrary concurrent mutation.
 

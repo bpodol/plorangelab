@@ -10,7 +10,7 @@ PLO RangeLab is a full-stack application built around a custom Python equity eng
 
 ## Features
 
-- **PLO4 and PLO5** support for 2–6 players.
+- **PLO4 and PLO5** support for two to six players, with a shared game mode per session.
 - **Weighted hand ranges** with card-blocker handling.
 - **Exact equity calculations** and adaptive Monte Carlo simulations.
 - **Preflop, flop, turn, and river** calculations.
@@ -31,7 +31,7 @@ PLO RangeLab is a full-stack application built around a custom Python equity eng
 The application separates its components into:
 
 - **Equity Engine:** Numba-compiled hand evaluation, exact enumeration, and Monte Carlo simulation.
-- **Services:** Session management, player ranges, filters, and equity job execution.
+- **Services:** Session management, shared street states, player-specific range filtering, and equity job execution.
 - **API:** FastAPI REST endpoints and WebSocket communication.
 - **Frontend:** React interface for interacting with the backend.
 

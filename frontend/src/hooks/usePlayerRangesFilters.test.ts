@@ -74,7 +74,7 @@ describe('usePlayerRanges filter operations', () => {
     const updated = makeSnapshot(35, makeNestedTree());
     vi.mocked(createFilter).mockResolvedValue(updated);
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
 
     act(() => {
       result.current.updatePlayer(2, {
@@ -109,7 +109,7 @@ describe('usePlayerRanges filter operations', () => {
     const updated = makeSnapshot(60, makeNestedTree());
     vi.mocked(createGroup).mockResolvedValue(updated);
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
 
     await act(async () => {
       await result.current.addGroup(0, 'nut_draws', ['draws']);
@@ -132,7 +132,7 @@ describe('usePlayerRanges filter operations', () => {
     const updated = makeSnapshot(55, makeNestedTree());
     vi.mocked(setFilterActive).mockResolvedValue(updated);
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
     act(() => {
       result.current.updatePlayer(1, { filterSnapshot: previous, numberOfHands: 40 });
     });
@@ -154,7 +154,7 @@ describe('usePlayerRanges filter operations', () => {
     const updated = makeSnapshot(80, makeNestedTree());
     vi.mocked(setFilterActive).mockResolvedValue(updated);
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
     act(() => {
       result.current.updatePlayer(1, { filterSnapshot: previous });
     });
@@ -173,7 +173,7 @@ describe('usePlayerRanges filter operations', () => {
     const previous = makeSnapshot(40, makeNestedTree());
     vi.mocked(setFilterActive).mockResolvedValue(makeSnapshot(100));
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
     act(() => {
       result.current.updatePlayer(0, { filterSnapshot: previous });
     });
@@ -193,7 +193,7 @@ describe('usePlayerRanges filter operations', () => {
   });
 
   test('toggleFilterActive does not request nonexistent nodes or invalid paths', async () => {
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
 
     // No snapshot exists yet.
     await act(async () => {
@@ -223,7 +223,7 @@ describe('usePlayerRanges filter operations', () => {
     const updated = makeSnapshot(75, makeNestedTree());
     vi.mocked(deleteFilter).mockResolvedValue(updated);
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
 
     await act(async () => {
       await result.current.removeFilter(3, resource, name, path);
@@ -250,7 +250,7 @@ describe('usePlayerRanges filter operations', () => {
     const updated = makeSnapshot(100, tree);
     vi.mocked(clearFilters).mockResolvedValue(updated);
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
     act(() => {
       result.current.updatePlayer(0, {
         numberOfHands: 40,
@@ -278,7 +278,7 @@ describe('usePlayerRanges filter operations', () => {
     const previous = makeSnapshot(30, makeNestedTree());
     vi.mocked(createFilter).mockRejectedValue(new Error('Invalid filter expression'));
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
     act(() => {
       result.current.updatePlayer(4, {
         filterSnapshot: previous,
@@ -311,7 +311,7 @@ describe('usePlayerRanges filter operations', () => {
   });
 
   test('filter mutations are not sent when there is no session', async () => {
-    const { result } = renderHook(() => usePlayerRanges(null, 4));
+    const { result } = renderHook(() => usePlayerRanges(null));
     act(() => {
       result.current.updatePlayer(0, {
         filterSnapshot: makeSnapshot(30, makeNestedTree()),
@@ -340,7 +340,7 @@ describe('usePlayerRanges filter operations', () => {
     });
     vi.mocked(createFilter).mockReturnValue(pendingRequest);
 
-    const { result } = renderHook(() => usePlayerRanges(SESSION_ID, 4));
+    const { result } = renderHook(() => usePlayerRanges(SESSION_ID));
     let operation!: Promise<boolean>;
 
     act(() => {

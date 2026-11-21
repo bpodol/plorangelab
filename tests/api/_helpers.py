@@ -16,11 +16,10 @@ def add_player(
     session_id: str,
     slot: int,
     hands: str,
-    mode: int = 4,
 ) -> None:
     response = client.put(
         f"/api/sessions/{session_id}/players/{slot}",
-        json={"hands": hands, "mode": mode},
+        json={"hands": hands},
     )
     assert response.status_code == 200, response.text
 
@@ -49,4 +48,4 @@ def ws_url(session_id: str) -> str:
 
 
 def start_message(mode: int = 4, target_moe: float = 0.002) -> dict:
-    return {"type": "start", "mode": mode, "target_moe": target_moe}
+    return {"type": "start", "target_moe": target_moe}

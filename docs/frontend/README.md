@@ -33,7 +33,7 @@ It connects the state-management hooks to the UI components and handles operatio
 The `api/` directory contains typed clients for backend communication.
 
 - `client.ts` — Shared HTTP request handling and error processing.
-- `sessions.ts` — Session creation and management requests.
+- `sessions.ts` — Session creation, session-wide mode changes, and board updates.
 - `players.ts` — Player range requests.
 - `filters.ts` — Filter management requests.
 - `equity.ts` — Equity calculation message types.
@@ -77,8 +77,20 @@ These components receive application state and callbacks through props. They do 
 4. Session-dependent hooks use that ID to communicate with the backend.
 5. On failure, the application displays an error message and a Retry button.
 
-Session creation and board application maintain independent loading states.
+Session creation, board application, and mode changes maintain separate loading states.
 The session ID is not displayed in the UI.
+
+### Game mode selection
+
+New sessions default to PLO4. The game mode selector in `App.tsx` allows switching between PLO4 and PLO5 before player ranges are applied.
+
+Changing the selection sends `PUT /api/sessions/{session_id}/mode` through `api/sessions.ts`.
+
+The frontend updates its local mode only after the backend confirms the change. If the request fails, the previous mode remains selected and the error is displayed.
+
+While the mode request is pending, the selector and player range inputs are disabled. The selector is also disabled when any player has an applied range or an unfinished range operation.
+
+The backend owns the authoritative session-wide PLO mode. Individual range submissions do not include a separate mode.
 
 ### Player range management
 
@@ -132,11 +144,11 @@ The equity computation itself runs in the backend.
 
 The frontend distinguishes between three kinds of state:
 
-- **Application-level state:** Session ID, board input, game mode, and application feedback, owned by `App.tsx`.
+- **Application-level state:** Session ID, board input, confirmed game mode, mode-change loading state, and application feedback, owned by `App.tsx`.
 - **Workflow state:** Player ranges and equity calculation state, managed by dedicated hooks.
 - **Component-local state:** UI-specific values such as the target margin of error input.
 
-The backend remains authoritative for applied ranges, board state, and equity computation.
+The backend remains authoritative for the session-wide PLO mode, applied ranges, board states, filters, and equity computation.
 
 ## Current Scope
 

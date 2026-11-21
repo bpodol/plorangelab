@@ -1,5 +1,4 @@
 import { apiRequest } from './client.ts';
-import type { Mode } from '../types.ts';
 
 export interface RangeResponse {
   hands: number;
@@ -22,7 +21,6 @@ export function addRange(
   sessionId: string,
   playerId: number,
   hands: string,
-  mode: Mode,
 ): Promise<RangeResponse> {
   return apiRequest<RangeResponse>(`/api/sessions/${sessionId}/players/${playerId}`, {
     method: 'PUT',
@@ -31,7 +29,6 @@ export function addRange(
     },
     body: JSON.stringify({
       hands,
-      mode,
     }),
   });
 }

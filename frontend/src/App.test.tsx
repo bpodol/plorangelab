@@ -3,13 +3,14 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
 import App from './App';
-import { createSession, changeBoard } from './api/sessions';
+import { createSession, changeBoard, changeMode } from './api/sessions';
 import { addRange, deleteRange } from './api/players';
 import { connectEquityWebSocket } from './api/equity';
 
 vi.mock('./api/sessions', () => ({
   createSession: vi.fn(),
   changeBoard: vi.fn(),
+  changeMode: vi.fn(),
 }));
 
 vi.mock('./api/players', () => ({
@@ -64,6 +65,11 @@ test('automatically creates a session on mount', async () => {
   expect(screen.getAllByRole('textbox', { name: /^Player [1-6]$/ })).toHaveLength(6);
   expect(createSession).toHaveBeenCalledOnce();
 
+  const modeSelector = screen.getByRole('combobox', { name: 'Game mode' });
+  expect(modeSelector).toHaveValue('4');
+  expect(modeSelector).toBeDisabled();
+  expect(changeMode).not.toHaveBeenCalled();
+
   // Session-dependent actions must remain disabled until initialization finishes.
   expect(screen.getByRole('button', { name: /apply board/i })).toBeDisabled();
   expect(screen.getByRole('button', { name: /calculate equity/i })).toBeDisabled();
@@ -78,6 +84,7 @@ test('automatically creates a session on mount', async () => {
   });
 
   expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
+  expect(modeSelector).toBeEnabled();
   expect(screen.queryByText(/Session:/i)).not.toBeInTheDocument();
 });
 
@@ -202,7 +209,7 @@ test('adds and deletes a player range through the UI', async () => {
 
   await user.click(screen.getAllByRole('button', { name: /add range/i })[0]);
 
-  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'AsAhQcJd', 4);
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'AsAhQcJd');
 
   expect(await screen.findByText('Hands: 1')).toBeInTheDocument();
   expect(modeSelector).toBeDisabled();
@@ -236,7 +243,7 @@ test('renders filter panels only for applied players without renumbering them', 
   ] as const) {
     await user.type(screen.getByRole('textbox', { name: `Player ${playerId + 1}` }), range);
     await user.click(screen.getAllByRole('button', { name: /add range/i })[playerId]);
-    expect(addRange).toHaveBeenCalledWith('session-123', playerId, range, 4);
+    expect(addRange).toHaveBeenCalledWith('session-123', playerId, range);
     await screen.findByRole('region', { name: `Player ${playerId + 1} filters` });
   }
 
@@ -391,9 +398,105 @@ test('submits the complete large range instead of its preview', async () => {
 
   await user.click(screen.getAllByRole('button', { name: /add range/i })[0]);
 
-  expect(addRange).toHaveBeenCalledWith('session-123', 0, fullRange, 4);
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, fullRange);
 
   await waitFor(() => {
     expect(screen.queryByRole('button', { name: /clear input/i })).not.toBeInTheDocument();
   });
+});
+
+test('changes mode after backend confirmation and uses it for equity', async () => {
+  vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
+
+  let resolveMode!: () => void;
+  vi.mocked(changeMode).mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveMode = resolve;
+      }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+
+  const modeSelector = screen.getByRole('combobox', { name: 'Game mode' });
+  await waitFor(() => {
+    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(modeSelector).toBeEnabled();
+  });
+
+  await user.selectOptions(modeSelector, '5');
+
+  expect(changeMode).toHaveBeenCalledOnce();
+  expect(changeMode).toHaveBeenCalledWith('session-123', 5);
+  expect(modeSelector).toBeDisabled();
+  // The controlled value must not change until the backend accepts the mode.
+  expect(modeSelector).toHaveValue('4');
+
+  await act(async () => {
+    resolveMode();
+  });
+
+  expect(modeSelector).toBeEnabled();
+  expect(modeSelector).toHaveValue('5');
+
+  act(() => {
+    socket.open();
+  });
+  await user.click(screen.getByRole('button', { name: /calculate equity/i }));
+
+  expect(socket.send).toHaveBeenCalledWith(
+    JSON.stringify({ type: 'start', mode: 5, target_moe: 0.0015 }),
+  );
+});
+
+test('retains the previous mode and displays an error when mode change fails', async () => {
+  vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
+  vi.mocked(changeMode).mockRejectedValue(new Error('Mode change rejected'));
+
+  const user = userEvent.setup();
+  render(<App />);
+
+  const modeSelector = screen.getByRole('combobox', { name: 'Game mode' });
+  await waitFor(() => expect(modeSelector).toBeEnabled());
+
+  await user.selectOptions(modeSelector, '5');
+
+  expect(changeMode).toHaveBeenCalledWith('session-123', 5);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Mode change rejected');
+  expect(modeSelector).toHaveValue('4');
+  expect(modeSelector).toBeEnabled();
+});
+
+test('disables mode changes while a player range is being added', async () => {
+  vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
+
+  let resolveRange!: (value: { hands: number }) => void;
+  vi.mocked(addRange).mockImplementation(
+    () =>
+      new Promise<{ hands: number }>((resolve) => {
+        resolveRange = resolve;
+      }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+
+  const modeSelector = screen.getByRole('combobox', { name: 'Game mode' });
+  await waitFor(() => expect(modeSelector).toBeEnabled());
+
+  await user.type(screen.getByRole('textbox', { name: 'Player 1' }), 'AsAhQcJd');
+  await user.click(screen.getAllByRole('button', { name: /add range/i })[0]);
+
+  expect(addRange).toHaveBeenCalledWith('session-123', 0, 'AsAhQcJd');
+  expect(modeSelector).toBeDisabled();
+  expect(changeMode).not.toHaveBeenCalled();
+
+  await act(async () => {
+    resolveRange({ hands: 1 });
+  });
+
+  expect(await screen.findByText('Hands: 1')).toBeInTheDocument();
+  // An applied range also prevents further mode changes.
+  expect(modeSelector).toBeDisabled();
 });

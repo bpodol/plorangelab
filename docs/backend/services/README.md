@@ -9,20 +9,23 @@ This page is a **navigation map**: use it to find which component owns a behavio
 ## Service map
 
 ```text
-SessionManager                         (session_manager.py)
-└── Session
-    ├── RangeManager                  (range_manager.py)
-    │   ├── board: Board
-    │   └── PlayerRangeState[0..5]    (player_range_state.py)
-    │       └── StreetState per street
-    │           └── FilterManager     (filter_manager.py)
-    └── EquityJob | None              (equity_job.py)
-        ├── Future
-        ├── cancellation event
-        └── latest progress + subscriber
+SessionManager (session_manager.py)
+`-- Session
+    |-- RangeManager (range_manager.py)
+    |   |-- mode: PLO4 | PLO5
+    |   |-- _active_street: Street
+    |   `-- _streets: dict[Street, StreetState]
+    |       `-- StreetState
+    |           |-- board: Board | None
+    |           `-- ranges[0..5]: PlayerRange | None
+    |               `-- PlayerRange (player_range.py)
+    `-- EquityJob | None (equity_job.py)
+        |-- Future
+        |-- cancellation event
+        `-- latest progress + subscriber
 
-EquityJob worker ──calls──> RangeManager.calculate_equity()
-                              └── equity engine
+EquityJob worker --calls--> RangeManager.calculate_equity()
+                              `--> equity engine
 ```
 
 Each session owns a `RangeManager`. The session may also reference a job created with `start_equity_job()`. The application caller attaches and coordinates that job; it is **not automatically registered by the job factory**.
@@ -36,15 +39,15 @@ The `ThreadPoolExecutor` used for equity jobs is supplied by the caller and is n
 | Session creation, inactivity, deletion, cleanup | [Sessions and equity jobs](session-and-jobs.md) | [`session_manager.py`](../../../src/plorangelab/services/session_manager.py) |
 | Job submission, status, cancellation, progress notifications | [Sessions and equity jobs](session-and-jobs.md) | [`equity_job.py`](../../../src/plorangelab/services/equity_job.py) |
 | Adding/removing players, changing the shared board, invoking equity | [Range management](range-management.md) | [`range_manager.py`](../../../src/plorangelab/services/range_manager.py) |
-| Flop/turn/river state reuse, range carryover, board blockers | [Range management](range-management.md) | [`player_range_state.py`](../../../src/plorangelab/services/player_range_state.py) |
-| Filter groups, activation, weighted coverage, selected ranges | [Range management](range-management.md) | [`filter_manager.py`](../../../src/plorangelab/services/filter_manager.py) |
+| Flop/turn/river state reuse, range carryover, board blockers | [Range management](range-management.md) | [`range_manager.py`](../../../src/plorangelab/services/range_manager.py) |
+| Filter groups, activation, weighted coverage, selected ranges | [Range management](range-management.md) | [`player_range.py`](../../../src/plorangelab/services/player_range.py) |
 
 ## Follow a calculation through the code
 
 A useful investigation path is:
 
 1. **Find the session.** `SessionManager` returns a session with its own `RangeManager`.
-2. **Prepare ranges.** `RangeManager` creates/replaces player slots and updates their shared board. Each `PlayerRangeState` determines the active street and its `FilterManager`'s current range.
+2. **Prepare ranges.** `RangeManager` manages the shared PLO mode, all existing street states, and six player slots per street. Each occupied slot holds a `PlayerRange` responsible for that street's current filtered range.
 3. **Start work.** The caller invokes `start_equity_job()` with a `RangeManager` and an existing executor. The worker calls `RangeManager.calculate_equity()`.
 4. **Compute.** `calculate_equity()` gathers occupied players' current ranges and calls the equity engine.
 5. **Report results.** `EquityJob` retains the latest progress snapshot and notifies one subscriber; its `Future` holds the final result or exception.

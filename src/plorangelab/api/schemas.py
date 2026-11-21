@@ -17,6 +17,10 @@ from plorangelab.equity.results import StopReason
 from plorangelab.types import Mode
 
 
+class ModeRequest(BaseModel):
+    mode: Mode
+
+
 class BoardRequest(BaseModel):
     """Request to update or clear the shared community board.
 
@@ -49,18 +53,16 @@ class EquityDetails(BaseModel):
 
 class RangeRequest(BaseModel):
     hands: str
-    mode: Mode
 
 
 class EquityRequest(BaseModel):
-    """Specify the PLO mode and requested equity calculation precision.
+    """Specify requested equity calculation precision.
 
     The target margin of error must be greater than zero and at
     most 0.005. It is used by the equity engine when performing
     Monte Carlo calculations.
     """
 
-    mode: Mode
     target_moe: float = Field(gt=0, le=0.005)
 
 

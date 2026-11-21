@@ -13,6 +13,7 @@ Paths below are relative to the API host. Bodies and responses use JSON except w
 | Method | Path | Success | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/sessions` | 201 | Create an empty session. |
+| `PUT` | `/api/sessions/{session_id}/mode` | 204 | Change the session-wide PLO mode. |
 | `PUT` | `/api/sessions/{session_id}/board` | 200 | Set or clear the shared board. |
 | `PUT` | `/api/sessions/{session_id}/players/{player_id}` | 200 | Create or replace a player's range. |
 | `DELETE` | `/api/sessions/{session_id}/players/{player_id}` | 204 | Clear a player slot. |
@@ -23,9 +24,6 @@ Paths below are relative to the API host. Bodies and responses use JSON except w
 | `POST` | `/api/sessions/{session_id}/players/{player_id}/filters/clear` | 200 | Deactivate all filters without deleting them. |
 | `DELETE` | `/api/sessions/{session_id}/players/{player_id}/filters/{name}` | 200 | Delete a filter or group subtree. |
 | `DELETE` | `/api/sessions/{session_id}/players/{player_id}/groups/{name}` | 200 | Same deletion operation. |
-| `GET` | `/api/sessions/{session_id}/players/{player_id}/filters` | 200 | Retrieve the filter tree. |
-| `GET` | `/api/sessions/{session_id}/players/{player_id}/filters/{name}` | 200 | Retrieve one node. |
-| `GET` | `/api/sessions/{session_id}/players/{player_id}/groups/{name}` | 200 | Same node lookup. |
 
 The `/filters/{name}` and `/groups/{name}` aliases share handlers; the service identifies a node by **name and parent-group path**, not by the URL segment's asserted type. No session-list, session-detail, or session-delete REST route is present in the uploaded routers.
 
@@ -35,7 +33,7 @@ The `/filters/{name}` and `/groups/{name}` aliases share handlers; the service i
 
 `POST /api/sessions`
 
-No request body is defined. Creates a session with six empty player slots and no board.
+No request body is defined. Creates a session with six empty player slots, a preflop street state, no community board, and PLO4 as the default session-wide mode.
 
 **201 response** (`SessionResponse`; illustrative identifier):
 
@@ -46,6 +44,30 @@ No request body is defined. Creates a session with six empty player slots and no
 ```
 
 A session ID is required for subsequent requests. A successful session lookup refreshes its activity; inactivity expiration is checked on lookup, with a **30-minute** timeout when no unfinished equity job exists.
+
+### Change PLO mode
+
+`PUT /api/sessions/{session_id}/mode`
+
+**Request** (`ModeRequest`):
+
+```json
+{ "mode": 5 }
+```
+
+`mode` is required and must be `4` or `5`.
+
+The mode is shared by all players and streets within the session. A successful change determines how subsequently added ranges are encoded and how equity calculations are performed.
+
+Changing to the currently selected mode is a no-op, even when player ranges exist.
+
+Changing to a different mode is rejected if any player range exists in the session. The mode change does not clear the board or existing street states.
+
+**204 response:** no response body.
+
+**409 response:** a different mode was requested while player ranges exist in the session, or an unfinished equity calculation prevents mutation.
+
+**422 response:** invalid mode value.
 
 ### Update or clear board
 
@@ -108,14 +130,14 @@ See [Range Management](../backend/services/range-management.md).
 **Request** (`RangeRequest`):
 
 ```json
-{ "hands": "50%", "mode": 4 }
+{ "hands": "50%" }
 ```
 
 - `hands` is a required range-expression string. The encoder interprets supported percentage and explicit weighted-hand notation; see [encoding](../backend/encoding.md).
-- `mode` is required and must be **4** or **5**.
-- `player_id` must be in **0–5**.
+- The range is interpreted using the session's current PLO mode.
+- `player_id` must be in **0 through 5**.
 
-A new range **replaces** the slot's previous player state, including its saved filter configurations. If a board is already set, blocked hands are excluded before returning.
+A new range replaces the selected player's range and filter configurations across all existing streets. The manager recreates that player's preflop range and propagates it through existing postflop boards, removing blocked hands. Other player slots remain unchanged.
 
 **200 response** (`RangeResponse`; illustrative count):
 
@@ -129,7 +151,7 @@ The count is the player's **current** range size, after applying the board if ap
 
 `DELETE /api/sessions/{session_id}/players/{player_id}`
 
-**204 response:** no response body. Removes the player's range, street states, and filters, while leaving the shared board and other player slots unchanged. Removing an empty slot is allowed.
+**204 response:** no response body. Clears the selected player's slot across all existing street states while leaving the shared mode, boards, and other player slots unchanged. Removing an empty slot is allowed.
 
 ## Filters and groups
 
@@ -166,8 +188,6 @@ Each filter or group's `coverage` describes its membership coverage independentl
 
 The response contains the complete resulting filter tree, not only the modified node.
 
-Read-only GET endpoints continue returning filter trees or individual nodes rather than player snapshots.
-
 ### Addressing nested nodes
 
 On **POST** creation requests, `path` is a JSON array of parent group names, starting at the root:
@@ -180,7 +200,7 @@ On **POST** creation requests, `path` is a JSON array of parent group names, sta
 }
 ```
 
-On **GET**, **PATCH**, and **DELETE** node routes, supply the same parent path as **repeated query parameters**:
+On **PATCH** and **DELETE** node routes, supply the same parent path as **repeated query parameters**:
 
 ```text
 ?path=draws&path=blockers
@@ -296,8 +316,6 @@ Activating a leaf also activates its ancestor groups without activating siblings
 
 The response reflects the resulting activation state, filtered hand count, and effective weighted coverage.
 
-Activating a leaf also activates its ancestor groups without activating siblings. Activating a group recursively activates descendants; deactivating a group recursively deactivates them. Activation of a node whose membership matches zero hands is rejected.
-
 The snapshot's `filtered_coverage` may differ from the addressed node's membership `coverage`.
 
 ### Clear filters
@@ -324,8 +342,6 @@ No request body is used. **Deactivates** all filters and groups for that street 
   }
 }
 ```
-
-Clearing filters deactivates every filter and group on the current street without deleting their definitions or hierarchy.
 
 The effective range returns to the street's base range, so `filtered_hands` equals `base_hands` and `filtered_coverage` becomes `1.0`.
 
@@ -355,67 +371,28 @@ The response contains the complete updated filter tree with the deleted node rem
 
 The effective hand count and weighted coverage are recalculated based on the remaining active filters. In this example, deleting the only filter restores the unfiltered base range.
 
-### Retrieve the tree or a node
 
-Full tree:
-
-```text
-GET /api/sessions/{session_id}/players/{player_id}/filters
-```
-
-Single node (both aliases are supported):
-
-```text
-GET /api/sessions/{session_id}/players/{player_id}/filters/{name}
-GET /api/sessions/{session_id}/players/{player_id}/groups/{name}
-```
-
-Single-node lookup accepts repeated `path` query parameters.
-
-**200 response**: a dictionary keyed by root node names (full tree), or one node object (single lookup). A leaf uses `FilterInfoResponse`; a group uses recursive `FilterGroupInfoResponse`:
-
-```json
-{
-  "type": "group",
-  "name": "draws",
-  "coverage": 0.6,
-  "active": true,
-  "filters": {
-    "flush_draw": {
-      "type": "filter",
-      "name": "flush_draw",
-      "expression": "s",
-      "coverage": 0.35,
-      "active": true
-    }
-  }
-}
-```
-
-*Illustrative shape and values only; examples are not claims about the matching behavior of these particular expressions.* For a full-tree response, this group object would be nested under the root key `"draws"`.
-
-The `type` field is `"filter"` or `"group"`; group `filters` may contain nested groups and leaf filters. Node `coverage` is **membership coverage**, even for inactive nodes. The tree does not expose internal Boolean selection arrays or raw weighted hands.
 
 ## Error responses and validation
 
 | Status | When |
 | --- | --- |
-| **404** | A session is unknown, expired, or closed; filter read endpoints also use 404 for missing players/nodes. |
-| **409** | A mutation is attempted while a session's equity calculation has an unfinished future. |
-| **422** | Invalid request field/path value; invalid domain operation (bad board/range/filter/group path, missing mutation target, duplicate name, etc.). |
+| **404** | A session is unknown, expired, or closed. |
+| **409** | A mutation is attempted while an equity calculation is unfinished, or a different PLO mode is requested while active-street player ranges exist. |
+| **422** | Invalid request field/path value or invalid domain operation, such as a bad board, range, filter expression, group path, or missing mutation target. |
 
 The API has **two 422 response styles**:
 
 - Request validation errors generated by FastAPI/Pydantic typically contain a structured list under `detail`.
 - Domain `ValueError` exceptions caught by routers produce a string under `detail`, for example `{"detail": "..."}`.
 
-A service-level missing node yields **422 for a mutation** but **404 for a read** in the current router implementation. The code also does not provide an explicit HTTP `DELETE /api/sessions/{session_id}` route.
+Missing filter or group nodes during mutations produce HTTP 422. The old filter-tree GET endpoints are no longer exposed; complete filter trees are returned through successful mutation responses and board-change snapshots. The code also does not provide an explicit HTTP `DELETE /api/sessions/{session_id}` route.
 
 ## Concurrency and session lifetime
 
-REST mutations run under `editable_session()`, which acquires the session lock and rejects any unfinished equity job with **409**. Filter reads use `locked_session()`, which checks that the session is open but does not reject reads merely because a calculation is running.
+REST mutations, including mode changes, run under `editable_session()`, which acquires the session lock and rejects unfinished equity jobs with HTTP 409. Service-level range and filter updates prepare replacement state before publishing successful changes, but clone-based failure atomicity is not a substitute for synchronization.
 
-Retrieving a session through an API dependency refreshes its activity. Sessions can expire on lookup after **30 minutes** of inactivity when no job is unfinished; expiration is not performed by a periodic REST endpoint or background sweeper in the reviewed code.
+Retrieving a session through an API dependency refreshes its activity. Sessions can expire on lookup after **30 minutes** of inactivity when no job is unfinished; expiration is not performed by a periodic REST endpoint or background sweeper in the current implementation.
 
 ## Related documentation
 

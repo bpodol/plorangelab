@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { createSession, changeBoard } from './api/sessions';
+import { createSession, changeBoard, changeMode } from './api/sessions';
 import { BoardInput } from './components/BoardInput';
 import { PlayerRangeInput } from './components/PlayerRangeInput';
 import { EquityPanel } from './components/EquityPanel';
@@ -37,6 +37,7 @@ function App() {
   const [boardMessage, setBoardMessage] = useState<string | null>(null);
   const [isApplyingBoard, setIsApplyingBoard] = useState(false);
   const [mode, setMode] = useState<4 | 5>(4);
+  const [isChangingMode, setIsChangingMode] = useState(false);
   const { equityStatus, isConnected, equityMessage, startEquity, cancelEquity } =
     useEquitySocket(sessionId);
   const {
@@ -50,7 +51,7 @@ function App() {
     toggleFilterActive,
     removeFilter,
     clearAllFilters,
-  } = usePlayerRanges(sessionId, mode);
+  } = usePlayerRanges(sessionId);
 
   /**
    * Create a backend session on application startup or manual retry.
@@ -125,6 +126,22 @@ function App() {
     }
   }
 
+  async function handleChangeMode(nextMode: 4 | 5) {
+    if (sessionId === null) return;
+
+    setIsChangingMode(true);
+    setError(null);
+
+    try {
+      await changeMode(sessionId, nextMode);
+      setMode(nextMode);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsChangingMode(false);
+    }
+  }
+
   return (
     <main>
       <h1>PLO RangeLab</h1>
@@ -144,8 +161,12 @@ function App() {
         <select
           id="mode"
           value={mode}
-          onChange={(event) => setMode(Number(event.target.value) as 4 | 5)}
-          disabled={players.some((player) => player.hasAppliedRange || player.isLoading)}
+          onChange={(event) => handleChangeMode(Number(event.target.value) as 4 | 5)}
+          disabled={
+            players.some((player) => player.hasAppliedRange || player.isLoading) ||
+            sessionId === null ||
+            isChangingMode
+          }
         >
           <option value={4}>PLO4</option>
           <option value={5}>PLO5</option>
@@ -185,7 +206,7 @@ function App() {
               onRangeChange={(value) => updatePlayer(index, { range: value })}
               onAdd={() => handleAddRange(index)}
               onDelete={() => handleDeleteRange(index)}
-              disabled={sessionId === null || player.isLoading}
+              disabled={sessionId === null || player.isLoading || isChangingMode}
               isLoading={player.isLoading}
               error={player.error}
               hasAppliedRange={player.hasAppliedRange}

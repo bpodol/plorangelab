@@ -29,8 +29,7 @@ def test_start_job_forwards_progress_and_returns_result() -> None:
     update = object()
     result = object()
 
-    def calculate_equity(*, mode, target_moe, on_progress, cancel_event):
-        assert mode == 4
+    def calculate_equity(*, target_moe, on_progress, cancel_event):
         assert target_moe == 0.002
         assert not cancel_event.is_set()
         on_progress(update)
@@ -42,7 +41,6 @@ def test_start_job_forwards_progress_and_returns_result() -> None:
         job = start_equity_job(
             manager=manager,
             executor=executor,
-            mode=4,
             target_moe=0.002,
             on_finished=on_finished,
         )
@@ -70,7 +68,6 @@ def test_cancel_signals_running_calculation() -> None:
         job = start_equity_job(
             manager=manager,
             executor=executor,
-            mode=4,
             target_moe=0.002,
         )
         assert job.future is not None
@@ -92,7 +89,6 @@ def test_on_finished_runs_if_calculation_fails() -> None:
         job = start_equity_job(
             manager=manager,
             executor=executor,
-            mode=4,
             target_moe=0.002,
             on_finished=on_finished,
         )

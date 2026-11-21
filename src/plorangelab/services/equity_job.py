@@ -12,7 +12,6 @@ from threading import Event, Lock
 from typing import Literal
 
 from plorangelab.equity import EquityResult, MonteCarloResult
-from plorangelab.types import Mode
 
 from .range_manager import RangeManager
 
@@ -172,7 +171,6 @@ class EquityJob:
 def start_equity_job(
     manager: RangeManager,
     executor: ThreadPoolExecutor,
-    mode: Mode,
     target_moe: float,
     on_finished: Callable[[], None] | None = None,
 ) -> EquityJob:
@@ -213,7 +211,6 @@ def start_equity_job(
     def run():
         try:
             return manager.calculate_equity(
-                mode=mode,
                 target_moe=target_moe,
                 on_progress=on_progress,
                 cancel_event=job.cancel_event,

@@ -1,4 +1,8 @@
-"""Tests for the range manager's player slots, board updates, and equity delegation."""
+"""Integration tests for RangeManager V2's street-centered range state.
+
+Keep the real encoder, filtering engine, and board sanitization; mock only the
+rating lookup input and the expensive equity computation.
+"""
 
 from threading import Event
 from types import SimpleNamespace
@@ -8,15 +12,18 @@ import pytest
 
 from plorangelab.encoder import encode_range
 from plorangelab.services import range_manager as manager_module
-from plorangelab.services.filter_manager import FilterAddress
-from plorangelab.services.range_manager import RangeManager
+from plorangelab.services.player_range import FilterAddress, PlayerRange
+from plorangelab.services.range_manager import RangeManager, Street
 
 BASE_RANGE = "AsAhKdQc,KsKhJdTd,QsQhJcTc,9s9h8d8c"
+FLOP = "2c3d5h"
+TURN = "2c3d5h7s"
+RIVER = "2c3d5h7s9d"
 
 
 @pytest.fixture
 def manager(monkeypatch: pytest.MonkeyPatch) -> RangeManager:
-    # Keep real range encoding and street logic, but skip rating-table loading.
+    # Use actual encoding/filtering rules but avoid loading rating tables.
     monkeypatch.setattr(
         manager_module,
         "encode_input",
@@ -29,130 +36,171 @@ def manager(monkeypatch: pytest.MonkeyPatch) -> RangeManager:
     return RangeManager(resources)
 
 
+def player_at(manager: RangeManager, street: Street, slot: int) -> PlayerRange:
+    """Access the manager for a slot on a particular existing street."""
+    player = manager._streets[street].ranges[slot]
+    assert player is not None
+    return player
+
+
 def test_add_replace_and_remove_range(manager: RangeManager) -> None:
-    assert manager.players == [None] * 6
-    assert manager.board is None
+    assert manager.mode == 4
+    assert manager._active_street is Street.PREFLOP
+    assert set(manager._streets) == {Street.PREFLOP}
+    assert manager._current_state.board is None
+    assert manager._current_state.ranges == [None] * 6
 
-    manager.add_range(BASE_RANGE, mode=4, player_index=2)
-    first_player = manager.players[2]
-    assert first_player is not None
-    assert first_player.id == 2
-    assert first_player.mode == 4
-    assert first_player.active_street is first_player.preflop
+    manager.add_range(BASE_RANGE, 2)
+    first = player_at(manager, Street.PREFLOP, 2)
+    assert first.mode == 4
+    assert len(first.base_range.hands) == 4
+    assert first.current_range is first.base_range
+    assert all(
+        player is None
+        for slot, player in enumerate(manager._current_state.ranges)
+        if slot != 2
+    )
 
-    manager.add_range("JsJhTdTc", mode=4, player_index=2)
-    assert manager.players[2] is not first_player
-    assert len(manager.players[2].preflop.filter_manager.base_range.masks) == 1
-    assert all(player is None for i, player in enumerate(manager.players) if i != 2)
+    manager.add_range("JsJhTdTc", 2)
+    replacement = player_at(manager, Street.PREFLOP, 2)
+    assert replacement is not first
+    assert len(replacement.base_range.masks) == 1
 
     manager.remove_range(2)
-    assert manager.players == [None] * 6
+    assert manager._current_state.ranges == [None] * 6
 
 
-@pytest.mark.parametrize("index", [-1, 6])
-def test_invalid_player_index_raises(manager: RangeManager, index: int) -> None:
-    with pytest.raises(ValueError, match="Out of range player index"):
-        manager.add_range(BASE_RANGE, mode=4, player_index=index)
+@pytest.mark.parametrize("slot", [-1, 6])
+def test_invalid_slot_rejected(manager: RangeManager, slot: int) -> None:
+    with pytest.raises(ValueError, match="Out of range slot index"):
+        manager.add_range(BASE_RANGE, slot)
+    with pytest.raises(ValueError, match="Out of range slot index"):
+        manager.remove_range(slot)
+    with pytest.raises(ValueError, match="Out of range slot index"):
+        manager.add_filter("AA", slot)
+    with pytest.raises(ValueError, match="Out of range slot index"):
+        manager.clear_filters(slot)
 
-    with pytest.raises(ValueError, match="Out of range player index"):
-        manager.remove_range(index)
+
+def test_filter_commands_reject_empty_slots(manager: RangeManager) -> None:
+    with pytest.raises(ValueError, match="empty"):
+        manager.add_filter("AA", 0)
+    with pytest.raises(ValueError, match="empty"):
+        manager.add_group("premium", 1)
+    with pytest.raises(ValueError, match="empty"):
+        manager.clear_filters(2)
 
 
-def test_change_board_updates_players_without_mutating_old_states(
+def test_change_board_creates_shared_street_without_mutating_preflop(
     manager: RangeManager,
 ) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=0)
-    manager.add_range("JsJhTdTc", mode=4, player_index=5)
-    previous_players = manager.players.copy()
+    manager.add_range(BASE_RANGE, 0)
+    manager.add_range("JsJhTdTc", 5)
+    preflop = manager._streets[Street.PREFLOP]
+    old_player_0 = player_at(manager, Street.PREFLOP, 0)
+    old_player_5 = player_at(manager, Street.PREFLOP, 5)
 
-    snapshots = manager.change_board("2c3d5h")
+    snapshots = manager.change_board(FLOP)
+
+    assert manager._active_street is Street.FLOP
+    assert set(manager._streets) == {Street.PREFLOP, Street.FLOP}
+    assert manager._streets[Street.PREFLOP] is preflop
+    assert player_at(manager, Street.PREFLOP, 0) is old_player_0
+    assert player_at(manager, Street.PREFLOP, 5) is old_player_5
+    assert manager._current_state.board is not None
+    assert not manager._current_state.board.cards.flags.writeable
+    assert manager._current_state.ranges[1:5] == [None] * 4
+    assert player_at(manager, Street.FLOP, 0) is not old_player_0
+    assert player_at(manager, Street.FLOP, 5) is not old_player_5
 
     assert len(snapshots) == 6
     assert snapshots[1:5] == [None] * 4
-
     assert snapshots[0].base_hands == 4
     assert snapshots[0].filtered_hands == 4
-    assert snapshots[0].filtered_coverage == 1.0
+    assert snapshots[0].filtered_coverage == pytest.approx(1.0)
     assert snapshots[0].filters == {}
-
     assert snapshots[5].base_hands == 1
     assert snapshots[5].filtered_hands == 1
 
-    assert manager.board is not None
-    assert manager.players[1:5] == [None] * 4
-    for index in (0, 5):
-        previous = previous_players[index]
-        current = manager.players[index]
-        assert current is not previous
-        assert previous.flop is None
-        assert current.active_street is current.flop
-        assert current.flop.board is manager.board
 
+def test_change_board_failure_is_atomic_for_all_slots(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.add_range("AsAhKdQc", 3)
+    manager.change_board(FLOP)
+    original_streets = manager._streets
+    original_street = manager._active_street
+    original_flop = manager._current_state
 
-def test_change_board_failure_preserves_all_player_states(
-    manager: RangeManager,
-) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=0)
-    manager.add_range("AsAhKdQc", mode=4, player_index=3)
-    manager.change_board("2c3d5h")
-    previous_board = manager.board
-    previous_players = manager.players.copy()
-
-    # The first player's range survives, but the second player's range does not.
+    # One player's range survives, but slot 3 has no remaining hands.
     with pytest.raises(ValueError, match="No combinations left"):
         manager.change_board("2c3dAs")
 
-    assert manager.board is previous_board
-    assert all(
-        current is previous
-        for current, previous in zip(manager.players, previous_players, strict=True)
-    )
+    assert manager._streets is original_streets
+    assert manager._active_street is original_street
+    assert manager._current_state is original_flop
 
 
-def test_add_range_respects_current_board_and_failure_keeps_slot(
+def test_invalid_board_does_not_change_state(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    original_streets = manager._streets
+
+    with pytest.raises(ValueError):
+        manager.change_board("2c2c5h")
+
+    assert manager._streets is original_streets
+    assert manager._active_street is Street.FLOP
+
+
+def test_add_range_on_active_board_and_failed_replacement_is_atomic(
     manager: RangeManager,
 ) -> None:
-    manager.change_board("2c3d5h")
-    manager.add_range(BASE_RANGE, mode=4, player_index=2)
-    previous_player = manager.players[2]
+    manager.change_board(FLOP)
+    manager.add_range(BASE_RANGE, 2)
+    first_flop = player_at(manager, Street.FLOP, 2)
+    first_preflop = player_at(manager, Street.PREFLOP, 2)
+    previous_streets = manager._streets
 
-    assert previous_player.active_street is previous_player.flop
-    assert previous_player.flop.board is manager.board
+    assert len(first_flop.base_range.hands) == 4
+    assert first_flop is not first_preflop
 
     with pytest.raises(ValueError, match="No combinations left"):
-        manager.add_range("2cAsAhKd", mode=4, player_index=2)
+        manager.add_range("2cAsAhKd", 2)
 
-    assert manager.players[2] is previous_player
-
-
-def test_clear_board_returns_players_to_preflop(
-    manager: RangeManager,
-) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=1)
-    manager.change_board("2c3d5h")
-    previous_player = manager.players[1]
-
-    manager.clear_board()
-
-    current = manager.players[1]
-    assert manager.board is None
-    assert current is not previous_player
-    assert current.active_street is current.preflop
-    assert current.flop is current.turn is current.river is None
-    assert current.preflop.current_range is previous_player.preflop.current_range
-    assert previous_player.flop is not None
+    assert manager._streets is previous_streets
+    assert player_at(manager, Street.FLOP, 2) is first_flop
+    assert player_at(manager, Street.PREFLOP, 2) is first_preflop
 
 
-@pytest.mark.parametrize("board_text", [None, "2c3d5h"])
-def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
+def test_clearing_board_preserves_preflop_filters(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 1)
+    manager.add_filter("AA", 1)
+    preflop_snapshot = manager.set_filter_active("AA", 1, True)
+    preflop = manager._streets[Street.PREFLOP]
+    manager.change_board(FLOP)
+    old_flop = manager._streets[Street.FLOP]
+
+    snapshots = manager.change_board(None)
+
+    assert manager._active_street is Street.PREFLOP
+    assert set(manager._streets) == {Street.PREFLOP}
+    assert manager._current_state is preflop
+    assert manager._current_state.board is None
+    assert snapshots[1] == preflop_snapshot
+    assert snapshots[:1] + snapshots[2:] == [None] * 5
+    assert old_flop.board is not None  # Previously captured state unchanged.
+
+
+@pytest.mark.parametrize("board", [None, FLOP])
+def test_equity_delegation_preserves_slot_order_and_arguments(
     manager: RangeManager,
     monkeypatch: pytest.MonkeyPatch,
-    board_text: str | None,
+    board: str | None,
 ) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=5)
-    manager.add_range("JsJhTdTc", mode=4, player_index=1)
-    if board_text is not None:
-        manager.change_board(board_text)
+    manager.add_range(BASE_RANGE, 5)
+    manager.add_range("JsJhTdTc", 1)
+    if board is not None:
+        manager.change_board(board)
 
     expected_result = object()
     compute_mock = Mock(return_value=expected_result)
@@ -161,7 +209,6 @@ def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
     cancel_event = Event()
 
     ids, result = manager.calculate_equity(
-        mode=4,
         on_progress=on_progress,
         cancel_event=cancel_event,
         target_moe=0.002,
@@ -173,221 +220,341 @@ def test_calculate_equity_forwards_active_ranges_and_returns_slot_ids(
     kwargs = compute_mock.call_args.kwargs
     assert len(kwargs["players"]) == 2
     assert all(
-        actual is manager.players[index].current_range
-        for actual, index in zip(kwargs["players"], ids, strict=True)
+        current is player_at(manager, manager._active_street, slot).current_range
+        for current, slot in zip(kwargs["players"], ids, strict=True)
     )
-    assert kwargs["mode"] == 4
-    assert kwargs["board"] is (manager.board.cards if manager.board else None)
+    assert kwargs["mode"] == manager.mode
+    assert kwargs["board"] is (
+        manager._current_state.board.cards if board is not None else None
+    )
     assert kwargs["on_progress"] is on_progress
     assert kwargs["cancel_event"] is cancel_event
     assert kwargs["target_moe"] == 0.002
-    assert kwargs["rank_lookup"] is manager.rank_lookup
+    assert kwargs["rank_lookup"] is manager.resources.rank_lookup
 
 
-def test_none_board_resets_players(manager: RangeManager):
-    manager.add_range("AsAhKdQc", mode=4, player_index=0)
-    manager.change_board("2c3d4h")
+def test_filter_edits_are_copy_on_write_and_return_snapshots(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    original = player_at(manager, Street.PREFLOP, 0)
 
-    assert manager.players[0].active_street is manager.players[0].flop
-
-    snapshots = manager.change_board(None)
-
-    assert len(snapshots) == 6
-    assert snapshots[0].base_hands == 1
-    assert snapshots[0].filtered_hands == 1
-    assert snapshots[0].filters == {}
-    assert snapshots[1:] == [None] * 5
-
-    player = manager.players[0]
-
-    assert manager.board is None
-    assert player.active_street is player.preflop
-    assert player.flop is None
-    assert player.turn is None
-    assert player.river is None
-
-
-def test_filter_updates_are_copy_on_write(manager: RangeManager) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=0)
-    original = manager.players[0]
-    snapshot = manager.add_filter("AA", player_index=0, name="aces")
-    assert snapshot.base_hands == 4
-    assert snapshot.filtered_hands == 4
-    assert snapshot.filtered_coverage == 1.0
-    assert snapshot.filters["aces"]["coverage"] == pytest.approx(0.25)
-    assert snapshot.filters["aces"]["active"] is False
-    after_save = manager.players[0]
+    saved = manager.add_filter("AA", 0, name="aces")
+    after_save = player_at(manager, Street.PREFLOP, 0)
     assert after_save is not original
-    assert original.current_range is original.preflop.filter_manager.base_range
-    assert after_save.current_range is after_save.preflop.filter_manager.base_range
+    assert original.current_range is original.base_range
+    assert after_save.current_range is after_save.base_range
+    assert saved.base_hands == 4
+    assert saved.filtered_hands == 4
+    assert saved.filtered_coverage == pytest.approx(1.0)
+    assert saved.filters["aces"]["coverage"] == pytest.approx(0.25)
+    assert saved.filters["aces"]["active"] is False
 
-    snapshot = manager.set_filter_active("aces", player_index=0, active=True)
-    assert snapshot.base_hands == 4
-    assert snapshot.filtered_hands == 1
-    assert snapshot.filtered_coverage == pytest.approx(0.25)
-    assert snapshot.filters["aces"]["active"] is True
-    activated = manager.players[0]
+    activated_snapshot = manager.set_filter_active("aces", 0, True)
+    activated = player_at(manager, Street.PREFLOP, 0)
     assert activated is not after_save
     assert len(activated.current_range.masks) == 1
-    assert not after_save.preflop.filter_manager.get_node(FilterAddress("aces")).active
+    assert activated_snapshot.filtered_hands == 1
+    assert activated_snapshot.filtered_coverage == pytest.approx(0.25)
+    assert activated_snapshot.filters["aces"]["active"] is True
+    assert not after_save.get_node(FilterAddress("aces")).active
+    assert saved.filters["aces"]["active"] is False  # Snapshot is detached.
 
     with pytest.raises(ValueError):
-        manager.add_filter("A|", player_index=0)
-    assert manager.players[0] is activated
+        manager.add_filter("A|", 0)
+    assert player_at(manager, Street.PREFLOP, 0) is activated
 
-    snapshot = manager.clear_filters(player_index=0)
-    assert snapshot.filtered_hands == 4
-    assert snapshot.filtered_coverage == 1.0
-    assert "aces" in snapshot.filters
-    assert snapshot.filters["aces"]["active"] is False
-    assert manager.players[0].current_range is (
-        manager.players[0].preflop.filter_manager.base_range
-    )
-    assert (
-        not manager.players[0]
-        .preflop.filter_manager.get_node(FilterAddress("aces"))
-        .active
-    )
+    cleared = manager.clear_filters(0)
+    current = player_at(manager, Street.PREFLOP, 0)
+    assert cleared.filtered_hands == 4
+    assert cleared.filtered_coverage == pytest.approx(1.0)
+    assert cleared.filters["aces"]["active"] is False
+    assert current.current_range is current.base_range
+    assert not current.get_node(FilterAddress("aces")).active
 
 
-def test_nested_group_management_via_range_manager(manager: RangeManager) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=2)
-    snapshot = manager.add_group("premium", player_index=2)
-
-    assert snapshot.filtered_coverage == 1.0
-    assert snapshot.filters["premium"]["type"] == "group"
-    assert snapshot.filters["premium"]["filters"] == {}
-
-    manager.add_filter("AA", player_index=2, path=("premium",))
-    manager.add_filter("KK", player_index=2, path=("premium",))
-    snapshot = manager.set_filter_active("premium", player_index=2, active=True)
-    assert snapshot.filtered_coverage == pytest.approx(0.5)
-    assert snapshot.filtered_hands == 2
-    assert snapshot.filters["premium"]["active"] is True
-    assert len(manager.players[2].current_range.masks) == 2
-
-    snapshot = manager.set_filter_active(
-        "KK", player_index=2, active=False, path=("premium",)
-    )
-    assert snapshot.filtered_coverage == pytest.approx(0.25)
-    assert snapshot.filtered_hands == 1
-    assert snapshot.filters["premium"]["filters"]["KK"]["active"] is False
-    assert len(manager.players[2].current_range.masks) == 1
-
-    snapshot = manager.delete_filter("AA", player_index=2, path=("premium",))
-    assert snapshot.filtered_coverage == 1.0
-    assert snapshot.filtered_hands == 4
-    assert "AA" not in snapshot.filters["premium"]["filters"]
-    assert manager.players[2].current_range is (
-        manager.players[2].active_street.filter_manager.base_range
-    )
-
-
-def test_filter_commands_reject_invalid_and_empty_slots(manager: RangeManager) -> None:
-    with pytest.raises(ValueError, match="empty"):
-        manager.add_filter("A", player_index=0)
-    with pytest.raises(ValueError, match="empty"):
-        manager.add_group("premium", player_index=1)
-    for index in (-1, 6):
-        with pytest.raises(ValueError, match="index"):
-            manager.add_filter("A", player_index=index)
-        with pytest.raises(ValueError, match="index"):
-            manager.clear_filters(player_index=index)
-
-
-def test_equity_receives_filtered_range_after_activation(
+def test_snapshot_creation_failure_does_not_publish_mutation(
     manager: RangeManager, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=0)
-    manager.add_filter("QQ", player_index=0)
-    manager.set_filter_active("QQ", player_index=0, active=True)
+    manager.add_range(BASE_RANGE, 0)
+    original = player_at(manager, Street.PREFLOP, 0)
+
+    def broken_tree(_self: PlayerRange) -> dict[str, object]:
+        raise RuntimeError("snapshot failed")
+
+    monkeypatch.setattr(PlayerRange, "get_tree", broken_tree)
+    with pytest.raises(RuntimeError, match="snapshot failed"):
+        manager.add_group("premium", 0)
+
+    assert player_at(manager, Street.PREFLOP, 0) is original
+    assert "premium" not in original.filters
+
+
+def test_nested_groups_through_manager(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 2)
+    created = manager.add_group("premium", 2)
+    assert created.filters["premium"]["type"] == "group"
+    assert created.filters["premium"]["filters"] == {}
+
+    manager.add_filter("AA", 2, path=("premium",))
+    manager.add_filter("KK", 2, path=("premium",))
+    grouped = manager.set_filter_active("premium", 2, True)
+    assert grouped.filtered_coverage == pytest.approx(0.5)
+    assert grouped.filtered_hands == 2
+    assert grouped.filters["premium"]["active"] is True
+
+    without_kings = manager.set_filter_active("KK", 2, False, path=("premium",))
+    assert without_kings.filtered_coverage == pytest.approx(0.25)
+    assert without_kings.filtered_hands == 1
+    assert without_kings.filters["premium"]["filters"]["KK"]["active"] is False
+
+    deleted = manager.delete_filter("AA", 2, path=("premium",))
+    assert deleted.filtered_coverage == pytest.approx(1.0)
+    assert deleted.filtered_hands == 4
+    assert "AA" not in deleted.filters["premium"]["filters"]
+    player = player_at(manager, Street.PREFLOP, 2)
+    assert player.current_range is player.base_range
+
+
+def test_equity_receives_active_filtered_range(
+    manager: RangeManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.add_filter("QQ", 0)
+    manager.set_filter_active("QQ", 0, True)
 
     compute_mock = Mock(return_value=object())
     monkeypatch.setattr(manager_module, "compute_equity", compute_mock)
-    manager.calculate_equity(mode=4)
+    manager.calculate_equity()
 
     passed_range = compute_mock.call_args.kwargs["players"][0]
-    assert passed_range is manager.players[0].current_range
+    assert passed_range is player_at(manager, Street.PREFLOP, 0).current_range
     assert len(passed_range.masks) == 1
 
 
-def test_filtered_preflop_range_carries_to_board(
+def test_filtered_preflop_range_carries_to_flop(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.add_filter("AA", 0)
+    manager.set_filter_active("AA", 0, True)
+    preflop = player_at(manager, Street.PREFLOP, 0)
+
+    snapshots = manager.change_board(FLOP)
+    flop = player_at(manager, Street.FLOP, 0)
+
+    assert snapshots[0].filtered_hands == 1
+    assert snapshots[0].filtered_coverage == pytest.approx(1.0)
+    assert len(flop.base_range.hands) == 1
+    assert flop.base_range is not preflop.base_range
+    assert flop.get_tree() == {}
+    assert preflop.get_node(FilterAddress("AA")).active
+
+
+def test_board_street_progression_carries_filtered_parent_ranges(
     manager: RangeManager,
 ) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=0)
-    manager.add_filter("AA", player_index=0)
-    manager.set_filter_active("AA", player_index=0, active=True)
-    old_player = manager.players[0]
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    manager.add_filter("KK", 0)
+    manager.set_filter_active("KK", 0, True)
+    flop = player_at(manager, Street.FLOP, 0)
 
-    snapshots = manager.change_board("2c3d5h")
-    snapshot = snapshots[0]
+    turn_snapshots = manager.change_board(TURN)
+    turn = player_at(manager, Street.TURN, 0)
+    assert turn_snapshots[0].base_hands == 1
+    assert turn.get_tree() == {}
+    assert len(turn.current_range.masks) == 1
 
-    assert snapshot.filtered_hands == 1
-    assert snapshot.filtered_coverage == pytest.approx(1.0)
-    updated_player = manager.players[0]
-    assert updated_player is not old_player
-    assert len(updated_player.current_range.masks) == 1
-    assert updated_player.flop.filter_manager.base_range is not (
-        updated_player.preflop.filter_manager.base_range
-    )
-    assert updated_player.preflop.filter_manager.get_node(FilterAddress("AA")).active
-
-
-def test_filter_retrieval_delegates_to_correct_player(
-    manager: RangeManager,
-) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=2)
-    manager.add_range(BASE_RANGE, mode=4, player_index=4)
-
-    manager.add_group("premium", player_index=2)
-    manager.add_filter(
-        "AA",
-        player_index=2,
-        name="aces",
-        path=("premium",),
-    )
-    manager.add_filter("KK", player_index=4, name="kings")
-
-    player = manager.players[2]
-
-    tree = manager.get_filters(player_index=2)
-
-    assert set(tree) == {"premium"}
-    assert (
-        manager.get_filter(
-            "aces",
-            player_index=2,
-            path=("premium",),
-        )
-        == tree["premium"]["filters"]["aces"]
-    )
-
-    assert set(manager.get_filters(player_index=4)) == {"kings"}
-
-    # Read operations must not clone or replace player state.
-    assert manager.players[2] is player
+    manager.add_group("turn-only", 0)
+    updated_turn = player_at(manager, Street.TURN, 0)
+    assert updated_turn is not turn  # Filter edits replace their manager.
+    river_snapshots = manager.change_board(RIVER)
+    river = player_at(manager, Street.RIVER, 0)
+    assert river_snapshots[0].base_hands == 1
+    assert river.get_tree() == {}
+    assert "turn-only" in updated_turn.get_tree()
+    assert flop.get_node(FilterAddress("KK")).active
 
 
-@pytest.mark.parametrize("board", [None, "2c3d5h"])
-def test_change_board_without_players_returns_empty_snapshots(
-    manager: RangeManager,
-    board: str | None,
-) -> None:
-    snapshots = manager.change_board(board)
+def test_reordered_same_board_reuses_street_and_filters(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 2)
+    manager.change_board(FLOP)
+    manager.add_filter("AA", 2, name="aces")
+    expected = manager.set_filter_active("aces", 2, True)
+    previous = manager._current_state
 
-    assert snapshots == [None] * 6
+    snapshots = manager.change_board("5h2c3d")
+
+    assert manager._current_state is previous
+    assert snapshots[2] == expected
+    assert manager._current_state.board is previous.board
 
 
-def test_change_board_restores_cached_filter_snapshot(
-    manager: RangeManager,
-) -> None:
-    manager.add_range(BASE_RANGE, mode=4, player_index=2)
-    manager.change_board("2c3d5h")
+def test_revisiting_flop_discards_later_streets(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 2)
+    manager.change_board(FLOP)
+    manager.add_filter("AA", 2, name="aces")
+    expected = manager.set_filter_active("aces", 2, True)
+    flop = manager._streets[Street.FLOP]
+    manager.change_board(TURN)
+    manager.change_board(RIVER)
 
-    manager.add_filter("AA", player_index=2, name="aces")
-    expected = manager.set_filter_active("aces", player_index=2, active=True)
-
-    manager.change_board("2c3d5h7s")
-    snapshots = manager.change_board("2c3d5h")
+    snapshots = manager.change_board(FLOP)
 
     assert snapshots[2] == expected
+    assert manager._current_state is flop
+    assert set(manager._streets) == {Street.PREFLOP, Street.FLOP}
+
+
+def test_changing_turn_card_preserves_flop_but_rebuilds_turn_and_river(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    flop = manager._streets[Street.FLOP]
+    manager.change_board(TURN)
+    old_turn = manager._streets[Street.TURN]
+    manager.add_group("old-turn-filter", 0)
+    manager.change_board(RIVER)
+
+    manager.change_board("2c3d5h8s")
+
+    assert manager._current_state is manager._streets[Street.TURN]
+    assert manager._streets[Street.FLOP] is flop
+    assert manager._streets[Street.TURN] is not old_turn
+    assert player_at(manager, Street.TURN, 0).get_tree() == {}
+    assert Street.RIVER not in manager._streets
+
+
+def test_changing_flop_invalidates_incompatible_following_streets(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    old_flop = manager._streets[Street.FLOP]
+    manager.change_board(TURN)
+    manager.change_board(RIVER)
+    original_preflop = manager._streets[Street.PREFLOP]
+
+    manager.change_board("2c3d6h")
+
+    assert manager._active_street is Street.FLOP
+    assert set(manager._streets) == {Street.PREFLOP, Street.FLOP}
+    assert manager._streets[Street.PREFLOP] is original_preflop
+    assert manager._streets[Street.FLOP] is not old_flop
+
+
+def test_skip_street_uses_closest_compatible_parent(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    manager.add_filter("QQ", 0)
+    manager.set_filter_active("QQ", 0, True)
+
+    snapshots = manager.change_board(RIVER)
+
+    assert set(manager._streets) == {Street.PREFLOP, Street.FLOP, Street.RIVER}
+    assert snapshots[0].base_hands == 1
+    assert manager._active_street is Street.RIVER
+    assert player_at(manager, Street.RIVER, 0).get_tree() == {}
+
+
+def test_replace_player_updates_all_cached_streets_only_for_that_slot(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.add_range(BASE_RANGE, 5)
+    manager.change_board(FLOP)
+    manager.add_filter("AA", 0)
+    manager.change_board(TURN)
+    manager.add_group("turn-group", 0)
+    old_other = {street: player_at(manager, street, 5) for street in manager._streets}
+    old_slot = {street: player_at(manager, street, 0) for street in manager._streets}
+
+    manager.add_range("JsJhTdTc", 0)
+
+    for street in manager._streets:
+        replacement = player_at(manager, street, 0)
+        assert replacement is not old_slot[street]
+        assert len(replacement.base_range.hands) == 1
+        assert replacement.get_tree() == {}
+        assert player_at(manager, street, 5) is old_other[street]
+
+
+def test_remove_player_removes_it_from_every_street(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.add_range(BASE_RANGE, 5)
+    manager.change_board(FLOP)
+    manager.change_board(TURN)
+    before_other = {
+        street: player_at(manager, street, 5) for street in manager._streets
+    }
+
+    manager.remove_range(0)
+
+    assert all(state.ranges[0] is None for state in manager._streets.values())
+    assert all(
+        player_at(manager, street, 5) is other for street, other in before_other.items()
+    )
+
+
+@pytest.mark.parametrize("board", [None, FLOP])
+def test_change_board_without_players_returns_empty_snapshots(
+    manager: RangeManager, board: str | None
+) -> None:
+    assert manager.change_board(board) == [None] * 6
+
+
+def test_change_mode_is_no_op_for_same_mode(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    original_streets = manager._streets
+
+    manager.change_mode(4)
+
+    assert manager._streets is original_streets
+    assert manager._active_street is Street.FLOP
+
+
+def test_change_mode_rejects_active_ranges_without_changing_state(
+    manager: RangeManager,
+) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    manager.change_board(FLOP)
+    manager.add_filter("AA", 0)
+    manager.set_filter_active("AA", 0, True)
+    original_streets = manager._streets
+    original_street = manager._active_street
+    original_state = manager._current_state
+
+    with pytest.raises(
+        RuntimeError, match="Cannot change mode with active player ranges"
+    ):
+        manager.change_mode(5)
+
+    assert manager.mode == 4
+    assert manager._streets is original_streets
+    assert manager._active_street is original_street
+    assert manager._current_state is original_state
+    assert player_at(manager, Street.FLOP, 0).get_node(FilterAddress("AA")).active
+
+
+def test_change_mode_succeeds_without_active_ranges(manager: RangeManager) -> None:
+    manager.change_mode(5)
+
+    assert manager.mode == 5
+    assert manager._active_street is Street.PREFLOP
+    assert set(manager._streets) == {Street.PREFLOP}
+    assert manager._current_state.ranges == [None] * 6
+    assert manager._current_state.board is None
+
+    manager.add_range("AsAhKdQcJs", 1)
+    assert player_at(manager, Street.PREFLOP, 1).mode == 5
+    assert player_at(manager, Street.PREFLOP, 1).base_range.hands.shape[1] == 5
+
+
+def test_invalid_mode_does_not_reset_state(manager: RangeManager) -> None:
+    manager.add_range(BASE_RANGE, 0)
+    original_streets = manager._streets
+    with pytest.raises(ValueError, match="Invalid Mode"):
+        manager.change_mode(6)
+    assert manager.mode == 4
+    assert manager._streets is original_streets

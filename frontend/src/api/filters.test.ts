@@ -1,14 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { apiRequest } from './client';
-import {
-  getFilters,
-  getFilter,
-  createFilter,
-  createGroup,
-  setFilterActive,
-  deleteFilter,
-  clearFilters,
-} from './filters';
+import { createFilter, createGroup, setFilterActive, deleteFilter, clearFilters } from './filters';
 
 vi.mock('./client', () => ({
   apiRequest: vi.fn(),
@@ -19,40 +11,6 @@ beforeEach(() => {
 });
 
 const base = '/api/sessions/session-123/players/2';
-
-test('retrieves the complete filter tree', async () => {
-  const tree = {
-    Draws: {
-      type: 'group',
-      name: 'Draws',
-      coverage: 0.5,
-      active: true,
-      filters: {},
-    },
-  };
-
-  vi.mocked(apiRequest).mockResolvedValue(tree);
-
-  expect(await getFilters('session-123', 2)).toEqual(tree);
-  expect(apiRequest).toHaveBeenCalledWith(`${base}/filters`);
-});
-
-test('retrieves nested nodes with encoded paths', async () => {
-  const node = {
-    type: 'filter',
-    name: 'Nut FD',
-    expression: 'FD',
-    coverage: 0.3,
-    active: true,
-  };
-
-  vi.mocked(apiRequest).mockResolvedValue(node);
-
-  const result = await getFilter('session-123', 2, 'filters', 'Nut FD', ['Flop', 'Strong draws']);
-
-  expect(result).toEqual(node);
-  expect(apiRequest).toHaveBeenCalledWith(`${base}/filters/Nut%20FD?path=Flop&path=Strong+draws`);
-});
 
 test('creates filters and groups', async () => {
   vi.mocked(apiRequest)
@@ -119,5 +77,5 @@ test('propagates API errors', async () => {
 
   vi.mocked(apiRequest).mockRejectedValue(error);
 
-  await expect(getFilters('session-123', 2)).rejects.toBe(error);
+  await expect(clearFilters('session-123', 2)).rejects.toBe(error);
 });

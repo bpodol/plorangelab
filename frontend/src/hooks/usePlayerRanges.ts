@@ -8,7 +8,7 @@ import {
   clearFilters,
   type FilterResource,
 } from '../api/filters.ts';
-import type { Mode, FilterTree, FilterNode } from '../types.ts';
+import type { FilterTree, FilterNode } from '../types.ts';
 import type { PlayerFilterSnapshot } from '../types.ts';
 
 /**
@@ -53,7 +53,7 @@ export interface PlayerState {
  * The hook does not automatically fetch player state from the backend
  * or reset its state when sessionId changes.
  */
-export function usePlayerRanges(sessionId: string | null, mode: Mode) {
+export function usePlayerRanges(sessionId: string | null) {
   const [players, setPlayers] = useState<PlayerState[]>(
     Array.from({ length: 6 }, () => ({
       range: '',
@@ -97,7 +97,7 @@ export function usePlayerRanges(sessionId: string | null, mode: Mode) {
     updatePlayer(playerId, { isLoading: true, error: null });
 
     try {
-      const hands = await addRange(sessionId, playerId, player.range, mode);
+      const hands = await addRange(sessionId, playerId, player.range);
 
       updatePlayer(playerId, {
         numberOfHands: hands.hands,
