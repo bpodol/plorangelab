@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import WebSocketDisconnect
 
-from plorangelab.equity import MonteCarloResult, SamplingExhaustedError
+from plorangelab.equity import EquityResult, SamplingExhaustedError
 from plorangelab.services.equity_job import EquityJob, start_equity_job
 from plorangelab.services.session_manager import Session
 
@@ -210,7 +210,7 @@ async def publish_equity_updates(
             pass
 
     job.subscribe(wake)
-    last_progress: MonteCarloResult | None = None
+    last_progress: EquityResult | None = None
 
     try:
         while True:

@@ -15,7 +15,7 @@ from plorangelab.types import Mode
 
 from .evaluator import numba_evaluate_hands
 from .exceptions import SamplingExhaustedError
-from .results import MonteCarloResult, StopReason
+from .results import EquityResult, StopReason
 
 _MAX_SIMULATIONS = 1_200_000
 _MAX_BATCH_SIZE = 100_000  # About 8 MiB for six-player PLO5 batch buffers.
@@ -388,9 +388,9 @@ def _run_batched_monte_carlo(
     min_samples: int,
     confidence_multiplier: float,
     cancel_event: Event | None = None,
-    on_progress: Callable[[MonteCarloResult], None] | None = None,
+    on_progress: Callable[[EquityResult], None] | None = None,
     rank_lookup: RankLookup,
-) -> MonteCarloResult:
+) -> EquityResult:
     """Run adaptive rejection-sampling Monte Carlo in bounded batches.
 
     Coordinates Numba sampling kernels while accumulating completed
@@ -425,7 +425,7 @@ def _run_batched_monte_carlo(
         rank_lookup: Precomputed five-card hand ranking tables.
 
     Returns:
-        MonteCarloResult containing per-player equity estimates, margins
+        EquityResult containing per-player equity estimates, margins
         of error, simulation and attempt counts, and the stopping reason.
 
     Raises:
@@ -522,8 +522,9 @@ def _run_batched_monte_carlo(
 
         if on_progress is not None and batch_simulations > 0:
             on_progress(
-                MonteCarloResult(
+                EquityResult(
                     equities=equities,
+                    method="monte-carlo",
                     margins_of_error=margins,
                     simulations=simulations,
                     attempts=attempts,
@@ -547,10 +548,12 @@ def _run_batched_monte_carlo(
         simulations,
         confidence_multiplier,
     )
-    return MonteCarloResult(
+    return EquityResult(
         equities=equities,
+        method="monte-carlo",
         margins_of_error=margins,
         simulations=simulations,
         attempts=attempts,
         stop_reason=stop_reason,
+        sampler="rejection",
     )

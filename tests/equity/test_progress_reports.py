@@ -9,7 +9,7 @@ import plorangelab.equity.engine as equity_module
 import plorangelab.equity.importance_sampling as importance_module
 import plorangelab.equity.monte_carlo as mc_module
 from plorangelab.encoder import encode_range
-from plorangelab.equity.monte_carlo import MonteCarloResult
+from plorangelab.equity import EquityResult
 from plorangelab.rank_combination import RankLookup
 
 from ._helpers import _guaranteed_split_players
@@ -19,7 +19,7 @@ def test_rejection_progress_callback(
     monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
 ) -> None:
     players, board = _guaranteed_split_players()
-    updates: list[MonteCarloResult] = []
+    updates: list[EquityResult] = []
 
     def balanced_batch(**kwargs):
         count = int(kwargs["batch_size"])
@@ -71,7 +71,7 @@ def test_importance_progress_callback(
         encode_range("AdKdQdJd", 4),
     ]
 
-    updates: list[MonteCarloResult] = []
+    updates: list[EquityResult] = []
 
     # Force the importance sampler through the public engine.
     monkeypatch.setattr(
@@ -147,7 +147,7 @@ def test_cancellation_from_callback_rejection(
     players, board = _guaranteed_split_players()
 
     cancelled = Event()
-    updates: list[MonteCarloResult] = []
+    updates: list[EquityResult] = []
     batch_calls = 0
 
     def balanced_batch(**kwargs):
@@ -161,7 +161,7 @@ def test_cancellation_from_callback_rejection(
             2,
         )
 
-    def on_progress(progress: MonteCarloResult) -> None:
+    def on_progress(progress: EquityResult) -> None:
         updates.append(progress)
         cancelled.set()
 
@@ -202,7 +202,7 @@ def test_cancellation_from_callback_importance(
     ]
 
     cancelled = Event()
-    updates: list[MonteCarloResult] = []
+    updates: list[EquityResult] = []
     batch_calls = 0
 
     # Force importance sampling.
@@ -234,7 +234,7 @@ def test_cancellation_from_callback_importance(
             2,
         )
 
-    def on_progress(progress: MonteCarloResult) -> None:
+    def on_progress(progress: EquityResult) -> None:
         updates.append(progress)
         cancelled.set()
 
@@ -275,7 +275,7 @@ def test_no_progress_for_exact_equity(
     monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
 ) -> None:
     players, board = _guaranteed_split_players()
-    updates: list[MonteCarloResult] = []
+    updates: list[EquityResult] = []
 
     def fake_exact_equity(**kwargs):
         return [0.5, 0.5]

@@ -21,7 +21,7 @@ from .monte_carlo import (
     _probe_collision_acceptance,
     _run_batched_monte_carlo,
 )
-from .results import EquityResult, MonteCarloResult
+from .results import EquityResult
 
 
 def choose_method(
@@ -253,7 +253,7 @@ def compute_equity(
     batch_size: int = 10_000,
     seed: int = 3,
     cancel_event: Event | None = None,
-    on_progress: Callable[[MonteCarloResult], None] | None = None,
+    on_progress: Callable[[EquityResult], None] | None = None,
     rank_lookup: RankLookup,
 ) -> EquityResult:
     """Calculate multiway PLO4/PLO5 equity using exact or Monte Carlo evaluation.
@@ -291,7 +291,7 @@ def compute_equity(
         batch_size: Maximum number of valid simulations per Monte Carlo batch.
         seed: Non-negative seed for reproducible random sampling.
         cancel_event: Optional threading event used to request cancellation.
-        on_progress: Optional callback receiving intermediate MonteCarloResult
+        on_progress: Optional callback receiving intermediate EquityResult
             instances after completed batches.
         rank_lookup: Precomputed lookup tables used for five-card hand ranking.
 
@@ -434,13 +434,4 @@ def compute_equity(
             rank_lookup=rank_lookup,
         )
 
-    return EquityResult(
-        equities=result.equities,
-        method="monte-carlo",
-        margins_of_error=result.margins_of_error,
-        simulations=result.simulations,
-        attempts=result.attempts,
-        stop_reason=result.stop_reason,
-        sampler=result.sampler,
-        effective_samples=result.effective_samples,
-    )
+    return result

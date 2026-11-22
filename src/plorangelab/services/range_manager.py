@@ -18,7 +18,6 @@ from plorangelab.bootstrap import EngineResources
 from plorangelab.encoder import build_mask, encode_board, encode_input
 from plorangelab.equity import (
     EquityResult,
-    MonteCarloResult,
     compute_equity,
     sanitize_range,
 )
@@ -359,7 +358,7 @@ class RangeManager:
 
     def calculate_equity(
         self,
-        on_progress: Callable[[MonteCarloResult], None] | None = None,
+        on_progress: Callable[[EquityResult], None] | None = None,
         cancel_event: Event | None = None,
         target_moe: float = 0.001,
     ) -> tuple[list[int], EquityResult]:
@@ -375,7 +374,7 @@ class RangeManager:
 
         Args:
             on_progress: Optional callback receiving intermediate
-                MonteCarloResult instances.
+                EquityResult instances.
             cancel_event: Optional event requesting calculation cancellation.
             target_moe: Target absolute Monte Carlo margin of error.
 
