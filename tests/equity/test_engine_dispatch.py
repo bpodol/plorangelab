@@ -6,9 +6,8 @@ from threading import Event
 import pytest
 
 import plorangelab.equity.engine as equity_module
-import plorangelab.equity.monte_carlo as mc_module
 from plorangelab.encoder import EncodedRange, encode_board, encode_range
-from plorangelab.equity import compute_equity
+from plorangelab.equity import EquityResult, compute_equity
 from plorangelab.rank_combination import RankLookup
 
 from ._helpers import RIVER, _guaranteed_split_players, _make_range_from_ids
@@ -27,12 +26,14 @@ def _stub_monte_carlo_coordinator(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         equity_module,
         "_run_batched_monte_carlo",
-        lambda *args, **kwargs: mc_module.MonteCarloResult(
+        lambda *args, **kwargs: EquityResult(
             equities=[0.75, 0.25],
+            method="monte-carlo",
             margins_of_error=[0.1, 0.1],
             simulations=4,
             attempts=5,
             stop_reason="target_reached",
+            sampler="rejection",
         ),
     )
 
@@ -267,12 +268,14 @@ def test_public_api_passes_the_same_lookup_object_to_rejection_engine(
 
     def fake_mc(*args, **kwargs):
         received.append(kwargs["rank_lookup"])
-        return mc_module.MonteCarloResult(
+        return EquityResult(
             equities=[0.5, 0.5],
+            method="monte-carlo",
             margins_of_error=[0.0, 0.0],
             simulations=4,
             attempts=4,
             stop_reason="target_reached",
+            sampler="rejection",
         )
 
     monkeypatch.setattr(equity_module, "_run_batched_monte_carlo", fake_mc)

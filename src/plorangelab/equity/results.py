@@ -39,28 +39,3 @@ class EquityResult:
     stop_reason: StopReason | None
     sampler: Literal["rejection", "importance"] | None = None
     effective_samples: float | None = None
-
-
-@dataclass(frozen=True)
-class MonteCarloResult:
-    """Result or progress snapshot from an adaptive Monte Carlo calculation.
-
-    Attributes:
-        equities: Per-player estimated pot shares as fractions from 0 to 1.
-        margins_of_error: Approximate per-player margins of error.
-            Individual values may be None when insufficient samples exist.
-        simulations: Number of completed valid showdowns.
-        attempts: Number of sampling attempts, including rejected ones.
-        stop_reason: Reason for stopping, or None for intermediate results.
-        sampler: Sampling strategy, either "rejection" or "importance".
-        effective_samples: Effective sample size for importance sampling,
-            or None for rejection sampling.
-    """
-
-    equities: list[float]
-    margins_of_error: list[float | None]
-    simulations: int
-    attempts: int
-    stop_reason: StopReason | None
-    sampler: Literal["rejection", "importance"] = "rejection"
-    effective_samples: float | None = None

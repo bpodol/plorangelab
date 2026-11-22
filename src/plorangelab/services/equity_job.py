@@ -11,7 +11,7 @@ from secrets import token_urlsafe
 from threading import Event, Lock
 from typing import Literal
 
-from plorangelab.equity import EquityResult, MonteCarloResult
+from plorangelab.equity import EquityResult
 
 from .range_manager import RangeManager
 
@@ -44,7 +44,7 @@ class EquityJob:
 
     cancel_event: Event = field(default_factory=Event)
     future: Future[tuple[list[int], EquityResult]] | None = None
-    progress: MonteCarloResult | None = None
+    progress: EquityResult | None = None
     lock: Lock = field(default_factory=Lock)
     job_id: str = field(default_factory=lambda: token_urlsafe(12))
     _subscriber: Subscriber | None = field(
@@ -152,7 +152,7 @@ class EquityJob:
         if callback is not None:
             callback()
 
-    def update_progress(self, update: MonteCarloResult) -> None:
+    def update_progress(self, update: EquityResult) -> None:
         """Store the latest Monte Carlo progress and notify the subscriber.
 
         The progress snapshot is replaced under the job lock.
@@ -163,7 +163,7 @@ class EquityJob:
             self.progress = update
         self.notify_subscriber()
 
-    def get_progress(self) -> MonteCarloResult | None:
+    def get_progress(self) -> EquityResult | None:
         with self.lock:
             return self.progress
 
@@ -205,7 +205,7 @@ def start_equity_job(
 
     job = EquityJob()
 
-    def on_progress(update: MonteCarloResult) -> None:
+    def on_progress(update: EquityResult) -> None:
         job.update_progress(update)
 
     def run():

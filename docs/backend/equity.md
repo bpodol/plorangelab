@@ -16,8 +16,7 @@ The package exports the following names from `__init__.py`:
 | --- | --- |
 | `compute_equity()` | Validate inputs, select a method, and calculate player equities. |
 | `sanitize_range()` | Return an encoded range with board-blocked hands removed. |
-| `EquityResult` | Final result of an exact or Monte Carlo calculation. |
-| `MonteCarloResult` | Intermediate or final Monte Carlo result and diagnostics. |
+| `EquityResult` | Final or intermediate result of equity calculation. |
 | `SamplingExhaustedError` | Indicates that no valid showdown was sampled within the attempt limit. |
 
 `compute_equity()` accepts an ordered list of `EncodedRange` instances, `mode` (`4` or `5`), an optional encoded board, calculation options, and a required `RankLookup` containing precomputed ranking tables. Results preserve the input player order.
@@ -231,7 +230,7 @@ Monte Carlo execution ends when one of the following occurs:
 
 Cancellation is cooperative: the coordinator checks a `threading.Event` **between Monte Carlo batches**. If cancellation occurs before any simulation completes, it raises `InterruptedError`; otherwise it can return a partial estimate with `stop_reason="cancelled"`. A running exact Numba kernel cannot be interrupted this way, although a pre-set cancellation event is checked before calculation starts.
 
-An optional `on_progress` callback receives intermediate `MonteCarloResult` snapshots after completed batches. Such snapshots have `stop_reason=None`. If the attempt budget produces **zero valid showdowns**, the engine raises `SamplingExhaustedError` rather than returning an estimate.
+An optional `on_progress` callback receives intermediate `EquityResult` snapshots after completed batches. Such snapshots have `stop_reason=None`. If the attempt budget produces **zero valid showdowns**, the engine raises `SamplingExhaustedError` rather than returning an estimate.
 
 ## Results
 
@@ -247,7 +246,7 @@ An optional `on_progress` callback receives intermediate `MonteCarloResult` snap
 | `sampler` | `None` | `"rejection"` or `"importance"` |
 | `effective_samples` | `None` | Value for importance sampling; `None` for rejection |
 
-`EquityResult` and `MonteCarloResult` are frozen dataclasses. The dataclass fields cannot be reassigned, although their contained lists remain mutable.
+`EquityResult` is a frozen dataclasse. The dataclass fields cannot be reassigned, although their contained lists remain mutable.
 
 ## Current limits and defaults
 

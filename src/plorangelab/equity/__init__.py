@@ -6,11 +6,10 @@ result models, and sampling-specific exceptions.
 
 from .engine import compute_equity, sanitize_range
 from .exceptions import SamplingExhaustedError
-from .results import EquityResult, MonteCarloResult
+from .results import EquityResult
 
 __all__ = [
     "EquityResult",
-    "MonteCarloResult",
     "SamplingExhaustedError",
     "compute_equity",
     "sanitize_range",

@@ -26,7 +26,7 @@ from .monte_carlo import (
     _MAX_BATCH_ATTEMPTS,
     deal_card,
 )
-from .results import MonteCarloResult, StopReason
+from .results import EquityResult, StopReason
 
 _INDEX_MAX_HANDS = 50_000
 
@@ -570,9 +570,9 @@ def _run_importance_monte_carlo(
     min_samples: int,
     confidence_multiplier: float,
     cancel_event: Event | None = None,
-    on_progress: Callable[[MonteCarloResult], None] | None = None,
+    on_progress: Callable[[EquityResult], None] | None = None,
     rank_lookup: RankLookup,
-) -> MonteCarloResult:
+) -> EquityResult:
     """Coordinate adaptive importance sampling across bounded batches.
 
     Builds compatibility lookup tables once per calculation, executes
@@ -584,7 +584,7 @@ def _run_importance_monte_carlo(
     or cancellation is requested.
 
     Cancellation is checked between batches. Progress callbacks
-    receive intermediate MonteCarloResult instances.
+    receive intermediate EquityResult instances.
 
     Args:
         hands: Numba typed list of encoded player hands.
@@ -608,7 +608,7 @@ def _run_importance_monte_carlo(
         rank_lookup: Precomputed five-card ranking tables.
 
     Returns:
-        MonteCarloResult containing weighted equity estimates,
+        EquityResult containing weighted equity estimates,
         approximate margins of error, simulation and attempt counts,
         stopping reason, and effective sample size.
 
@@ -706,8 +706,9 @@ def _run_importance_monte_carlo(
 
             if on_progress is not None and batch_simulations > 0:
                 on_progress(
-                    MonteCarloResult(
+                    EquityResult(
                         equities=equities,
+                        method="monte-carlo",
                         margins_of_error=margins,
                         simulations=simulations,
                         attempts=attempts,
@@ -743,8 +744,9 @@ def _run_importance_monte_carlo(
         confidence_multiplier,
     )
 
-    return MonteCarloResult(
+    return EquityResult(
         equities=equities,
+        method="monte-carlo",
         margins_of_error=margins,
         simulations=simulations,
         attempts=attempts,

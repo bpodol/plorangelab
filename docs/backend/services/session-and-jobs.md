@@ -28,7 +28,7 @@ SessionManager
         ├── equity_job: EquityJob | None
         │   ├── future: Future | None
         │   ├── cancel_event: threading.Event
-        │   ├── progress: MonteCarloResult | None
+        │   ├── progress: EquityResult | None
         │   └── _subscriber: callback | None
         ├── last_activity: monotonic timestamp
         └── closed: bool
@@ -134,7 +134,7 @@ Consequently, requesting cancellation does not immediately change a running job 
 
 ## Progress and subscriber notifications
 
-During Monte Carlo execution, the equity calculation may call the supplied progress callback with a `MonteCarloResult`. `EquityJob.update_progress()`:
+During Monte Carlo execution, the equity calculation may call the supplied progress callback with an `EquityResult`. `EquityJob.update_progress()`:
 
 1. Replaces the saved `progress` snapshot while holding the job lock.
 2. Releases that lock.
