@@ -100,6 +100,34 @@ def test_add_replace_and_remove_range(manager: RangeManager) -> None:
     assert manager._current_state.ranges == [None] * 6
 
 
+def test_active_player_count_tracks_occupied_slots_across_streets(
+    manager: RangeManager,
+) -> None:
+    assert manager.active_player_count == 0
+
+    # Count occupied slots, not insertion order or number of range hands.
+    manager.add_range(BASE_RANGE, 1)
+    manager.add_range("JsJhTdTc", 5)
+    assert manager.active_player_count == 2
+
+    manager.add_range("KsKhJdTd", 1)  # Replacement, not a new player.
+    assert manager.active_player_count == 2
+
+    manager.change_board(FLOP)
+    assert manager.active_player_count == 2
+    manager.add_range("QsQhJcTc", 3)
+    assert manager.active_player_count == 3
+
+    manager.remove_range(1)
+    assert manager.active_player_count == 2
+    manager.change_board(None)
+    assert manager.active_player_count == 2
+
+    manager.remove_range(3)
+    manager.remove_range(5)
+    assert manager.active_player_count == 0
+
+
 @pytest.mark.parametrize("slot", [-1, 6])
 def test_invalid_slot_rejected(manager: RangeManager, slot: int) -> None:
     with pytest.raises(ValueError, match="Out of range slot index"):

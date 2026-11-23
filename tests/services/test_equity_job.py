@@ -1,6 +1,6 @@
 """Tests for equity-job execution, progress reporting, and cancellation."""
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Event
 from unittest.mock import Mock
 
@@ -36,6 +36,37 @@ def test_jobs_have_independent_state() -> None:
     assert first.cancel_event.is_set()
     assert second.get_progress() is None
     assert not second.cancel_event.is_set()
+
+
+def test_get_snapshot_tracks_status_and_latest_progress() -> None:
+    job = EquityJob()
+    initial = job.get_snapshot()
+    assert initial.status == "pending"
+    assert initial.progress is None
+
+    future: Future[EquityResult] = Future()
+    job.future = future
+    assert future.set_running_or_notify_cancel()
+
+    first_progress = _equity_result()
+    job.update_progress(first_progress)
+    first_snapshot = job.get_snapshot()
+    assert first_snapshot.status == "running"
+    assert first_snapshot.progress is first_progress
+
+    latest_progress = _equity_result()
+    job.update_progress(latest_progress)
+    latest_snapshot = job.get_snapshot()
+    assert latest_snapshot.status == "running"
+    assert latest_snapshot.progress is latest_progress
+    # Previously returned snapshots do not change when progress is replaced.
+    assert first_snapshot.progress is first_progress
+
+    future.set_result(latest_progress)
+    completed_snapshot = job.get_snapshot()
+    assert completed_snapshot.status == "completed"
+    assert completed_snapshot.progress is latest_progress
+    assert first_snapshot.status == "running"
 
 
 def test_start_job_forwards_progress_and_returns_result() -> None:
