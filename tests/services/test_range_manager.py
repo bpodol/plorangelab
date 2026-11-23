@@ -245,21 +245,22 @@ def test_equity_delegation_preserves_slot_order_and_arguments(
     on_progress = Mock()
     cancel_event = Event()
 
-    ids, result = manager.calculate_equity(
+    result = manager.calculate_equity(
         on_progress=on_progress,
         cancel_event=cancel_event,
         target_moe=0.002,
     )
 
-    assert ids == [1, 5]  # Slot order, not insertion order.
     assert result is expected_result
     compute_mock.assert_called_once()
     kwargs = compute_mock.call_args.kwargs
-    assert len(kwargs["players"]) == 2
-    assert all(
-        current is player_at(manager, manager._active_street, slot).current_range
-        for current, slot in zip(kwargs["players"], ids, strict=True)
-    )
+    players = kwargs["players"]
+    assert list(players) == [1, 5]  # Slot order, not insertion order.
+    for slot in (1, 5):
+        assert (
+            players[slot]
+            is player_at(manager, manager._active_street, slot).current_range
+        )
     assert kwargs["mode"] == manager.mode
     assert kwargs["board"] is (
         manager._current_state.board.cards if board is not None else None
@@ -364,7 +365,9 @@ def test_equity_receives_active_filtered_range(
     monkeypatch.setattr(manager_module, "compute_equity", compute_mock)
     manager.calculate_equity()
 
-    passed_range = compute_mock.call_args.kwargs["players"][0]
+    players = compute_mock.call_args.kwargs["players"]
+    assert set(players) == {0}
+    passed_range = players[0]
     assert passed_range is player_at(manager, Street.PREFLOP, 0).current_range
     assert len(passed_range.masks) == 1
 

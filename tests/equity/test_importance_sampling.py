@@ -14,7 +14,7 @@ from plorangelab.equity.importance_sampling import (
 )
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import RIVER, _weighted_players
+from ._helpers import RIVER, _player_map, _weighted_players
 
 # Exact/rejection agreement and statistical properties
 
@@ -37,7 +37,7 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
     board = encode_board(board_text)
 
     exact = compute_equity(
-        players,
+        _player_map(players),
         mode=mode,
         board=board,
         method="exact",
@@ -48,7 +48,7 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
 
     for seed in (11, 29, 47):
         result = compute_equity(
-            players,
+            _player_map(players),
             mode=mode,
             board=board,
             method="monte-carlo",
@@ -66,15 +66,15 @@ def test_indexed_importance_matches_exact_over_multiple_seeds(
 
         assert 0 < result.effective_samples <= result.simulations + 1e-7
 
-        assert sum(result.equities) == pytest.approx(1.0, abs=1e-10)
+        assert sum(result.equities.values()) == pytest.approx(1.0, abs=1e-10)
 
-        estimates.append(list(result.equities))
+        estimates.append(list(result.equities.values()))
 
     mean_equity = np.mean(estimates, axis=0)
 
     np.testing.assert_allclose(
         mean_equity,
-        list(exact.equities),
+        list(exact.equities.values()),
         atol=0.025,
         rtol=0,
     )
@@ -87,7 +87,7 @@ def test_indexed_and_rejection_samplers_agree_statistically(
     board = encode_board("2c3d5h7s9c")
 
     common = {
-        "players": players,
+        "players": _player_map(players),
         "mode": 4,
         "board": board,
         "method": "monte-carlo",
@@ -114,9 +114,9 @@ def test_indexed_and_rejection_samplers_agree_statistically(
     assert importance.sampler == "importance"
     assert rejection.sampler == "rejection"
 
-    for importance_equity, rejection_equity in zip(
-        importance.equities, rejection.equities, strict=True
-    ):
+    assert importance.equities.keys() == rejection.equities.keys()
+    for player_id, importance_equity in importance.equities.items():
+        rejection_equity = rejection.equities[player_id]
         assert importance_equity == pytest.approx(
             rejection_equity,
             abs=0.035,
@@ -146,7 +146,7 @@ def test_indexed_importance_supports_modes_and_streets(
     board = None if board_text is None else encode_board(board_text)
 
     result = compute_equity(
-        _weighted_players(mode),
+        _player_map(_weighted_players(mode)),
         mode=mode,
         board=board,
         method="monte-carlo",
@@ -165,9 +165,11 @@ def test_indexed_importance_supports_modes_and_streets(
 
     assert 0 < result.effective_samples <= result.simulations + 1e-7
 
-    assert all(np.isfinite(value) and 0 <= value <= 1 for value in result.equities)
+    assert all(
+        np.isfinite(value) and 0 <= value <= 1 for value in result.equities.values()
+    )
 
-    assert sum(result.equities) == pytest.approx(1.0, abs=1e-10)
+    assert sum(result.equities.values()) == pytest.approx(1.0, abs=1e-10)
 
 
 def test_importance_batch_handles_dead_end_without_invalid_selection(
@@ -234,7 +236,11 @@ def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
     ]
 
     exact = compute_equity(
-        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+        _player_map(players),
+        mode=4,
+        board=board,
+        method="exact",
+        rank_lookup=rank_lookup,
     )
 
     # Force the importance-sampling path.
@@ -245,7 +251,7 @@ def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
     )
 
     sampled = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -261,11 +267,11 @@ def test_importance_sampler_agrees_with_exact_weighted_colliding_ranges(
     assert sampled.simulations == 20_000
     assert 1 < sampled.effective_samples <= sampled.simulations
 
-    assert sum(sampled.equities) == pytest.approx(1.0)
+    assert sum(sampled.equities.values()) == pytest.approx(1.0)
 
-    for sampled_equity, exact_equity in zip(
-        sampled.equities, exact.equities, strict=True
-    ):
+    assert sampled.equities.keys() == exact.equities.keys()
+    for player_id, sampled_equity in sampled.equities.items():
+        exact_equity = exact.equities[player_id]
         assert sampled_equity == pytest.approx(exact_equity, abs=0.02)
 
 

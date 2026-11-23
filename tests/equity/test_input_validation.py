@@ -7,7 +7,7 @@ from plorangelab.encoder import EncodedRange, build_mask, encode_board, encode_r
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import RIVER, _guaranteed_split_players
+from ._helpers import RIVER, _guaranteed_split_players, _player_map
 
 # Player and board validation
 
@@ -19,14 +19,22 @@ def test_compute_equity_rejects_player_counts_outside_two_to_six(
     player = encode_range("AsAhKdQc", 4)
 
     with pytest.raises(ValueError):
-        compute_equity([player] * player_count, mode=4, rank_lookup=rank_lookup)
+        compute_equity(
+            _player_map([player] * player_count),
+            mode=4,
+            rank_lookup=rank_lookup,
+        )
 
 
 def test_compute_equity_rejects_invalid_plo_mode(rank_lookup: RankLookup) -> None:
     players = [encode_range("AsAhKdQc", 4), encode_range("KsKhJdTd", 4)]
 
     with pytest.raises(ValueError):
-        compute_equity(players, mode=6, rank_lookup=rank_lookup)  # type: ignore[arg-type]
+        compute_equity(
+            _player_map(players),
+            mode=6,  # type: ignore[arg-type]
+            rank_lookup=rank_lookup,
+        )
 
 
 @pytest.mark.parametrize(
@@ -44,7 +52,25 @@ def test_compute_equity_rejects_invalid_boards(
     players = [encode_range("AsAhKdQc", 4), encode_range("KsKhJdTd", 4)]
 
     with pytest.raises(ValueError):
-        compute_equity(players, mode=4, board=board, rank_lookup=rank_lookup)
+        compute_equity(
+            _player_map(players),
+            mode=4,
+            board=board,
+            rank_lookup=rank_lookup,
+        )
+
+
+@pytest.mark.parametrize("invalid_id", [-1, 6, True, 1.5, "0"])
+def test_compute_equity_rejects_invalid_player_ids(
+    invalid_id: object, rank_lookup: RankLookup
+) -> None:
+    players = {
+        invalid_id: encode_range("AsAhKdQc", 4),
+        2: encode_range("KsKhJdTd", 4),
+    }
+
+    with pytest.raises(ValueError, match="Player IDs"):
+        compute_equity(players, mode=4, rank_lookup=rank_lookup)
 
 
 # Encoded range invariants
@@ -97,7 +123,10 @@ def test_compute_equity_rejects_malformed_encoded_ranges(
 
     with pytest.raises(ValueError):
         compute_equity(
-            players, mode=4, board=encode_board(RIVER), rank_lookup=rank_lookup
+            _player_map(players),
+            mode=4,
+            board=encode_board(RIVER),
+            rank_lookup=rank_lookup,
         )
 
 
@@ -121,7 +150,10 @@ def test_compute_equity_rejects_invalid_weights(
 
     with pytest.raises(ValueError):
         compute_equity(
-            players, mode=4, board=encode_board(RIVER), rank_lookup=rank_lookup
+            _player_map(players),
+            mode=4,
+            board=encode_board(RIVER),
+            rank_lookup=rank_lookup,
         )
 
 
@@ -137,7 +169,9 @@ def test_compute_equity_rejects_zero_weight_hand_in_nonzero_range(
 
     with pytest.raises(ValueError, match="invalid weights"):
         compute_equity(
-            [invalid, encode_range("2s3s4s5s", 4)], mode=4, rank_lookup=rank_lookup
+            _player_map([invalid, encode_range("2s3s4s5s", 4)]),
+            mode=4,
+            rank_lookup=rank_lookup,
         )
 
 
@@ -150,7 +184,7 @@ def test_compute_equity_rejects_empty_ranges(rank_lookup: RankLookup) -> None:
     players = [empty, encode_range("KsKhJdTd", 4)]
 
     with pytest.raises(ValueError, match="empty range"):
-        compute_equity(players, mode=4, rank_lookup=rank_lookup)
+        compute_equity(_player_map(players), mode=4, rank_lookup=rank_lookup)
 
 
 def test_compute_equity_rejects_ranges_fully_blocked_by_board(
@@ -163,7 +197,10 @@ def test_compute_equity_rejects_ranges_fully_blocked_by_board(
 
     with pytest.raises(ValueError, match="No combinations left"):
         compute_equity(
-            players, mode=4, board=encode_board(RIVER), rank_lookup=rank_lookup
+            _player_map(players),
+            mode=4,
+            board=encode_board(RIVER),
+            rank_lookup=rank_lookup,
         )
 
 
@@ -178,7 +215,7 @@ def test_compute_equity_rejects_invalid_sample_limits(
 
     with pytest.raises(ValueError):
         compute_equity(
-            players,
+            _player_map(players),
             mode=4,
             max_samples=max_samples,  # type: ignore[arg-type]
             method="monte-carlo",
@@ -193,7 +230,12 @@ def test_compute_equity_rejects_invalid_seeds(
     players = [encode_range("AsAhKdQc", 4), encode_range("KsKhJdTd", 4)]
 
     with pytest.raises(ValueError):
-        compute_equity(players, mode=4, seed=seed, rank_lookup=rank_lookup)  # type: ignore[arg-type]
+        compute_equity(
+            _player_map(players),
+            mode=4,
+            seed=seed,  # type: ignore[arg-type]
+            rank_lookup=rank_lookup,
+        )
 
 
 def test_compute_equity_rejects_invalid_computation_method(
@@ -203,7 +245,7 @@ def test_compute_equity_rejects_invalid_computation_method(
 
     with pytest.raises(ValueError, match="Method"):
         compute_equity(
-            players,
+            _player_map(players),
             mode=4,
             method="approximate",  # type: ignore[arg-type]
             rank_lookup=rank_lookup,
@@ -226,7 +268,7 @@ def test_monte_carlo_rejects_resource_limits(
 
     with pytest.raises(ValueError, match=message):
         compute_equity(
-            players,
+            _player_map(players),
             mode=4,
             board=board,
             method="monte-carlo",

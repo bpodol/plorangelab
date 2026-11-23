@@ -44,6 +44,7 @@ def choose_method(
 
 def validate_equity_inputs(
     players: list[EncodedRange],
+    ids: list[int],
     mode: Mode,
     board: NDArray[np.uint8] | None,
     seed: int,
@@ -70,6 +71,12 @@ def validate_equity_inputs(
 
     if not 2 <= len(players) <= 6:
         raise ValueError("Expected 2 to 6 players")
+
+    if any(type(player_id) is not int or not 0 <= player_id < 6 for player_id in ids):
+        raise ValueError("Player IDs must be integers between 0 and 5")
+
+    if len(set(ids)) != len(ids):
+        raise ValueError("Player IDs must be unique")
 
     if (
         isinstance(seed, (bool, np.bool_))
@@ -241,7 +248,7 @@ def _positive_integer(value: object, name: str) -> int:
 
 
 def compute_equity(
-    players: list[EncodedRange],
+    players: dict[int, EncodedRange],
     mode: Mode,
     board: NDArray[np.uint8] | None = None,
     *,
@@ -273,8 +280,8 @@ def compute_equity(
     kernels cannot be interrupted.
 
     Args:
-        players: Encoded ranges for 2 to 6 players. Each range must contain
-            valid hands, matching masks, and strictly positive finite weights.
+        players: Mapping of zero-based player slot IDs to their encoded ranges.
+            The IDs are preserved in the returned equity and MOE dictionaries.
         mode: Number of hole cards per player (4 or 5).
         board: Known community cards as uint8 card IDs, or None for preflop.
             Supported board lengths are 0, 3, 4, and 5.
@@ -318,9 +325,11 @@ def compute_equity(
                 "Monte Carlo calculation cancelled before any simulations "
                 "(before validation or preparation)"
             )
-
+    ids = list(players)
+    ranges = list(players.values())
     validate_equity_inputs(
-        players,
+        ranges,
+        ids,
         mode,
         board,
         seed,
@@ -335,7 +344,7 @@ def compute_equity(
     if cancel_event is not None and cancel_event.is_set():
         raise InterruptedError("Monte Carlo calculation cancelled before preparation")
 
-    valid_players = prepare_ranges(players, board)
+    valid_players = prepare_ranges(ranges, board)
 
     if method == "auto":
         _, estimated_showdowns = _estimate_exact_showdowns(valid_players, mode, board)
@@ -353,7 +362,7 @@ def compute_equity(
             board=board,
         )
         return EquityResult(
-            equities=equities,
+            equities=dict(zip(ids, equities, strict=True)),
             method="exact",
             margins_of_error=None,
             simulations=None,
@@ -412,6 +421,7 @@ def compute_equity(
             cancel_event=cancel_event,
             on_progress=on_progress,
             rank_lookup=rank_lookup,
+            ids=ids,
         )
 
     else:
@@ -432,6 +442,7 @@ def compute_equity(
             cancel_event=cancel_event,
             on_progress=on_progress,
             rank_lookup=rank_lookup,
+            ids=ids,
         )
 
     return result

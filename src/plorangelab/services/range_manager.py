@@ -361,7 +361,7 @@ class RangeManager:
         on_progress: Callable[[EquityResult], None] | None = None,
         cancel_event: Event | None = None,
         target_moe: float = 0.001,
-    ) -> tuple[list[int], EquityResult]:
+    ) -> EquityResult:
         """Calculate equity for all occupied player slots.
 
         Collects the current filtered range from each occupied player,
@@ -379,9 +379,9 @@ class RangeManager:
             target_moe: Target absolute Monte Carlo margin of error.
 
         Returns:
-            A tuple containing:
-                - Player slot indices in calculation order.
-                - EquityResult with corresponding per-player equities.
+            EquityResult containing equities and, when available, margins
+            of error keyed by the original zero-based player slot IDs.
+            Only occupied player slots are included.
 
         Raises:
             ValueError: If the player configuration or equity inputs
@@ -395,17 +395,15 @@ class RangeManager:
             not necessarily with all six available slots.
         """
         state = self._current_state
-        active_players = [
-            (slot, player_range)
-            for slot, player_range in enumerate(state.ranges)
-            if player_range is not None
-        ]
 
-        ids = [slot for slot, _ in active_players]
-        ranges = [player.current_range for _, player in active_players]
+        active_players = {
+            index: player.current_range
+            for index, player in enumerate(state.ranges)
+            if player is not None
+        }
 
         equity_result = compute_equity(
-            players=ranges,
+            players=active_players,
             mode=self.mode,
             board=state.board.cards if state.board is not None else None,
             on_progress=on_progress,
@@ -414,7 +412,7 @@ class RangeManager:
             rank_lookup=self.resources.rank_lookup,
         )
 
-        return ids, equity_result
+        return equity_result
 
     @staticmethod
     def _validate_slot(slot_index: int) -> None:

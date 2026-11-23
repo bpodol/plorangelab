@@ -9,7 +9,7 @@ from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import SamplingExhaustedError, compute_equity
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import RIVER, TURN
+from ._helpers import RIVER, TURN, _player_map
 
 # Legal sampling and board runouts
 
@@ -23,7 +23,7 @@ def test_monte_carlo_rejects_colliding_hands(rank_lookup: RankLookup) -> None:
     ]
 
     equity = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=encode_board(RIVER),
         target_moe=0.0,
@@ -34,7 +34,7 @@ def test_monte_carlo_rejects_colliding_hands(rank_lookup: RankLookup) -> None:
         rank_lookup=rank_lookup,
     ).equities
 
-    assert equity == [0.0, 1.0]
+    assert equity == {0: 0.0, 1: 1.0}
 
 
 @pytest.mark.parametrize(
@@ -52,7 +52,7 @@ def test_monte_carlo_supports_each_board_state(
     ]
 
     equity = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -62,7 +62,7 @@ def test_monte_carlo_supports_each_board_state(
         rank_lookup=rank_lookup,
     ).equities
 
-    assert sum(equity) == pytest.approx(1.0)
+    assert sum(equity.values()) == pytest.approx(1.0)
 
 
 def test_deal_card_never_returns_board_or_hand_cards() -> None:
@@ -100,7 +100,7 @@ def test_monte_carlo_raises_when_attempt_limit_is_exceeded(
 
     with pytest.raises(SamplingExhaustedError, match="Sampling limit exceeded"):
         compute_equity(
-            players,
+            _player_map(players),
             mode=4,
             board=encode_board(RIVER),
             min_samples=1,
@@ -125,7 +125,7 @@ def test_monte_carlo_results_are_reproducible_for_the_same_seed(
     board = encode_board("2c3d5h")
 
     first = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         min_samples=300,
@@ -136,7 +136,7 @@ def test_monte_carlo_results_are_reproducible_for_the_same_seed(
         rank_lookup=rank_lookup,
     ).equities
     second = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         min_samples=300,
@@ -173,7 +173,7 @@ def test_monte_carlo_deterministic_across_thread_counts(
             numba.set_num_threads(threads)
 
             equity = compute_equity(
-                players=players,
+                players=_player_map(players),
                 mode=5,
                 board=board,
                 min_samples=10_000,
@@ -202,7 +202,7 @@ def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent(
     board = encode_board(TURN)
 
     small_batches = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         min_samples=5_000,
@@ -214,7 +214,7 @@ def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent(
         rank_lookup=rank_lookup,
     ).equities
     single_batch = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         min_samples=5_000,
@@ -227,7 +227,7 @@ def test_fixed_budget_seeded_result_matches_legacy_and_is_batch_independent(
     ).equities
 
     assert small_batches == single_batch
-    assert small_batches == [0.9762, 0.0238]
+    assert small_batches == {0: 0.9762, 1: 0.0238}
 
 
 def test_fixed_budget_three_way_ties_are_batch_independent(
@@ -241,7 +241,7 @@ def test_fixed_budget_three_way_ties_are_batch_independent(
     ]
     results = [
         compute_equity(
-            players,
+            _player_map(players),
             mode=4,
             board=board,
             target_moe=0.0,
@@ -256,5 +256,8 @@ def test_fixed_budget_three_way_ties_are_batch_independent(
     ]
 
     for result in results[1:]:
-        np.testing.assert_allclose(list(result), list(results[0]), rtol=0, atol=1e-15)
-    assert list(results[0]) == pytest.approx([1 / 3, 1 / 3, 1 / 3])
+        assert result.keys() == results[0].keys()
+        np.testing.assert_allclose(
+            list(result.values()), list(results[0].values()), rtol=0, atol=1e-15
+        )
+    assert results[0] == pytest.approx({0: 1 / 3, 1: 1 / 3, 2: 1 / 3})

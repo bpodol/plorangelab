@@ -26,7 +26,7 @@ const progressMessage = {
   type: 'progress',
   job_id: 'job-123',
   simulations: 125000,
-  margins_of_error: [0.0018, 0.0023],
+  margins_of_error: { '0': 0.0018, '2': 0.0023 },
 } satisfies EquityMessage;
 
 const resultMessage = {
@@ -35,7 +35,7 @@ const resultMessage = {
   equities: { '2': 0.347, '0': 0.653 },
   details: {
     method: 'monte-carlo',
-    margins_of_error: [0.0012, 0.0023],
+    margins_of_error: { '2': 0.0023, '0': 0.0012 },
     simulations: 100000,
     attempts: 110000,
     stop_reason: 'target_reached',
@@ -109,10 +109,13 @@ test('displays simulations and the highest non-null progress MOE', () => {
   expect(screen.getByText('Highest MOE: ±0.230 pp')).toBeInTheDocument();
 });
 
-test.each([
-  { label: 'all-null', moes: [null, null] },
-  { label: 'empty', moes: [] },
-])('hides the highest progress MOE for $label values', ({ moes }) => {
+const missingMoeCases: { label: string; moes: Record<string, number | null> | null }[] = [
+  { label: 'all-null', moes: { '0': null, '2': null } },
+  { label: 'empty', moes: {} },
+  { label: 'null', moes: null },
+];
+
+test.each(missingMoeCases)('hides the highest progress MOE for $label values', ({ moes }) => {
   renderPanel({
     status: 'running',
     message: { ...progressMessage, margins_of_error: moes },

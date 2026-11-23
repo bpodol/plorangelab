@@ -13,7 +13,7 @@ from plorangelab.encoder import build_mask, encode_board, encode_range
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import RIVER, _make_range_from_ids
+from ._helpers import RIVER, _make_range_from_ids, _player_map
 
 # Sequential/parallel comparison helper
 
@@ -202,9 +202,13 @@ def test_exact_public_api_uses_sequential_kernel_with_one_numba_thread(
         parallel_must_not_run,
     )
     result = compute_equity(
-        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+        _player_map(players),
+        mode=4,
+        board=board,
+        method="exact",
+        rank_lookup=rank_lookup,
     )
-    assert sum(result.equities) == pytest.approx(1.0)
+    assert sum(result.equities.values()) == pytest.approx(1.0)
 
 
 def test_parallel_exact_preserves_multiway_split_pots(rank_lookup: RankLookup) -> None:
@@ -288,10 +292,14 @@ def test_parallel_exact_is_reproducible_across_thread_counts(
         for count in thread_counts:
             numba.set_num_threads(count)
             first = compute_equity(
-                players, mode=mode, board=board, method="exact", rank_lookup=rank_lookup
+                _player_map(players),
+                mode=mode,
+                board=board,
+                method="exact",
+                rank_lookup=rank_lookup,
             )
             repeated = compute_equity(
-                players,
+                _player_map(players),
                 mode=mode,
                 board=board,
                 method="exact",
@@ -303,4 +311,7 @@ def test_parallel_exact_is_reproducible_across_thread_counts(
         numba.set_num_threads(original_threads)
 
     for result in results[1:]:
-        np.testing.assert_allclose(result, results[0], rtol=0, atol=1e-12)
+        assert result.keys() == results[0].keys()
+        np.testing.assert_allclose(
+            list(result.values()), list(results[0].values()), rtol=0, atol=1e-12
+        )

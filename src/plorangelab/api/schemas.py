@@ -43,7 +43,7 @@ class EquityDetails(BaseModel):
     """
 
     method: Literal["exact", "monte-carlo"]
-    margins_of_error: list[float | None] | None
+    margins_of_error: dict[int, float | None] | None
     simulations: int | None
     attempts: int | None
     stop_reason: StopReason | None

@@ -572,6 +572,7 @@ def _run_importance_monte_carlo(
     cancel_event: Event | None = None,
     on_progress: Callable[[EquityResult], None] | None = None,
     rank_lookup: RankLookup,
+    ids: list[int],
 ) -> EquityResult:
     """Coordinate adaptive importance sampling across bounded batches.
 
@@ -606,6 +607,7 @@ def _run_importance_monte_carlo(
         cancel_event: Optional cancellation event.
         on_progress: Optional callback for intermediate results.
         rank_lookup: Precomputed five-card ranking tables.
+        ids: original positions of the players for final mapping
 
     Returns:
         EquityResult containing weighted equity estimates,
@@ -707,9 +709,9 @@ def _run_importance_monte_carlo(
             if on_progress is not None and batch_simulations > 0:
                 on_progress(
                     EquityResult(
-                        equities=equities,
+                        equities=dict(zip(ids, equities, strict=True)),
                         method="monte-carlo",
-                        margins_of_error=margins,
+                        margins_of_error=dict(zip(ids, margins, strict=True)),
                         simulations=simulations,
                         attempts=attempts,
                         stop_reason=None,
@@ -745,9 +747,9 @@ def _run_importance_monte_carlo(
     )
 
     return EquityResult(
-        equities=equities,
+        equities=dict(zip(ids, equities, strict=True)),
         method="monte-carlo",
-        margins_of_error=margins,
+        margins_of_error=dict(zip(ids, margins, strict=True)),
         simulations=simulations,
         attempts=attempts,
         stop_reason=stop_reason,

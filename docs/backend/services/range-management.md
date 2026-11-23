@@ -305,19 +305,19 @@ The implementation relies on callers treating shared encoded arrays and exposed 
 
 ## Equity calculation integration
 
-`RangeManager.calculate_equity()` gathers the `current_range` of every occupied slot in the active `StreetState`, preserving ascending slot order.
+`RangeManager.calculate_equity()` gathers the `current_range` of every occupied slot in the active `StreetState` into a dictionary keyed by the original zero-based player slot ID. It iterates slots in ascending order, but player identity is represented by the dictionary keys, not by a separate positional index list.
 
-It passes those ranges, the active street's board, the manager's session-wide PLO mode, and the shared ranking resources to `compute_equity()`.
+For example, when slots `0`, `2`, and `5` are occupied, the input to the engine has this shape:
+
+```python
+players = {0: range_0, 2: range_2, 5: range_5}
+```
+
+The manager passes that mapping, the active street's board, the session-wide PLO mode, and shared ranking resources to `compute_equity()`.
 
 The method forwards optional Monte Carlo progress callbacks, a cancellation event, and a target margin of error. It delegates sampling, exact enumeration, input validation, and statistics to the [equity engine](../equity.md).
 
-Its return value is a pair:
-
-```python
-(player_indices, equity_result)
-```
-
-`player_indices` maps the returned equity values back to the original six slots. For example, if slots `0`, `2`, and `5` are occupied, the result indices are `[0, 2, 5]`, and the three equity values use that same order.
+It returns a single `EquityResult`, not an `(indices, result)` tuple. The result's `equities` dictionary, and its `margins_of_error` dictionary when present, use the same original slot IDs as keys. For the example above, `set(result.equities) == {0, 2, 5}`. No separate player-index list is returned.
 
 The calculation mode is owned by `RangeManager`. All player ranges are encoded using that shared mode, so the manager does not support mixed PLO4/PLO5 player configurations. The equity engine independently validates its input requirements, including the number of participating players.
 

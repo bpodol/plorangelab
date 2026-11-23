@@ -6,13 +6,28 @@ from unittest.mock import Mock
 
 import pytest
 
+from plorangelab.equity import EquityResult
+from plorangelab.equity.results import StopReason
 from plorangelab.services.equity_job import EquityJob, start_equity_job
+
+
+def _equity_result(*, stop_reason: StopReason | None = None) -> EquityResult:
+    """Create a representative player-indexed Monte Carlo result."""
+    return EquityResult(
+        equities={0: 0.6, 4: 0.4},
+        method="monte-carlo",
+        margins_of_error={0: 0.01, 4: 0.01},
+        simulations=100,
+        attempts=120,
+        stop_reason=stop_reason,
+        sampler="rejection",
+    )
 
 
 def test_jobs_have_independent_state() -> None:
     first = EquityJob()
     second = EquityJob()
-    update = object()
+    update = _equity_result()
 
     first.update_progress(update)
     first.cancel()
@@ -26,14 +41,14 @@ def test_jobs_have_independent_state() -> None:
 def test_start_job_forwards_progress_and_returns_result() -> None:
     manager = Mock()
     on_finished = Mock()
-    update = object()
-    result = object()
+    update = _equity_result()
+    result = _equity_result()
 
     def calculate_equity(*, target_moe, on_progress, cancel_event):
         assert target_moe == 0.002
         assert not cancel_event.is_set()
         on_progress(update)
-        return [0, 4], result
+        return result
 
     manager.calculate_equity.side_effect = calculate_equity
 
@@ -45,10 +60,10 @@ def test_start_job_forwards_progress_and_returns_result() -> None:
             on_finished=on_finished,
         )
         assert job.future is not None
-        assert job.future.result(timeout=3) == ([0, 4], result)
+        assert job.future.result(timeout=3) is result
 
     assert job.get_progress() is update
-    assert job.get_progress() is update
+    assert job.get_status() == "completed"
     on_finished.assert_called_once_with()
     manager.calculate_equity.assert_called_once()
 
@@ -56,11 +71,12 @@ def test_start_job_forwards_progress_and_returns_result() -> None:
 def test_cancel_signals_running_calculation() -> None:
     manager = Mock()
     started = Event()
+    expected_result = _equity_result(stop_reason="cancelled")
 
     def calculate_equity(*, cancel_event, **_kwargs):
         started.set()
         assert cancel_event.wait(timeout=3), "The worker did not receive cancellation"
-        return [0, 1], object()
+        return expected_result
 
     manager.calculate_equity.side_effect = calculate_equity
 
@@ -77,7 +93,8 @@ def test_cancel_signals_running_calculation() -> None:
         job.cancel()
 
         assert job.cancel_event.is_set()
-        assert job.future.result(timeout=3)[0] == [0, 1]
+        assert job.future.result(timeout=3) is expected_result
+        assert job.get_status() == "cancelled"
 
 
 def test_on_finished_runs_if_calculation_fails() -> None:
@@ -95,5 +112,6 @@ def test_on_finished_runs_if_calculation_fails() -> None:
         assert job.future is not None
         with pytest.raises(RuntimeError, match="engine failed"):
             job.future.result(timeout=3)
+        assert job.get_status() == "failed"
 
     on_finished.assert_called_once_with()

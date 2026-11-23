@@ -136,7 +136,7 @@ test('updates state when receiving equity messages', () => {
     type: 'progress',
     job_id: 'job-1',
     simulations: 1000,
-    margins_of_error: [0.01, 0.02],
+    margins_of_error: { '0': 0.01, '1': 0.02 },
   };
 
   act(() => {
@@ -155,7 +155,7 @@ test('updates state when receiving equity messages', () => {
     },
     details: {
       method: 'monte-carlo',
-      margins_of_error: [0.002, 0.002],
+      margins_of_error: { '0': 0.002, '1': 0.002 },
       simulations: 10000,
       attempts: 11000,
       stop_reason: 'target_reached',
@@ -463,7 +463,7 @@ test('resumes and recovers a job completed during disconnection', () => {
       },
       details: {
         method: 'monte-carlo',
-        margins_of_error: [0.001, 0.001],
+        margins_of_error: { '0': 0.001, '1': 0.001 },
         simulations: 100000,
         attempts: 120000,
         stop_reason: 'target_reached',
@@ -611,7 +611,7 @@ test('handles cooperative cancellation returned as a result', () => {
     equities: { '0': 0.6, '1': 0.4 },
     details: {
       method: 'monte-carlo',
-      margins_of_error: [0.01, 0.01],
+      margins_of_error: { '0': 0.01, '1': 0.01 },
       simulations: 1000,
       attempts: 1200,
       stop_reason: 'cancelled',

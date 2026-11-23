@@ -60,3 +60,8 @@ def _weighted_players(mode: int) -> list[EncodedRange]:
         )
 
     return [encode_range(text, mode) for text in texts]
+
+
+def _player_map(players: list[EncodedRange]) -> dict[int, EncodedRange]:
+    """Adapt ordered test fixtures to the player-ID keyed public equity API."""
+    return dict(enumerate(players))

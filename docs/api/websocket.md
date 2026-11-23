@@ -117,11 +117,14 @@ This acknowledgment **does not mean the worker has stopped**. The job must reach
   "type": "progress",
   "job_id": "example-job-id",
   "simulations": 15000,
-  "margins_of_error": [0.004, 0.004]
+  "margins_of_error": {
+    "0": 0.004,
+    "2": 0.004
+  }
 }
 ```
 
-`simulations` is the number of completed samples represented by that update. `margins_of_error` is a per-participant array of optional numeric estimates. **The progress event does not include the latest equity estimates**, even though the underlying service result contains them.
+`simulations` is the number of completed samples represented by that update. `margins_of_error` is an object keyed by participating player slot ID, with numeric or `null` values (or the whole field may be `null`). **The progress event does not include the latest equity estimates**, even though the underlying service result contains them.
 
 Progress is a **snapshot, not a stream with guaranteed delivery of every intermediate update**. The job holds one latest progress value, and a publisher can skip older updates if computation or notification happens faster than socket delivery. Exact calculations may produce no Monte Carlo progress messages.
 
@@ -139,7 +142,10 @@ Progress is a **snapshot, not a stream with guaranteed delivery of every interme
   },
   "details": {
     "method": "monte-carlo",
-    "margins_of_error": [0.003, 0.003],
+    "margins_of_error": {
+      "0": 0.003,
+      "2": 0.003
+    },
     "simulations": 20000,
     "attempts": 21000,
     "stop_reason": "target_reached",
@@ -149,27 +155,18 @@ Progress is a **snapshot, not a stream with guaranteed delivery of every interme
 }
 ```
 
-The values above are examples, not a recorded calculation. `equities` includes **participating player slots only**, using their zero-based indices as keys. JSON object keys are strings even though the Python response schema uses `dict[int, float]`. Array diagnostics correspond to the participating players in slot order.
+The values above are examples, not a recorded calculation. `equities` includes **participating player slots only**, using their zero-based indices as keys. Both `equities` and non-null `margins_of_error` are JSON objects whose keys are strings, even though the Python models use integer player slot IDs. Inactive slots are omitted.
 
-**Margin-of-error ordering:** The `margins_of_error` array contains one entry per participating player, ordered by ascending player slot ID. Inactive slots are omitted, so the array is not padded with `null` values.
+**Margin-of-error lookup:** Match each player's MOE to its equity using the **same player slot key**, not an array position. For example, `margins_of_error: {"0": 0.0012, "2": 0.0023}` associates `0.0012` with slot `0` and `0.0023` with slot `2`; no sorting is needed to associate them. Progress messages use the same MOE mapping, although they do not include equities.
 
-For example, if only player slots `0` and `2` participate,
-`margins_of_error: [0.0012, 0.0023]` assigns `0.0012` to player `0`
-and `0.0023` to player `2`.
-
-For `result` messages, clients should match MOEs to `equities`
-after sorting the equity keys numerically. `progress` messages
-follow the same ordering, although they do not include equities.
-
-A `null` array entry means that the margin of error is unavailable,
-not that the corresponding player slot is inactive.
+A `null` value for an individual player key means that player's MOE is unavailable. `margins_of_error: null` means no MOE mapping is available, such as for an exact calculation. Inactive slots are omitted rather than represented by `null` entries.
 
 The `details` object always has these field names, though several values may be `null` depending on the calculation:
 
 | Field | Type / allowed values | Meaning |
 | --- | --- | --- |
 | `method` | `"exact"` or `"monte-carlo"` | Calculation method selected by the equity engine. |
-| `margins_of_error` | Array of number/null, or null | Per-participant estimated precision when available. |
+| `margins_of_error` | Object mapping player slot IDs to number/null, or null | Per-participant estimated precision when available. |
 | `simulations` | Integer or null | Completed samples when applicable. |
 | `attempts` | Integer or null | Sampling attempts when applicable. |
 | `stop_reason` | `"target_reached"`, `"max_simulations"`, `"cancelled"`, `"attempt_limit"`, or null | Why the calculation stopped. |

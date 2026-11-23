@@ -1,7 +1,6 @@
 """WebSocket equity protocol: validation, progress, errors, cancellation and concurrency."""
 
 from threading import Event
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -14,6 +13,7 @@ from ._helpers import (
     add_player,
     add_two_players,
     create_session,
+    equity_progress,
     equity_result,
     start_message,
     ws_url,
@@ -55,9 +55,7 @@ def test_websocket_progress_and_sparse_slot_results(
     release = Event()
 
     def fake_compute(**kwargs):
-        kwargs["on_progress"](
-            SimpleNamespace(simulations=1000, margins_of_error=[0.01, 0.01])
-        )
+        kwargs["on_progress"](equity_progress())
         assert release.wait(timeout=10), "Test did not release calculation"
         return equity_result()
 
@@ -76,7 +74,7 @@ def test_websocket_progress_and_sparse_slot_results(
             assert progress["type"] == "progress"
             assert progress["job_id"] == job_id
             assert progress["simulations"] == 1000
-            assert progress["margins_of_error"] == [0.01, 0.01]
+            assert progress["margins_of_error"] == {"0": 0.01, "4": 0.01}
 
             release.set()
             completed = ws.receive_json()
@@ -94,12 +92,10 @@ def test_websocket_progress_and_sparse_slot_results(
     assert kwargs["board"].shape == (3,)
 
     session = client.app.state.session_manager.sessions[session_id]
-    assert (
-        kwargs["players"][0] is session.manager._current_state.ranges[0].current_range
-    )
-    assert (
-        kwargs["players"][1] is session.manager._current_state.ranges[4].current_range
-    )
+    players = kwargs["players"]
+    assert list(players) == [0, 4]
+    assert players[0] is session.manager._current_state.ranges[0].current_range
+    assert players[4] is session.manager._current_state.ranges[4].current_range
     assert (
         kwargs["rank_lookup"] is client.app.state.session_manager.resources.rank_lookup
     )

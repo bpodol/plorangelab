@@ -19,12 +19,13 @@ The package exports the following names from `__init__.py`:
 | `EquityResult` | Final or intermediate result of equity calculation. |
 | `SamplingExhaustedError` | Indicates that no valid showdown was sampled within the attempt limit. |
 
-`compute_equity()` accepts an ordered list of `EncodedRange` instances, `mode` (`4` or `5`), an optional encoded board, calculation options, and a required `RankLookup` containing precomputed ranking tables. Results preserve the input player order.
+`compute_equity()` accepts `players: dict[int, EncodedRange]`, keyed by zero-based player slot ID (`0`–`5`), along with `mode` (`4` or `5`), an optional encoded board, calculation options, and a required `RankLookup` containing precomputed ranking tables. The engine builds aligned player-ID and range sequences for its positional numerical kernels, then maps the results back to the original IDs. The input mapping's insertion order does not change which result belongs to which player.
 
 ### Encoded input representation
 
 | Data | Representation | Invariant |
 | --- | --- | --- |
+| Player input | `dict[int, EncodedRange]` | Keys are distinct player slot IDs in `0`–`5`; 2–6 participating players. |
 | Card | Integer ID in `[0, 51]` | Each ID represents one card. |
 | Player hands | `uint8` array, shape `(n, mode)` | Four or five distinct cards per hand. |
 | Hand masks | `uint64` array, shape `(n,)` | One bit per card; masks must match hands. |
@@ -52,7 +53,7 @@ compute_equity(players, mode, board, options, rank_lookup)
     |       +-- Exact: sequential or parallel enumeration
     |       +-- Monte Carlo: rejection or importance sampling
     |
-    +-- Return EquityResult in input player order
+    +-- Return EquityResult keyed by original player slot IDs
 ```
 
 The caller can explicitly request `"exact"` or `"monte-carlo"` instead of automatic method selection. The **automatic** method always chooses Monte Carlo preflop. Postflop, it chooses exact enumeration when the conservative estimate is at most **500,000 showdowns**; otherwise it chooses Monte Carlo. Explicit exact calculations are also subject to the workload limit.
@@ -234,7 +235,14 @@ An optional `on_progress` callback receives intermediate `EquityResult` snapshot
 
 ## Results
 
-`compute_equity()` returns `EquityResult`, with one equity value per player:
+`compute_equity()` returns `EquityResult`, with equities and any available margins of error keyed by the original player slot IDs (including noncontiguous IDs such as `0`, `2`, and `5`):
+
+```python
+equities: dict[int, float]
+margins_of_error: dict[int, float | None] | None
+```
+
+This mapping contract applies to final results and intermediate `on_progress` snapshots. Exact calculations have `margins_of_error=None`; a Monte Carlo margin for an individual player may be `None` when unavailable.
 
 | Field | Exact | Monte Carlo |
 | --- | --- | --- |
@@ -246,7 +254,7 @@ An optional `on_progress` callback receives intermediate `EquityResult` snapshot
 | `sampler` | `None` | `"rejection"` or `"importance"` |
 | `effective_samples` | `None` | Value for importance sampling; `None` for rejection |
 
-`EquityResult` is a frozen dataclasse. The dataclass fields cannot be reassigned, although their contained lists remain mutable.
+`EquityResult` is a frozen dataclass. Its fields cannot be reassigned, but its contained dictionaries remain mutable; freezing the dataclass does not recursively freeze those mappings.
 
 ## Current limits and defaults
 
