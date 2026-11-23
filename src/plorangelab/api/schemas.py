@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from plorangelab.equity.results import StopReason
+from plorangelab.services.equity_job import JobStatus
 from plorangelab.types import Mode
 
 
@@ -148,3 +149,38 @@ class BoardResponse(BaseModel):
     """
 
     players: list[PlayerFilterSnapshotResponse | None]
+
+
+class EquityDetailsSSE(BaseModel):
+    """Describe the execution method and diagnostics of an equity result
+    or intermediate progress.
+
+    Includes the calculation method, equities, optional Monte Carlo statistics,
+    sampling information, and the reason execution stopped.
+
+    Fields that do not apply to a particular calculation method
+    are represented by None.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    equities: dict[int, float]
+    method: Literal["exact", "monte-carlo"]
+    margins_of_error: dict[int, float | None] | None
+    simulations: int | None
+    attempts: int | None
+    stop_reason: StopReason | None
+    sampler: Literal["rejection", "importance"] | None
+    effective_samples: float | None
+
+
+class EquityStreamEvent(BaseModel):
+    job_id: str
+    status: JobStatus
+    error: str | None = None
+    details: EquityDetailsSSE | None = None
+
+
+class EquityResponseSSE(BaseModel):
+    status: Literal["starting", "cancelling"]
+    job_id: str

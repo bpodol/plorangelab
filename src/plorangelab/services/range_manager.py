@@ -114,6 +114,11 @@ class RangeManager:
     def _current_state(self) -> StreetState:
         return self._streets[self._active_street]
 
+    @property
+    def active_player_count(self) -> int:
+        """Return the number of occupied player slots on the active street."""
+        return sum(player is not None for player in self._current_state.ranges)
+
     def change_mode(self, mode: Mode) -> None:
         """Change the PLO mode. There should be no active ranges
         in order to change the mode.

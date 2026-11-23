@@ -27,6 +27,12 @@ JobStatus = Literal[
 Subscriber = Callable[[], None]
 
 
+@dataclass(frozen=True)
+class JobSnapshot:
+    status: JobStatus
+    progress: EquityResult | None
+
+
 @dataclass
 class EquityJob:
     """Track the state and notifications of one equity calculation.
@@ -167,6 +173,11 @@ class EquityJob:
         with self.lock:
             return self.progress
 
+    def get_snapshot(self) -> JobSnapshot:
+        """Return the latest progress and current Future-derived job status."""
+        with self.lock:
+            return JobSnapshot(status=self.get_status(), progress=self.progress)
+
 
 def start_equity_job(
     manager: RangeManager,
@@ -191,7 +202,6 @@ def start_equity_job(
     Args:
         manager: RangeManager used to perform the calculation.
         executor: Existing thread pool responsible for execution.
-        mode: PLO variant used for the calculation.
         target_moe: Requested Monte Carlo margin of error.
         on_finished: Optional callback invoked when the worker exits.
 
