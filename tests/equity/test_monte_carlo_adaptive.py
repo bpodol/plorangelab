@@ -10,7 +10,7 @@ import plorangelab.equity.monte_carlo as mc_module
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import _configured_ranges, _guaranteed_split_players
+from ._helpers import _configured_ranges, _guaranteed_split_players, _player_map
 
 # Precision stopping and unweighted uncertainty
 
@@ -21,7 +21,7 @@ def test_adaptive_monte_carlo_stops_when_target_is_reached(
     players, board = _guaranteed_split_players()
 
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -37,8 +37,8 @@ def test_adaptive_monte_carlo_stops_when_target_is_reached(
     assert result.stop_reason == "target_reached"
     assert result.simulations == 4
     assert result.attempts == 4
-    assert result.equities == [0.5, 0.5]
-    assert result.margins_of_error == [0.0, 0.0]
+    assert result.equities == {0: 0.5, 1: 0.5}
+    assert result.margins_of_error == {0: 0.0, 1: 0.0}
 
 
 def test_adaptive_stops_at_max_samples_when_precision_is_not_reached(
@@ -68,7 +68,7 @@ def test_adaptive_stops_at_max_samples_when_precision_is_not_reached(
 
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", varying_batch)
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -118,7 +118,7 @@ def test_adaptive_cancellation_before_execution_raises(
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", unexpected_batch)
     with pytest.raises(InterruptedError, match="before any simulations"):
         equity_module.compute_equity(
-            players,
+            _player_map(players),
             mode=4,
             board=board,
             method="monte-carlo",
@@ -151,7 +151,7 @@ def test_adaptive_cancellation_between_batches_returns_partial_estimate(
 
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", tied_batch)
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -165,7 +165,7 @@ def test_adaptive_cancellation_between_batches_returns_partial_estimate(
     assert calls == 1
     assert result.stop_reason == "cancelled"
     assert result.simulations == 2
-    assert result.equities == [0.5, 0.5]
+    assert result.equities == {0: 0.5, 1: 0.5}
 
 
 # Attempt and memory budgets
@@ -197,7 +197,7 @@ def test_attempt_limit_returns_partial_adaptive_batch_without_losing_successes(
 
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", exhausting_batch)
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -210,7 +210,7 @@ def test_attempt_limit_returns_partial_adaptive_batch_without_losing_successes(
     assert result.stop_reason == "attempt_limit"
     assert result.simulations == 1
     assert result.attempts == 10_000
-    assert result.equities == [1.0, 0.0]
+    assert result.equities == {0: 1.0, 1: 0.0}
 
 
 def test_fixed_budget_memory_is_bounded_by_batch_size(
@@ -226,7 +226,7 @@ def test_fixed_budget_memory_is_bounded_by_batch_size(
 
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", recording_batch)
     result = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         min_samples=11,
@@ -241,7 +241,7 @@ def test_fixed_budget_memory_is_bounded_by_batch_size(
     assert sum(allocated_batch_sizes) == 11
     assert allocated_batch_sizes == [4, 4, 3]
     assert max(allocated_batch_sizes) <= 4
-    assert sum(result.equities) == pytest.approx(1.0)
+    assert sum(result.equities.values()) == pytest.approx(1.0)
 
 
 def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
@@ -272,7 +272,7 @@ def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
 
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", capped_batch)
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -288,4 +288,4 @@ def test_attempts_are_capped_per_batch_and_global_attempts_accumulate(
     assert result.stop_reason == "cancelled"
     assert result.simulations == 1
     assert result.attempts == mc_module._MAX_BATCH_ATTEMPTS + 1
-    assert result.equities == [1.0, 0.0]
+    assert result.equities == {0: 1.0, 1: 0.0}

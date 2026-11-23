@@ -1,7 +1,6 @@
 """WebSocket resume behavior after disconnect, completion, and failure."""
 
 from threading import Event
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -12,6 +11,7 @@ from plorangelab.services import range_manager as range_manager_module
 from ._helpers import (
     add_two_players,
     create_session,
+    equity_progress,
     equity_result,
     start_message,
     ws_url,
@@ -64,9 +64,7 @@ def test_resume_running_job_receives_latest_progress_and_result(
     entered = Event()
 
     def fake_compute(**kwargs):
-        kwargs["on_progress"](
-            SimpleNamespace(simulations=1000, margins_of_error=[0.01, 0.01])
-        )
+        kwargs["on_progress"](equity_progress())
         entered.set()
         assert release.wait(timeout=10), "Test did not release calculation"
         return equity_result()
@@ -97,6 +95,7 @@ def test_resume_running_job_receives_latest_progress_and_result(
             assert progress["type"] == "progress"
             assert progress["job_id"] == job_id
             assert progress["simulations"] == 1000
+            assert progress["margins_of_error"] == {"0": 0.01, "4": 0.01}
 
             release.set()
             completed = second.receive_json()

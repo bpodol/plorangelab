@@ -12,13 +12,14 @@ from plorangelab.encoder import encode_range
 from plorangelab.equity import EquityResult
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import _guaranteed_split_players
+from ._helpers import _guaranteed_split_players, _player_map
 
 
 def test_rejection_progress_callback(
     monkeypatch: pytest.MonkeyPatch, rank_lookup: RankLookup
 ) -> None:
     players, board = _guaranteed_split_players()
+    player_map = {4: players[0], 1: players[1]}
     updates: list[EquityResult] = []
 
     def balanced_batch(**kwargs):
@@ -33,7 +34,7 @@ def test_rejection_progress_callback(
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", balanced_batch)
 
     result = equity_module.compute_equity(
-        players,
+        player_map,
         mode=4,
         board=board,
         method="monte-carlo",
@@ -50,16 +51,24 @@ def test_rejection_progress_callback(
     assert [u.attempts for u in updates] == [2, 4]
 
     for update in updates:
+        assert isinstance(update, EquityResult)
+        assert update.method == "monte-carlo"
         assert update.sampler == "rejection"
         assert update.stop_reason is None
-        assert update.equities == [0.5, 0.5]
+        assert update.equities == {4: 0.5, 1: 0.5}
+        assert update.margins_of_error is not None
+        assert update.margins_of_error.keys() == update.equities.keys()
+        assert update.effective_samples is None
 
     # Verify the MOE uses cumulative statistics.
-    assert updates[0].margins_of_error[0] == pytest.approx(1.96 * np.sqrt(0.5 / 2))
-    assert updates[1].margins_of_error[0] == pytest.approx(1.96 * np.sqrt((1 / 3) / 4))
+    assert updates[0].margins_of_error[4] == pytest.approx(1.96 * np.sqrt(0.5 / 2))
+    assert updates[1].margins_of_error[4] == pytest.approx(1.96 * np.sqrt((1 / 3) / 4))
 
     assert result.simulations == 6
     assert result.stop_reason == "max_simulations"
+    assert result.equities.keys() == {4, 1}
+    assert result.margins_of_error is not None
+    assert result.margins_of_error.keys() == result.equities.keys()
 
 
 def test_importance_progress_callback(
@@ -71,6 +80,8 @@ def test_importance_progress_callback(
         encode_range("AdKdQdJd", 4),
     ]
 
+    # Deliberately noncontiguous and out-of-order slot IDs.
+    player_map = {5: players[0], 0: players[1], 2: players[2]}
     updates: list[EquityResult] = []
 
     # Force the importance sampler through the public engine.
@@ -111,7 +122,7 @@ def test_importance_progress_callback(
     )
 
     result = equity_module.compute_equity(
-        players,
+        player_map,
         mode=4,
         method="monte-carlo",
         min_samples=6,
@@ -129,16 +140,23 @@ def test_importance_progress_callback(
     for update in updates:
         assert update.sampler == "importance"
         assert update.stop_reason is None
+        assert isinstance(update, EquityResult)
+        assert update.method == "monte-carlo"
         assert update.effective_samples == pytest.approx(update.simulations)
+        assert update.margins_of_error is not None
+        assert update.equities.keys() == update.margins_of_error.keys()
 
-        assert update.equities == [0.5, 0.5, 0]
+        assert update.equities == {5: 0.5, 0: 0.5, 2: 0.0}
 
-        assert update.margins_of_error[0] > 0
+        assert update.margins_of_error[5] > 0
         assert update.margins_of_error[2] == 0.0
 
     assert result.sampler == "importance"
     assert result.stop_reason == "target_reached"
     assert result.simulations == 6
+    assert result.equities.keys() == {5, 0, 2}
+    assert result.margins_of_error is not None
+    assert result.margins_of_error.keys() == result.equities.keys()
 
 
 def test_cancellation_from_callback_rejection(
@@ -168,7 +186,7 @@ def test_cancellation_from_callback_rejection(
     monkeypatch.setattr(mc_module, "_run_monte_carlo_batch", balanced_batch)
 
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="monte-carlo",
@@ -245,7 +263,7 @@ def test_cancellation_from_callback_importance(
     )
 
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         method="monte-carlo",
         min_samples=6,
@@ -283,7 +301,7 @@ def test_no_progress_for_exact_equity(
     monkeypatch.setattr(equity_module, "run_exact_equity", fake_exact_equity)
 
     result = equity_module.compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=board,
         method="exact",
@@ -293,6 +311,6 @@ def test_no_progress_for_exact_equity(
 
     assert updates == []
     assert result.method == "exact"
-    assert result.equities == [0.5, 0.5]
+    assert result.equities == {0: 0.5, 1: 0.5}
     assert result.simulations is None
     assert result.margins_of_error is None

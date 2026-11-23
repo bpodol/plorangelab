@@ -104,7 +104,7 @@ manager.calculate_equity(
 )
 ```
 
-`RangeManager.calculate_equity()` collects the current filtered ranges from occupied slots of the active street, uses the manager's shared PLO mode and active board, and returns `(player_indices, EquityResult)`. Details of range selection and equity algorithms belong to the [range-management](range-management.md) and [equity-engine](../equity.md) documents.
+`RangeManager.calculate_equity()` collects the current filtered ranges into a mapping keyed by occupied player slot IDs, uses the manager's shared PLO mode and active board, and returns a single `EquityResult` with player-indexed equities and margins of error (when available). Details of range selection and equity algorithms belong to the [range-management](range-management.md) and [equity-engine](../equity.md) documents.
 
 The worker receives the **existing `RangeManager` object**, not a snapshot. The job module itself does not lock or clone the manager. The surrounding application must ensure the manager is not changed unsafely during calculation.
 
@@ -124,7 +124,7 @@ The `on_finished` callback, if provided, is invoked in the worker's `finally` bl
 
 `completed` means **the worker returned normally**, not necessarily that the desired margin of error was achieved. The equity result's own stopping diagnostics explain why sampling stopped.
 
-A newly created job may be pending while waiting for a free worker. `job.future` holds the `Future[tuple[list[int], EquityResult]]` returned by the executor.
+A newly created job may be pending while waiting for a free worker. `job.future` holds the `Future[EquityResult]` returned by the executor.
 
 ### Cooperative cancellation
 
@@ -184,7 +184,7 @@ The following is a **conceptual caller workflow**, not an API or WebSocket contr
 
 4. Worker computes equity
      → progress callback → EquityJob.progress → subscriber notification
-     → final (player_indices, EquityResult) or exception in Future
+     → final EquityResult or exception in Future
 
 5. Caller reads progress/status/result
      → possibly streams state over its own transport

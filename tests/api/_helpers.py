@@ -1,8 +1,8 @@
 """Shared HTTP/WebSocket test builders; no fixtures or test cases."""
 
-from types import SimpleNamespace
-
 from fastapi.testclient import TestClient
+
+from plorangelab.equity import EquityResult
 
 
 def create_session(client: TestClient) -> str:
@@ -29,16 +29,30 @@ def add_two_players(client: TestClient, session_id: str) -> None:
     add_player(client, session_id, 4, "KsKhTd9c")
 
 
-def equity_result(equities: list[float] | None = None) -> SimpleNamespace:
-    """Small completed result; ranking and sampling are tested elsewhere."""
-    return SimpleNamespace(
-        equities=equities if equities is not None else [0.6, 0.4],
+def equity_result(equities: dict[int, float] | None = None) -> EquityResult:
+    """Small completed result with equities keyed by player slot."""
+    return EquityResult(
+        equities=equities if equities is not None else {0: 0.6, 4: 0.4},
         method="exact",
         margins_of_error=None,
         simulations=None,
         attempts=None,
         stop_reason=None,
         sampler=None,
+        effective_samples=None,
+    )
+
+
+def equity_progress() -> EquityResult:
+    """Representative Monte Carlo progress keyed by player slot."""
+    return EquityResult(
+        equities={0: 0.6, 4: 0.4},
+        method="monte-carlo",
+        margins_of_error={0: 0.01, 4: 0.01},
+        simulations=1000,
+        attempts=1000,
+        stop_reason=None,
+        sampler="rejection",
         effective_samples=None,
     )
 

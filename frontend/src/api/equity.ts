@@ -9,7 +9,7 @@ export type JobStatus = 'pending' | 'running' | 'completed' | 'cancelled' | 'fai
  */
 export interface EquityDetails {
   method: 'exact' | 'monte-carlo';
-  margins_of_error: (number | null)[] | null;
+  margins_of_error: Record<string, number | null> | null;
   simulations: number | null;
   attempts: number | null;
   stop_reason: 'target_reached' | 'max_simulations' | 'cancelled' | 'attempt_limit' | null;
@@ -40,7 +40,7 @@ export type EquityMessage =
       type: 'progress';
       job_id: string;
       simulations: number;
-      margins_of_error: (number | null)[];
+      margins_of_error: Record<string, number | null> | null;
     }
   | {
       type: 'result';

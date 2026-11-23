@@ -256,6 +256,8 @@ The two cancellation paths matter: an engine that stops cooperatively may return
 
 The `EquityMessage` union models the expected incoming messages. The current handler checks that parsed JSON is an object with a string `type`, then asserts it is an `EquityMessage`; it does **not** validate all fields at runtime.
 
+Equity and margin-of-error payloads use JSON objects keyed by player slot ID. `EquityPanel` calculates the highest available progress MOE from `Object.values(message.margins_of_error ?? {})` and looks up each final-result MOE by the same player ID key as the corresponding equity, not by array position.
+
 ### Disconnect, reconnect, and resume
 
 - An unexpected socket closure sets `isConnected` to false and schedules a retry.

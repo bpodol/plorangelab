@@ -123,9 +123,9 @@ def build_final_message(job: EquityJob) -> dict:
     """
 
     try:
-        ids, result = job.future.result()
+        result = job.future.result()
         response = EquityResponse(
-            equities=dict(zip(ids, result.equities, strict=True)),
+            equities=result.equities,
             details=EquityDetails(
                 method=result.method,
                 margins_of_error=result.margins_of_error,

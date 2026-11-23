@@ -43,7 +43,7 @@ class EquityJob:
     """
 
     cancel_event: Event = field(default_factory=Event)
-    future: Future[tuple[list[int], EquityResult]] | None = None
+    future: Future[EquityResult] | None = None
     progress: EquityResult | None = None
     lock: Lock = field(default_factory=Lock)
     job_id: str = field(default_factory=lambda: token_urlsafe(12))
@@ -87,7 +87,7 @@ class EquityJob:
         if future.exception() is not None:
             return "failed"
 
-        _, result = future.result()
+        result = future.result()
 
         if result.stop_reason == "cancelled":
             return "cancelled"

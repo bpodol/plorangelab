@@ -9,7 +9,7 @@ from plorangelab.encoder import EncodedRange, encode_board, encode_range
 from plorangelab.equity import compute_equity
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import RIVER, _configured_ranges, _make_range_from_ids
+from ._helpers import RIVER, _configured_ranges, _make_range_from_ids, _player_map
 
 # Equity correctness
 
@@ -23,14 +23,14 @@ def test_exact_equity_returns_guaranteed_winner_and_loser(
     ]
 
     equity = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=encode_board(RIVER),
         method="exact",
         rank_lookup=rank_lookup,
     ).equities
 
-    assert equity == [1.0, 0.0]
+    assert equity == {0: 1.0, 1: 0.0}
 
 
 def test_exact_equity_splits_a_guaranteed_tie_equally(rank_lookup: RankLookup) -> None:
@@ -40,7 +40,7 @@ def test_exact_equity_splits_a_guaranteed_tie_equally(rank_lookup: RankLookup) -
     ]
 
     equity = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=encode_board(RIVER),
         method="exact",
@@ -62,10 +62,14 @@ def test_exact_equity_splits_a_three_way_tie_into_thirds(
     ]
 
     equity = compute_equity(
-        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+        _player_map(players),
+        mode=4,
+        board=board,
+        method="exact",
+        rank_lookup=rank_lookup,
     ).equities
 
-    for value in equity:
+    for value in equity.values():
         assert value == pytest.approx(1 / 3)
 
 
@@ -76,7 +80,7 @@ def test_exact_equity_respects_range_weights(rank_lookup: RankLookup) -> None:
     ]
 
     equity = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=encode_board(RIVER),
         method="exact",
@@ -97,14 +101,14 @@ def test_exact_equity_excludes_colliding_hands(rank_lookup: RankLookup) -> None:
     ]
 
     equity = compute_equity(
-        players,
+        _player_map(players),
         mode=4,
         board=encode_board(RIVER),
         method="exact",
         rank_lookup=rank_lookup,
     ).equities
 
-    assert equity == [0.0, 1.0]
+    assert equity == {0: 0.0, 1: 1.0}
 
 
 @pytest.mark.parametrize(
@@ -125,12 +129,16 @@ def test_exact_equity_supports_player_modes_and_range_sizes(
     players, board = _configured_ranges(player_count, mode, multi_hand)
 
     equity = compute_equity(
-        players, mode=mode, board=board, method="exact", rank_lookup=rank_lookup
+        _player_map(players),
+        mode=mode,
+        board=board,
+        method="exact",
+        rank_lookup=rank_lookup,
     ).equities
 
     assert len(equity) == player_count
-    assert all(0.0 <= value <= 1.0 for value in equity)
-    assert sum(equity) == pytest.approx(1.0)
+    assert all(0.0 <= value <= 1.0 for value in equity.values())
+    assert sum(equity.values()) == pytest.approx(1.0)
 
 
 # Limits and invariance
@@ -146,7 +154,7 @@ def test_exact_equity_rejects_matchups_with_no_compatible_hands(
 
     with pytest.raises(ValueError, match="No compatible"):
         compute_equity(
-            players,
+            _player_map(players),
             mode=4,
             board=encode_board(RIVER),
             method="exact",
@@ -165,7 +173,7 @@ def test_exact_equity_raises_when_workload_limit_is_exceeded(
 
     with pytest.raises(RuntimeError, match="workload limit"):
         compute_equity(
-            [large_range, large_range],
+            _player_map([large_range, large_range]),
             mode=4,
             board=board,
             method="exact",
@@ -183,7 +191,11 @@ def test_exact_equity_is_invariant_to_weight_scaling(scale, rank_lookup: RankLoo
     board = encode_board("2c3d5h7s9c")
 
     baseline = compute_equity(
-        players, mode=4, board=board, method="exact", rank_lookup=rank_lookup
+        _player_map(players),
+        mode=4,
+        board=board,
+        method="exact",
+        rank_lookup=rank_lookup,
     ).equities
 
     scaled_players = [
@@ -196,12 +208,15 @@ def test_exact_equity_is_invariant_to_weight_scaling(scale, rank_lookup: RankLoo
     ]
 
     actual = compute_equity(
-        scaled_players,
+        _player_map(scaled_players),
         mode=4,
         board=board,
         method="exact",
         rank_lookup=rank_lookup,
     ).equities
 
-    for actual_equity, baseline_equity in zip(actual, baseline, strict=True):
+    assert actual.keys() == baseline.keys()
+    for player_id in baseline:
+        actual_equity = actual[player_id]
+        baseline_equity = baseline[player_id]
         assert actual_equity == pytest.approx(baseline_equity, abs=1e-12)

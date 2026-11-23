@@ -11,15 +11,15 @@ class EquityResult:
     """Result of an exact or Monte Carlo equity calculation.
 
     Equity values represent expected pot shares, including split pots,
-    and are aligned with the input player order.
+    and are keyed by the original, zero-based player slot IDs.
 
     Monte Carlo diagnostics are unavailable for exact calculations.
 
     Attributes:
-        equities: Per-player equity values as fractions from 0 to 1.
+        equities: Expected pot shares from 0 to 1, keyed by player slot ID.
         method: Calculation method used.
-        margins_of_error: Approximate per-player Monte Carlo margins of
-            error, or None for exact calculations.
+        margins_of_error: Approximate Monte Carlo margins of error keyed by
+            player slot ID, or None for exact calculations.
         simulations: Number of completed Monte Carlo showdowns, or None
             for exact calculations.
         attempts: Number of sampling attempts, including rejected ones,
@@ -31,9 +31,9 @@ class EquityResult:
             or None when not applicable.
     """
 
-    equities: list[float]
+    equities: dict[int, float]
     method: Literal["exact", "monte-carlo"]
-    margins_of_error: list[float | None] | None
+    margins_of_error: dict[int, float | None] | None
     simulations: int | None
     attempts: int | None
     stop_reason: StopReason | None

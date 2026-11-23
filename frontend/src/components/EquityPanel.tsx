@@ -52,7 +52,9 @@ export function EquityPanel({
   // Show the highest available player MOE as the current precision
   // indicator; null entries represent unavailable estimates.
   const validMoes =
-    message?.type === 'progress' ? message.margins_of_error.filter((moe) => moe !== null) : [];
+    message?.type === 'progress'
+      ? Object.values(message.margins_of_error ?? {}).filter((moe) => moe !== null)
+      : [];
 
   const highestMoe =
     validMoes.length > 0 && validMoes.every(Number.isFinite) ? Math.max(...validMoes) : null;
@@ -100,9 +102,8 @@ export function EquityPanel({
           <ul>
             {Object.entries(message.equities)
               .sort(([a], [b]) => Number(a) - Number(b))
-              // MOEs follow participating-player order, not player slot IDs.
-              .map(([playerId, equity], index) => {
-                const moe = message.details.margins_of_error?.[index];
+              .map(([playerId, equity]) => {
+                const moe = message.details.margins_of_error?.[playerId];
 
                 return (
                   <li key={playerId}>

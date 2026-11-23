@@ -17,7 +17,7 @@ from plorangelab.equity.importance_sampling import (
 )
 from plorangelab.rank_combination import RankLookup
 
-from ._helpers import _weighted_players
+from ._helpers import _player_map, _weighted_players
 
 # Deterministic index test data
 
@@ -237,7 +237,7 @@ def test_scan_fallback_matches_indexed_public_results(
     )
 
     kwargs = {
-        "players": _weighted_players(4),
+        "players": _player_map(_weighted_players(4)),
         "mode": 4,
         "board": encode_board("2c3d5h7s9c"),
         "method": "monte-carlo",
@@ -258,11 +258,9 @@ def test_scan_fallback_matches_indexed_public_results(
 
     assert indexed_result.simulations == fallback_result.simulations == 2_000
 
-    for indexed_equity, fallback_equity in zip(
-        indexed_result.equities,
-        fallback_result.equities,
-        strict=True,
-    ):
+    assert indexed_result.equities.keys() == fallback_result.equities.keys()
+    for player_id, indexed_equity in indexed_result.equities.items():
+        fallback_equity = fallback_result.equities[player_id]
         assert indexed_equity == pytest.approx(
             fallback_equity,
             abs=1e-12,

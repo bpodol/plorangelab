@@ -390,6 +390,7 @@ def _run_batched_monte_carlo(
     cancel_event: Event | None = None,
     on_progress: Callable[[EquityResult], None] | None = None,
     rank_lookup: RankLookup,
+    ids: list[int],
 ) -> EquityResult:
     """Run adaptive rejection-sampling Monte Carlo in bounded batches.
 
@@ -423,6 +424,7 @@ def _run_batched_monte_carlo(
         cancel_event: Optional cancellation event.
         on_progress: Optional callback receiving intermediate results.
         rank_lookup: Precomputed five-card hand ranking tables.
+        ids: original positions of the players for final mapping
 
     Returns:
         EquityResult containing per-player equity estimates, margins
@@ -523,9 +525,9 @@ def _run_batched_monte_carlo(
         if on_progress is not None and batch_simulations > 0:
             on_progress(
                 EquityResult(
-                    equities=equities,
+                    equities=dict(zip(ids, equities, strict=True)),
                     method="monte-carlo",
-                    margins_of_error=margins,
+                    margins_of_error=dict(zip(ids, margins, strict=True)),
                     simulations=simulations,
                     attempts=attempts,
                     stop_reason=None,
@@ -549,9 +551,9 @@ def _run_batched_monte_carlo(
         confidence_multiplier,
     )
     return EquityResult(
-        equities=equities,
+        equities=dict(zip(ids, equities, strict=True)),
         method="monte-carlo",
-        margins_of_error=margins,
+        margins_of_error=dict(zip(ids, margins, strict=True)),
         simulations=simulations,
         attempts=attempts,
         stop_reason=stop_reason,
