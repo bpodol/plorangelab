@@ -3,8 +3,8 @@ import { createSession, changeBoard, changeMode } from './api/sessions';
 import { BoardInput } from './components/BoardInput';
 import { PlayerRangeInput } from './components/PlayerRangeInput';
 import { EquityPanel } from './components/EquityPanel';
-import { useEquitySocket } from './hooks/useEquitySocket';
 import { usePlayerRanges } from './hooks/usePlayerRanges';
+import { useEquitySSE } from './hooks/useEquitySSE';
 import { FilterPanel } from './components/FilterPanel';
 
 /**
@@ -14,7 +14,7 @@ import { FilterPanel } from './components/FilterPanel';
  * board input, PLO mode, loading indicators, and feedback messages.
  *
  * Delegates player range management to usePlayerRanges() and equity
- * calculation state to useEquitySocket().
+ * calculation state to useEquitySSE().
  *
  * Connects these hooks to presentational components and coordinates
  * operations that affect multiple parts of the application.
@@ -38,8 +38,8 @@ function App() {
   const [isApplyingBoard, setIsApplyingBoard] = useState(false);
   const [mode, setMode] = useState<4 | 5>(4);
   const [isChangingMode, setIsChangingMode] = useState(false);
-  const { equityStatus, isConnected, equityMessage, startEquity, cancelEquity } =
-    useEquitySocket(sessionId);
+  const { equityStatus, equityMessage, equityError, startEquity, cancelEquity } =
+    useEquitySSE(sessionId);
   const {
     players,
     applyBoardSnapshots,
@@ -184,10 +184,10 @@ function App() {
       {boardMessage && <p>{boardMessage}</p>}
 
       <EquityPanel
-        mode={mode}
+        hasSession={sessionId !== null}
         status={equityStatus}
         message={equityMessage}
-        isConnected={isConnected}
+        error={equityError}
         onCalculate={startEquity}
         onCancel={cancelEquity}
       />

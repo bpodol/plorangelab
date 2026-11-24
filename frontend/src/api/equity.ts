@@ -1,13 +1,14 @@
+import { apiRequest } from './client';
+
 export type JobStatus = 'pending' | 'running' | 'completed' | 'cancelled' | 'failed';
 
-/**
- * Describe the calculation method and diagnostics of an equity result.
- *
- * Includes Monte Carlo statistics, sampling information, and the
- * reason execution stopped. Fields that do not apply to the
- * calculation method are represented by null.
- */
+export interface EquityResponse {
+  status: 'starting' | 'cancelling';
+  job_id: string;
+}
+
 export interface EquityDetails {
+  equities: Record<string, number>;
   method: 'exact' | 'monte-carlo';
   margins_of_error: Record<string, number | null> | null;
   simulations: number | null;
@@ -17,71 +18,94 @@ export interface EquityDetails {
   effective_samples: number | null;
 }
 
-/**
- * Represent messages received from the equity WebSocket.
- *
- * The "type" field discriminates between job acknowledgements,
- * progress updates, terminal results, cancellation, and errors.
- *
- * A "result" message may contain a stop_reason of "cancelled"
- * when the calculation stops cooperatively.
- */
-export type EquityMessage =
-  | {
-      type: 'started';
-      job_id: string;
-    }
-  | {
-      type: 'resumed';
-      job_id: string;
-      status: JobStatus;
-    }
-  | {
-      type: 'progress';
-      job_id: string;
-      simulations: number;
-      margins_of_error: Record<string, number | null> | null;
-    }
-  | {
-      type: 'result';
-      job_id: string;
-      /** Player slot indices serialized as JSON object keys. */
-      equities: Record<string, number>;
-      details: EquityDetails;
-    }
-  | {
-      type: 'cancel_requested';
-    }
-  | {
-      type: 'cancelled';
-      job_id: string;
-    }
-  | {
-      type: 'error';
-      detail: string;
-    };
+export interface EquityStreamEvent {
+  job_id: string;
+  status: JobStatus;
+  error: string | null;
+  details: EquityDetails | null;
+}
+
+export function submitEquityCalculation(
+  sessionId: string,
+  targetMOE: number,
+): Promise<EquityResponse> {
+  return apiRequest<EquityResponse>(`/api/sessions/${sessionId}/equity`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      target_moe: targetMOE,
+    }),
+  });
+}
+
+export function cancelEquityCalculation(sessionId: string, jobId: string): Promise<EquityResponse> {
+  return apiRequest<EquityResponse>(`/api/sessions/${sessionId}/equity/${jobId}/cancel`, {
+    method: 'POST',
+  });
+}
 
 /**
- * Open a WebSocket connection for a session's equity calculations.
+ * Submit an equity calculation and subscribe to its SSE stream.
  *
- * Uses the current page's hostname and port, selecting ws://
- * or wss:// according to the page protocol.
+ * The backend executes the calculation independently of the connection.
+ * EventSource automatically reconnects after temporary disconnections.
  *
- * @param sessionId - Identifier of the target backend session.
- * @returns The newly created WebSocket instance.
+ * The stream closes when a terminal result is received.
  *
- * @remarks
- * This function only creates the connection. Reconnection,
- * job resumption, and message handling are managed by
- * useEquitySocket().
- *
- * The backend WebSocket endpoint must be reachable through
- * the same host as the frontend.
+ * @param sessionId - Active backend session ID.
+ * @param targetMOE - Requested margin of error.
+ * @param onUpdate - Callback invoked for each progress or terminal event.
+ * @param onStreamError - Reports unrecoverable connection or message parsing errors.
+ * @returns The job ID and EventSource instance for lifecycle management.
  */
-export function connectEquityWebSocket(sessionId: string): WebSocket {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+export async function startEquityStream(
+  sessionId: string,
+  targetMOE: number,
+  onUpdate: (message: EquityStreamEvent) => void,
+  onStreamError: (error: Error, jobId: string, source: EventSource) => void,
+): Promise<{ jobId: string; source: EventSource }> {
+  // Submit the calculation. The backend responds with HTTP 202
+  // and a job ID without waiting for the calculation to finish.
+  const response = await submitEquityCalculation(sessionId, targetMOE);
+  const jobId = response.job_id;
 
-  const url = `${protocol}//${window.location.host}/api/sessions/${sessionId}/equity/ws`;
+  // Establish an SSE connection to the existing calculation.
+  const source = new EventSource(`/api/sessions/${sessionId}/equity/${jobId}/events`);
 
-  return new WebSocket(url);
+  source.onmessage = (event: MessageEvent<string>) => {
+    let message: EquityStreamEvent;
+
+    try {
+      message = JSON.parse(event.data) as EquityStreamEvent;
+    } catch {
+      source.close();
+      onStreamError(new Error('Invalid equity SSE message received'), jobId, source);
+      return;
+    }
+
+    // Forward the event to the consumer (typically a React hook).
+    onUpdate(message);
+
+    // The backend closes the stream after sending a terminal event,
+    // but EventSource would otherwise attempt to reconnect.
+    if (
+      message.status === 'completed' ||
+      message.status === 'cancelled' ||
+      message.status === 'failed'
+    ) {
+      source.close();
+    }
+  };
+
+  source.onerror = () => {
+    if (source.readyState === EventSource.CONNECTING) {
+      console.warn('Equity SSE connection lost. Reconnecting...');
+    } else if (source.readyState === EventSource.CLOSED) {
+      onStreamError(new Error('Equity SSE connection closed unexpectedly'), jobId, source);
+    }
+  };
+
+  return { jobId, source };
 }

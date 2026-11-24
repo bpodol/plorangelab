@@ -6,7 +6,7 @@ import App from './App';
 import type { PlayerFilterSnapshot } from './types';
 import { createSession, changeBoard, changeMode } from './api/sessions';
 import { addRange, deleteRange } from './api/players';
-import { connectEquityWebSocket } from './api/equity';
+import { useEquitySSE } from './hooks/useEquitySSE';
 
 vi.mock('./api/sessions', () => ({
   createSession: vi.fn(),
@@ -19,35 +19,26 @@ vi.mock('./api/players', () => ({
   deleteRange: vi.fn(),
 }));
 
-vi.mock('./api/equity', () => ({
-  connectEquityWebSocket: vi.fn(),
+vi.mock('./hooks/useEquitySSE', () => ({
+  useEquitySSE: vi.fn(),
 }));
 
-class FakeWebSocket {
-  readyState: number = WebSocket.CONNECTING;
-
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onmessage: ((event: MessageEvent<string>) => void) | null = null;
-  onerror: (() => void) | null = null;
-
-  send = vi.fn();
-  close = vi.fn();
-
-  open() {
-    this.readyState = WebSocket.OPEN;
-    this.onopen?.();
-  }
-}
-
-let socket: FakeWebSocket;
+// App tests verify wiring to the hook, not HTTP requests or EventSource behavior.
+const startEquity = vi.fn(async (_targetMoe: number): Promise<void> => {});
+const cancelEquity = vi.fn(async (): Promise<void> => {});
 
 beforeEach(() => {
   vi.resetAllMocks();
+  startEquity.mockResolvedValue(undefined);
+  cancelEquity.mockResolvedValue(undefined);
 
-  socket = new FakeWebSocket();
-
-  vi.mocked(connectEquityWebSocket).mockReturnValue(socket as unknown as WebSocket);
+  vi.mocked(useEquitySSE).mockReturnValue({
+    equityStatus: 'idle',
+    equityMessage: null,
+    equityError: null,
+    startEquity,
+    cancelEquity,
+  });
 });
 
 function makeRangeSnapshot(
@@ -93,7 +84,7 @@ test('automatically creates a session on mount', async () => {
   });
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
@@ -101,35 +92,20 @@ test('automatically creates a session on mount', async () => {
   expect(screen.queryByText(/Session:/i)).not.toBeInTheDocument();
 });
 
-test('starts an equity calculation after automatic session creation', async () => {
-  vi.mocked(createSession).mockResolvedValue({
-    session_id: 'session-123',
-  });
-
+test('passes the session to the equity hook and delegates calculation requests', async () => {
+  vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
   const user = userEvent.setup();
 
   render(<App />);
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(useEquitySSE).toHaveBeenLastCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /calculate equity/i })).toBeEnabled();
   });
 
   expect(createSession).toHaveBeenCalledOnce();
-
-  // Simulate the WebSocket connection opening.
-  act(() => {
-    socket.open();
-  });
-
   await user.click(screen.getByRole('button', { name: /calculate equity/i }));
-
-  expect(socket.send).toHaveBeenCalledWith(
-    JSON.stringify({
-      type: 'start',
-      mode: 4,
-      target_moe: 0.0015,
-    }),
-  );
+  expect(startEquity).toHaveBeenCalledExactlyOnceWith(0.0015);
 });
 
 test('updates hand counts and shows loading state while applying the board', async () => {
@@ -180,7 +156,7 @@ test('updates hand counts and shows loading state while applying the board', asy
   render(<App />);
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   await user.type(screen.getByRole('textbox', { name: 'Board' }), 'AsKd2c');
@@ -212,7 +188,7 @@ test('adds and deletes a player range through the UI', async () => {
   render(<App />);
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   const input = screen.getByRole('textbox', { name: 'Player 1' });
@@ -263,7 +239,7 @@ test('shows auto-generated filter groups when adding a range on an active board'
   const user = userEvent.setup();
   render(<App />);
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   await user.type(screen.getByRole('textbox', { name: 'Board' }), 'AsKd2c');
@@ -291,7 +267,7 @@ test('renders filter panels only for applied players without renumbering them', 
   expect(screen.queryByRole('region', { name: /Player [1-6] filters/ })).not.toBeInTheDocument();
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   for (const [playerId, range] of [
@@ -319,7 +295,7 @@ test('displays an error and retry button when session creation fails', async () 
   expect(await screen.findByRole('alert')).toHaveTextContent('Server unavailable');
   expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
   expect(createSession).toHaveBeenCalledOnce();
-  expect(connectEquityWebSocket).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: /calculate equity/i })).toBeDisabled();
   expect(screen.getByRole('button', { name: /apply board/i })).toBeDisabled();
 });
 
@@ -336,7 +312,7 @@ test('retries session creation and clears the error after success', async () => 
   await user.click(screen.getByRole('button', { name: 'Retry' }));
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   expect(createSession).toHaveBeenCalledTimes(2);
@@ -358,7 +334,7 @@ test('displays an error when board update fails', async () => {
   render(<App />);
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   await user.type(screen.getByRole('textbox', { name: 'Board' }), 'invalid');
@@ -374,62 +350,27 @@ test('displays an error when board update fails', async () => {
   expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
 });
 
-test('enables cancellation only while connected and running', async () => {
-  vi.mocked(createSession).mockResolvedValue({
-    session_id: 'session-123',
+test('delegates cancellation when the equity hook reports a running job', async () => {
+  vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
+  vi.mocked(useEquitySSE).mockReturnValue({
+    equityStatus: 'running',
+    equityMessage: null,
+    equityError: null,
+    startEquity,
+    cancelEquity,
   });
 
   const user = userEvent.setup();
   render(<App />);
+  const cancelButton = screen.getByRole('button', { name: /cancel equity/i });
 
-  const cancelButton = screen.getByRole('button', {
-    name: /cancel equity/i,
-  });
-
-  // No session or running job.
+  // App must not enable session-dependent actions before session creation.
   expect(cancelButton).toBeDisabled();
-
-  await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
-  });
-
-  act(() => {
-    socket.open();
-  });
-
-  // Connected, but no job running.
-  expect(cancelButton).toBeDisabled();
-
-  await user.click(screen.getByRole('button', { name: /calculate equity/i }));
-
-  // Backend confirms that the job started.
-  act(() => {
-    socket.onmessage?.(
-      new MessageEvent('message', {
-        data: JSON.stringify({
-          type: 'started',
-          job_id: 'job-123',
-        }),
-      }),
-    );
-  });
-
-  expect(cancelButton).toBeEnabled();
+  await waitFor(() => expect(cancelButton).toBeEnabled());
 
   await user.click(cancelButton);
-
-  expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'cancel' }));
-
-  // Requesting cancellation should not immediately mark it cancelled.
-  expect(screen.getByText('Status: running')).toBeInTheDocument();
-
-  // Connection loss makes cancellation unavailable.
-  act(() => {
-    socket.readyState = WebSocket.CLOSED;
-    socket.onclose?.();
-  });
-
-  expect(cancelButton).toBeDisabled();
+  expect(cancelEquity).toHaveBeenCalledOnce();
+  expect(startEquity).not.toHaveBeenCalled();
 });
 
 test('submits the complete large range instead of its preview', async () => {
@@ -442,7 +383,7 @@ test('submits the complete large range instead of its preview', async () => {
   render(<App />);
 
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
+    expect(screen.getByRole('button', { name: /apply board/i })).toBeEnabled();
   });
 
   const fullRange = 'AsAhKdQc,'.repeat(150);
@@ -462,7 +403,7 @@ test('submits the complete large range instead of its preview', async () => {
   });
 });
 
-test('changes mode after backend confirmation and uses it for equity', async () => {
+test('changes mode only after backend confirmation', async () => {
   vi.mocked(createSession).mockResolvedValue({ session_id: 'session-123' });
 
   let resolveMode!: () => void;
@@ -478,7 +419,6 @@ test('changes mode after backend confirmation and uses it for equity', async () 
 
   const modeSelector = screen.getByRole('combobox', { name: 'Game mode' });
   await waitFor(() => {
-    expect(connectEquityWebSocket).toHaveBeenCalledWith('session-123');
     expect(modeSelector).toBeEnabled();
   });
 
@@ -496,15 +436,6 @@ test('changes mode after backend confirmation and uses it for equity', async () 
 
   expect(modeSelector).toBeEnabled();
   expect(modeSelector).toHaveValue('5');
-
-  act(() => {
-    socket.open();
-  });
-  await user.click(screen.getByRole('button', { name: /calculate equity/i }));
-
-  expect(socket.send).toHaveBeenCalledWith(
-    JSON.stringify({ type: 'start', mode: 5, target_moe: 0.0015 }),
-  );
 });
 
 test('retains the previous mode and displays an error when mode change fails', async () => {

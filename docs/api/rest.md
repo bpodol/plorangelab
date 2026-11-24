@@ -2,9 +2,9 @@
 
 ## Overview
 
-The REST API manages **sessions, community boards, player ranges, and filter trees**. Equity calculation itself is exposed through the [WebSocket protocol](websocket.md), not a REST calculation endpoint.
+The REST API manages **sessions, community boards, player ranges, and filter trees**. Equity jobs are submitted and cancelled through HTTP endpoints; progress and results are delivered through [Server-Sent Events (SSE)](sse.md).
 
-This document describes routes implemented by `src/plorangelab/api/routers/sessions.py`, `players.py`, and `filters.py`, with schemas from `src/plorangelab/api/schemas.py`. It is a client-facing contract; see [backend API architecture](../backend/api/README.md) for synchronization and implementation details.
+This document describes routes implemented by `src/plorangelab/api/routers/sessions.py`, `players.py`, `filters.py`, and the equity HTTP routes in `equity_sse.py`, with schemas from `src/plorangelab/api/schemas.py`. It is a client-facing contract; see [backend API architecture](../backend/api/README.md) for synchronization and implementation details.
 
 Paths below are relative to the API host. Bodies and responses use JSON except where no body is returned. `{session_id}` identifies an in-memory session and `{player_id}` is a **zero-based integer 0 through 5**.
 
@@ -13,6 +13,9 @@ Paths below are relative to the API host. Bodies and responses use JSON except w
 | Method | Path | Success | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/sessions` | 201 | Create an empty session. |
+| `POST` | `/api/sessions/{session_id}/equity` | 202 | Submit an equity calculation; returns a job ID. |
+| `POST` | `/api/sessions/{session_id}/equity/{job_id}/cancel` | 202 | Request cooperative job cancellation. |
+| `GET` | `/api/sessions/{session_id}/equity/{job_id}/events` | 200 (stream) | Subscribe to equity status, progress, and results via SSE. |
 | `PUT` | `/api/sessions/{session_id}/mode` | 204 | Change the session-wide PLO mode. |
 | `PUT` | `/api/sessions/{session_id}/board` | 200 | Set or clear the shared board. |
 | `PUT` | `/api/sessions/{session_id}/players/{player_id}` | 200 | Create or replace a player's range. |
@@ -380,12 +383,24 @@ The effective hand count and weighted coverage are recalculated based on the rem
 
 
 
+## Equity jobs (HTTP + SSE)
+
+The equity API separates **submission**, **subscription**, and **cancellation**:
+
+1. `POST /api/sessions/{session_id}/equity` with `{"target_moe": 0.0015}` accepts a job and returns HTTP **202** with a `job_id` and `"status": "starting"`.
+2. `GET /api/sessions/{session_id}/equity/{job_id}/events` opens a `text/event-stream` response. Each `data:` line carries a JSON snapshot with `job_id`, `status`, `error`, and `details`. A blank line terminates each SSE event.
+3. `POST /api/sessions/{session_id}/equity/{job_id}/cancel` requests cooperative cancellation. HTTP **202** returns `{"status": "cancelling", "job_id": "..."}`; the worker may continue until it observes the cancellation event.
+
+No separate PLO mode is sent with an equity request: the calculation uses the session's `RangeManager` mode. An unfinished calculation prevents a second submission for the same session and blocks range/board/filter mutations.
+
+For status values, result fields, terminal behavior, reconnection, heartbeats, and examples, see the [Equity SSE protocol](sse.md).
+
 ## Error responses and validation
 
 | Status | When |
 | --- | --- |
 | **404** | A session is unknown, expired, or closed. |
-| **409** | A mutation is attempted while an equity calculation is unfinished, or a different PLO mode is requested while active-street player ranges exist. |
+| **409** | A mutation or second calculation is attempted while an equity calculation is unfinished, or a different PLO mode is requested while player ranges exist. |
 | **422** | Invalid request field/path value or invalid domain operation, such as a bad board, range, filter expression, group path, or missing mutation target. |
 
 The API has **two 422 response styles**:
@@ -404,7 +419,7 @@ Retrieving a session through an API dependency refreshes its activity. Sessions 
 ## Related documentation
 
 - [Backend API architecture](../backend/api/README.md)
-- [WebSocket protocol](websocket.md)
+- [Equity SSE protocol](sse.md)
 - [Range management](../backend/services/range-management.md)
 - [Filter-expression engine](../backend/filter-engine.md)
 - [Encoding](../backend/encoding.md)

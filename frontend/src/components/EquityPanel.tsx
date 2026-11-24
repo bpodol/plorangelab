@@ -1,39 +1,29 @@
 import { useState } from 'react';
-import type { EquityMessage } from '../api/equity';
-import type { Mode } from '../types';
-import type { EquityStatus } from '../hooks/useEquitySocket';
+import type { EquityStreamEvent } from '../api/equity';
+import type { EquityStatus } from '../hooks/useEquitySSE';
 
 interface EquityPanelProps {
-  mode: Mode;
+  hasSession: boolean;
   status: EquityStatus;
-  message: EquityMessage | null;
-  isConnected: boolean;
-  onCalculate: (mode: Mode, targetMoe: number) => void;
+  message: EquityStreamEvent | null;
+  error: string | null;
+  onCalculate: (targetMoe: number) => void;
   onCancel: () => void;
 }
 
 /**
  * Render equity calculation controls, progress, and results.
  *
- * Maintains the target margin of error input locally and validates
- * it before allowing a calculation to start.
- *
- * Receives connection status, calculation status, and WebSocket
- * messages from the parent. Calculation and cancellation requests
- * are delegated through callbacks.
- *
- * Displays simulation progress, the highest reported margin of
- * error, and per-player equity results when available.
- *
- * @remarks
- * This component does not manage the WebSocket connection or
- * perform equity calculations.
+ * The parent owns the HTTP/SSE lifecycle. This component validates the
+ * target MOE, displays streamed snapshots, and delegates user actions.
+ * An SSE connection is established only after submission, so it must not
+ * be required to start a calculation or request cancellation.
  */
 export function EquityPanel({
-  mode,
+  hasSession,
   status,
   message,
-  isConnected,
+  error,
   onCalculate,
   onCancel,
 }: EquityPanelProps) {
@@ -49,11 +39,16 @@ export function EquityPanel({
     targetMoe > 0 &&
     targetMoe <= 0.005;
 
+  const isBusy = status === 'starting' || status === 'running' || status === 'cancelling';
+  const details = message?.details;
+  const isProgress = message?.status === 'pending' || message?.status === 'running';
+  const isResult = message?.status === 'completed' || message?.status === 'cancelled';
+
   // Show the highest available player MOE as the current precision
   // indicator; null entries represent unavailable estimates.
   const validMoes =
-    message?.type === 'progress'
-      ? Object.values(message.margins_of_error ?? {}).filter((moe) => moe !== null)
+    isProgress && details
+      ? Object.values(details.margins_of_error ?? {}).filter((moe) => moe !== null)
       : [];
 
   const highestMoe =
@@ -75,35 +70,31 @@ export function EquityPanel({
       />
 
       <button
-        onClick={() => onCalculate(mode, targetMoe)}
-        disabled={!isConnected || status === 'running' || !isValidTargetMoe}
+        onClick={() => onCalculate(targetMoe)}
+        disabled={!hasSession || isBusy || !isValidTargetMoe}
       >
         Calculate Equity
       </button>
 
-      <button onClick={onCancel} disabled={!isConnected || status !== 'running'}>
+      <button onClick={onCancel} disabled={!hasSession || status !== 'running'}>
         Cancel Equity
       </button>
 
       <p>Status: {status}</p>
 
-      {message?.type === 'progress' && (
+      {(isProgress || isResult) && details && (
         <div>
-          <p>Simulations: {message.simulations.toLocaleString()}</p>
+          {isResult && <h3>Results</h3>}
 
-          {highestMoe !== null && <p>Highest MOE: ±{(highestMoe * 100).toFixed(3)} pp</p>}
-        </div>
-      )}
-
-      {message?.type === 'result' && (
-        <div>
-          <h3>Results</h3>
+          {details.simulations !== null && (
+            <p>Simulations: {details.simulations.toLocaleString()}</p>
+          )}
 
           <ul>
-            {Object.entries(message.equities)
+            {Object.entries(details.equities)
               .sort(([a], [b]) => Number(a) - Number(b))
               .map(([playerId, equity]) => {
-                const moe = message.details.margins_of_error?.[playerId];
+                const moe = details.margins_of_error?.[playerId];
 
                 return (
                   <li key={playerId}>
@@ -115,13 +106,14 @@ export function EquityPanel({
                 );
               })}
           </ul>
-          {message.details.simulations !== null && (
-            <p>Simulations: {message.details.simulations.toLocaleString()}</p>
+
+          {isProgress && highestMoe !== null && (
+            <p>Highest MOE: ±{(highestMoe * 100).toFixed(3)} pp</p>
           )}
         </div>
       )}
 
-      {message?.type === 'error' && <p role="alert">{message.detail}</p>}
+      {error !== null && <p role="alert">{error}</p>}
     </section>
   );
 }

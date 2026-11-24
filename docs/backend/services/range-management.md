@@ -324,7 +324,7 @@ The calculation mode is owned by `RangeManager`. All player ranges are encoded u
 ## Boundaries and current constraints
 
 - **No persistence in this layer.** These classes maintain in-memory state; they do not save range/filter state to a database.
-- **No API or session lifecycle.** HTTP/WebSocket endpoints, session ownership, and job scheduling are handled by other components.
+- **No API or session lifecycle.** HTTP/SSE endpoints, session ownership, and job scheduling are handled by other components.
 - **Definition generation is delegated.** Board-dependent definitions come from `plorangelab.filters.generate_filters`; `PlayerRange` installs them and evaluates their expressions, while the filtering service manages selections.
 - **Shared board per street.** Each `StreetState` stores one board shared by all players on that street. `RangeManager` owns all existing street states and selects one active street.
 - **Filter carryover is by range, not by definition.** Later streets start from the parent street's currently selected hands and create their own generated filter trees instead of copying parent definitions.

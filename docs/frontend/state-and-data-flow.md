@@ -4,7 +4,7 @@
 
 PLO RangeLab's React frontend coordinates session setup, player-range editing, community board changes, and live equity calculations. The current implementation separates **transport functions** (`src/api/`), **stateful hooks** (`src/hooks/`), and **application orchestration** (`src/App.tsx`). UI components receive state and callbacks through props.
 
-This document explains **where state lives**, **how requests update it**, and **what happens when work is asynchronous**. It describes the implementation reviewed for this documentation pass, not planned functionality. For backend request and message formats, use the [REST API contract](../api/rest.md) and [WebSocket protocol](../api/websocket.md).
+This document explains **where state lives**, **how requests update it**, and **what happens when work is asynchronous**. It describes the implementation reviewed for this documentation pass, not planned functionality. For backend request and message formats, use the [REST API contract](../api/rest.md) and [Equity SSE protocol](../api/sse.md).
 
 For an overview of the frontend structure, component responsibilities,
 and application workflows, see [Frontend Architecture](README.md).
@@ -15,12 +15,12 @@ and application workflows, see [Frontend Architecture](README.md).
 | --- | --- |
 | `src/App.tsx` | Owns the session ID, editable board string, confirmed PLO mode, mode-change state, board/session loading, and errors; connects hooks to UI components. |
 | `src/hooks/usePlayerRanges.ts` | Owns six player states, handles range and filter mutations, and applies backend-returned filter snapshots. |
-| `src/hooks/useEquitySocket.ts` | Owns the equity WebSocket connection lifecycle, latest server message, UI status, and tracked job ID. |
+| `src/hooks/useEquitySSE.ts` | Owns equity job submission/cancellation, the SSE connection lifecycle, latest server message, UI status, and tracked job ID. |
 | `src/api/client.ts` | Shared `fetch` helper for REST responses and FastAPI error messages. |
 | `src/api/sessions.ts` | Session creation, PLO mode changes, and board-update REST calls. |
 | `src/api/players.ts` | Player-range PUT (returns `PlayerFilterSnapshot`) and DELETE calls. |
 | `src/api/filters.ts` | Typed filter and group REST operations that return updated player snapshots after mutations. |
-| `src/api/equity.ts` | Equity WebSocket message types and connection creation. |
+| `src/api/equity.ts` | HTTP equity submission/cancellation, `EventSource` creation and parsing, SSE event types and failure callbacks. |
 | `src/types.ts` | Shared mode, recursive filter-tree types, and `PlayerFilterSnapshot`. |
 
 The UI consists of `BoardInput`, `PlayerRangeInput`, `FilterPanel`, and `EquityPanel`, coordinated by `App.tsx`.
@@ -49,9 +49,10 @@ App.tsx
 │   ├── applyBoardSnapshots()
 │   ├── players API
 │   └── filters API
-├── useEquitySocket(sessionId)
-│   ├── WebSocket connection, job ID, latest message, status
-│   └── equity API: connectEquityWebSocket()
+├── useEquitySSE(sessionId)
+│   ├── EventSource, job ID ref, latest message, status/error
+│   └── equity API: submitEquityCalculation(), startEquityStream(),
+│                   cancelEquityCalculation()
 └── UI components (props + event callbacks)
     ├── BoardInput
     ├── PlayerRangeInput × 6 (left column)
@@ -60,8 +61,8 @@ App.tsx
     │   └── FilterTreeView (local group expansion state)
     └── EquityPanel
 
-REST clients ────> FastAPI REST routes
-WebSocket client ─> FastAPI equity WebSocket route
+HTTP clients ────> FastAPI REST + equity POST endpoints
+EventSource GET ─> FastAPI equity SSE stream
 ```
 
 The **backend owns the authoritative session, applied ranges, board, and equity job**. React maintains the state needed to edit inputs and display recent backend responses. Not all frontend state is automatically reloaded from the server.
@@ -79,8 +80,8 @@ The **backend owns the authoritative session, applied ranges, board, and equity 
 | `usePlayerRanges` | `players: PlayerState[6]` | Local edits, range-request results, and board-returned snapshots (effective hand counts and current-street filter state). |
 | `AddNodeControl` | `type`, `name`, `expression`, `submitting` | Manages the creation form. `type` is `null` when closed, or `'filter'` / `'group'` when open. |
 | `FilterTreeView` | `expandedGroups` | Tracks expanded direct child groups using their names. Expansion is local to each recursive component instance. |
-| `useEquitySocket` | `equityStatus`, `equityMessage`, `isConnected` | WebSocket lifecycle events and incoming messages. |
-| `useEquitySocket` | `socketRef`, `jobRef` | Mutable connection and job identifiers that persist across renders without triggering renders. |
+| `useEquitySSE` | `equityStatus`, `equityMessage`, `equityError` | Job submissions, incoming SSE snapshots, terminal outcomes, and errors. |
+| `useEquitySSE` | `sourceRef`, `jobIdRef`, `generationRef` and other guard refs | Stream/job identity and stale-async-response protection without rerendering. |
 
 Each `PlayerState` contains `range`, `numberOfHands`, `filterSnapshot`, `hasAppliedRange`, `isLoading`, and `error`.
 
@@ -103,7 +104,7 @@ Filter mutations share `runFilterMutation()`, which synchronizes the effective h
 3. `App` sets `isCreatingSession` to `true` and clears the previous error.
 4. `createSession()` sends `POST /api/sessions` through `apiRequest()`.
 5. On success, `App` stores the returned `session_id`.
-6. `useEquitySocket(sessionId)` reacts to the new session ID by opening a WebSocket connection.
+6. `useEquitySSE(sessionId)` resets equity state for the new session ID; it opens a stream **only when a calculation is submitted**.
 7. `App` resets `isCreatingSession` in `finally`.
 
 On failure, the application displays an error message and a **Retry** button. Clicking Retry calls `handleCreateSession()` again without remounting the application.
@@ -216,64 +217,58 @@ All REST clients call `apiRequest<T>()`, which uses `fetch` and:
 
 The generic `T` is a **compile-time TypeScript expectation**, not runtime JSON validation. Error presentation belongs to the calling hook or `App`, not the API client.
 
-## Equity WebSocket flow
+## Equity HTTP and SSE flow
 
 ### Connection ownership
 
-`api/equity.ts` builds a WebSocket URL using the current page host and either `ws:` or `wss:` according to the page protocol. This assumes the equity endpoint is available on the frontend's origin (for example, through an appropriate development proxy or deployment routing).
+`api/equity.ts` submits jobs and requests cancellation using `apiRequest()`, and opens a native `EventSource` using a same-origin `/api/sessions/{session_id}/equity/{job_id}/events` URL. Development and deployment must route `/api` to FastAPI. The backend uses the session's configured PLO mode; neither the hook nor the HTTP submission needs a separate mode argument.
 
-`useEquitySocket(sessionId)` owns the socket lifecycle. On a session-ID change, its effect resets local equity state, closes the previous connection during cleanup, and opens a new connection when the ID is non-null.
+`useEquitySSE(sessionId)` owns job and stream lifecycle. It tracks `sourceRef`, `jobIdRef`, `submittingRef`, `cancellingRef`, `cancellationRequestedRef`, and `generationRef` for request coordination. React state includes `equityStatus`, `equityMessage`, and `equityError`. `App` passes these to `EquityPanel`, which receives `hasSession`, not an `isConnected` requirement.
 
-The UI receives `equityStatus`, `equityMessage`, `isConnected`, `startEquity`, and `cancelEquity` from the hook. `App` passes these to `EquityPanel`.
+A browser SSE connection is created **after** the job is accepted, not on session creation. The Calculate action is enabled when a session exists, the target MOE is valid, and the UI is not in `starting`, `running`, or `cancelling` state.
 
-### Start a calculation
+### Start and progress
 
-1. The UI calls `startEquity(mode, targetMoe)`.
-2. The hook sends a `start` command only if the socket is open; otherwise it returns without sending.
-3. The backend uses the session's configured PLO mode and validates the calculation request.
-4. On `started`, the hook records `job_id` in `jobRef` and sets status to `running`.
-5. `progress` messages update the latest message and keep status `running`.
-6. A terminal message updates status and clears the tracked job ID where implemented.
+1. `EquityPanel` calls `startEquity(targetMoe)`.
+2. The hook rejects duplicate local submissions and marks state `starting`.
+3. `startEquityStream()` POSTs `{"target_moe": targetMoe}` to `/api/sessions/{session_id}/equity` and receives HTTP 202 plus `job_id`.
+4. It opens an `EventSource` for that job; the backend emits default SSE events with JSON in `event.data`.
+5. The API layer parses each event into an `EquityStreamEvent`; the hook stores the latest snapshot and maps `pending` / `running` to the frontend `running` state.
+6. On `completed`, `cancelled`, or `failed`, the hook records the terminal message, clears the tracked job and stream refs, and reports errors when appropriate. The API adapter closes `EventSource` on terminal status.
 
-The mode argument remains part of the current frontend hook interface and is sent by the current client, but the backend does not use a WebSocket-supplied mode to configure equity. The authoritative mode is stored in `RangeManager`.
-
-Sending `start` is not the same as a server acknowledgement. The hook does not mark the calculation as running until it receives `started`.
+The API event object carries `job_id`, `status`, `error`, and `details`. `details` may contain `equities`, `margins_of_error`, `method`, `simulations`, `attempts`, `stop_reason`, `sampler`, and `effective_samples`; it may be null before progress is available. Player IDs remain **string keys in JSON**. `EquityPanel` shows both progress and terminal equities from `details`, ordering them numerically by player slot and displaying MOEs when present.
 
 ### Status transitions
 
-| Incoming message | Current hook behavior |
+| Input or event | Current hook behavior |
 | --- | --- |
-| `started` | Stores `job_id`; sets `running`. |
-| `resumed` | Sets `running`, even if the backend's included `status` says the job is already terminal. |
-| `progress` | Stores the latest message; sets `running`. |
-| `cancel_requested` | Sets `cancelling` (acknowledged request, not finished cancellation). |
-| `result` with `details.stop_reason === 'cancelled'` | Sets `cancelled`; clears `jobRef`. |
-| Other `result` | Sets `completed`; clears `jobRef`. |
-| `cancelled` | Sets `cancelled`; clears `jobRef`. |
-| `error` | Sets `error`; clears `jobRef`. |
+| Start action | `starting` while awaiting HTTP submission. |
+| SSE `pending` or `running` | `running`, except while cancellation is already requested. |
+| SSE `completed` | `completed`; retain result and release job reference. |
+| SSE `cancelled` | `cancelled`; retain any returned partial result and release job reference. |
+| SSE `failed` | `failed` with backend error and released job reference. |
+| Cancellation POST accepted (202) | `cancelling`; waits for terminal SSE event. |
+| Submission POST fails | `failed` with HTTP error; no SSE stream established. |
+| Unrecoverable SSE/parse error | `cancelling` while requesting backend cancellation, then `failed` and clear local job reference. |
 
-The two cancellation paths matter: an engine that stops cooperatively may return a **`result` with `stop_reason: "cancelled"`**, whereas an explicitly cancelled future may produce a `cancelled` message. The hook's cancellation-status handling was updated to distinguish these outcomes.
+The backend may complete normally while cancellation is being requested; the terminal event, not the HTTP 202 acknowledgment, determines the final calculation outcome.
 
-The `EquityMessage` union models the expected incoming messages. The current handler checks that parsed JSON is an object with a string `type`, then asserts it is an `EquityMessage`; it does **not** validate all fields at runtime.
+### Disconnect, reconnect, and cleanup
 
-Equity and margin-of-error payloads use JSON objects keyed by player slot ID. `EquityPanel` calculates the highest available progress MOE from `Object.values(message.margins_of_error ?? {})` and looks up each final-result MOE by the same player ID key as the corresponding equity, not by array position.
+- Native `EventSource` retries **temporary** connection interruptions automatically. The frontend does not implement a manual exponential-backoff WebSocket loop.
+- When `EventSource` becomes permanently `CLOSED`, or the client cannot parse SSE JSON, the API layer calls `onStreamError`.
+- `useEquitySSE` routes both cases through its shared `handleStreamFailure()` helper: close the stream, request cancellation through HTTP, clear the stored job reference, and display an error. The UI does **not** show a manual Reconnect button.
+- The backend can still be completing a cooperatively cancelled job after HTTP 202. An immediate fresh submission may receive HTTP 409 until that future is finished.
+- On session change or hook unmount, the hook closes its stream and increments `generationRef` to ignore late callbacks or requests. Closing a stream **does not cancel** a backend calculation on its own.
+- A page reload creates a new local session under the current `App` design, and the hook does not persist or restore old job IDs.
 
-### Disconnect, reconnect, and resume
-
-- An unexpected socket closure sets `isConnected` to false and schedules a retry.
-- Retry delays increase as **1, 2, 4, 8, then 10 seconds maximum**; a successful connection resets the retry counter. The hook has no retry-count limit.
-- Connection-open, message, and close handlers ignore events from a disposed effect or a socket no longer stored in `socketRef`.
-- After reconnecting, the hook sends `resume` with `jobRef.current` **only if a job ID is still tracked**.
-- Once a terminal result has cleared that ID, later connections do not automatically resume it.
-- Effect cleanup clears the retry timer and closes the socket; it **does not cancel the backend job**.
-
-The backend job belongs to the session, not the WebSocket connection. However, **the frontend job reference exists only in memory**. A page reload or remount loses `jobRef`, so this hook cannot automatically resume an earlier calculation after a full reload.
+The backend retains only the latest progress snapshot and a single subscriber callback, not an event history. Reconnecting streams may receive a newer snapshot rather than all missed events.
 
 ### Cancellation
 
-`cancelEquity()` sends `cancel` only over an open socket. The method itself does not change status; the subsequent `cancel_requested` acknowledgement changes it to `cancelling`. The eventual terminal message determines whether the UI displays `cancelled`, `completed`, or `error`.
+`cancelEquity()` sends `POST /api/sessions/{session_id}/equity/{job_id}/cancel`. It can be requested while a calculation is `running` without requiring the SSE stream to be connected; the stream stays open until a terminal status. Duplicate cancellation requests are guarded locally. On a failed cancellation HTTP request, the hook retains the running job and displays an error.
 
-For the server-side behavior, see the [WebSocket protocol](../api/websocket.md) and [session/job lifecycle](../backend/services/session-and-jobs.md).
+For the wire-level schema, see [Equity SSE protocol](../api/sse.md). For job state, subscriptions, and cancellation semantics, see [Sessions and equity jobs](../backend/services/session-and-jobs.md).
 
 ## Current boundaries and limitations
 
@@ -284,9 +279,9 @@ These are **current behavior**, not promises about planned features:
 - **No automatic filter-state recovery.** The hook does not refetch filter snapshots after failed or interrupted mutation responses. The backend may have completed an operation even if its response was not received.
 - **No session persistence or restoration.** `App` automatically creates a new backend session on mount, but does not persist the session ID or reconnect to an existing session after a page reload. Previous session state is not automatically restored.
 - **Draft inputs are distinct from applied state.** `hasAppliedRange` indicates a successful prior application, not necessarily that the current editable text equals the backend range.
-- **Job resume is in-memory only.** The hook tracks a known job across reconnects within the current mount, not across page reloads.
-- **WebSocket messages are only partially validated at runtime.** TypeScript assertions do not check arbitrary incoming JSON fields.
-- **REST and WebSocket use the current frontend origin.** Local development and deployment must route `/api` and the equity WebSocket endpoint to FastAPI.
+- **No durable job restoration.** The hook tracks the current job only in memory and does not restore it across a reload; temporary `EventSource` retries are browser-managed.
+- **SSE payloads are only partially validated at runtime.** JSON is parsed, but TypeScript assertions do not verify every incoming field.
+- **HTTP and SSE use the current frontend origin.** Local development and deployment must route `/api` to FastAPI.
 
 ## Where to investigate
 
@@ -295,8 +290,8 @@ These are **current behavior**, not promises about planned features:
 | A REST request returns an unexpected error | `src/api/client.ts`, then the relevant `src/api/*.ts` file and [REST contract](../api/rest.md) |
 | A player hand count or filter tree is stale after adding a range or changing the board | `usePlayerRanges.handleAddRange()` / `applyBoardSnapshots()`, then `src/api/players.ts` / `sessions.ts` |
 | An applied range differs from the input field | `usePlayerRanges.ts` (`range` versus `hasAppliedRange`) |
-| Equity does not start or connection status is wrong | `useEquitySocket.ts`, then `src/api/equity.ts` |
-| A disconnected equity job does not resume | `useEquitySocket.ts` (`jobRef`, `onopen`, `onclose`) and [WebSocket contract](../api/websocket.md) |
-| Cancellation displays the wrong status | `useEquitySocket.ts` message switch and [WebSocket contract](../api/websocket.md) |
+| Equity does not start or its status is wrong | `useEquitySSE.ts`, then `src/api/equity.ts` and [SSE contract](../api/sse.md) |
+| SSE disconnects or a malformed event is received | `src/api/equity.ts` (`onStreamError`), then `useEquitySSE.ts` (`handleStreamFailure`) |
+| Cancellation displays the wrong status | `useEquitySSE.ts` terminal-event handler and [SSE contract](../api/sse.md) |
 | A filter mutation fails or returns unexpected state | `usePlayerRanges.runFilterMutation()`, then `src/api/filters.ts` and the REST contract |
 | A filter control behaves incorrectly or generates the wrong parent path | `src/components/FilterPanel.tsx`, particularly `AddNodeControl()` and `FilterTreeView()` |
