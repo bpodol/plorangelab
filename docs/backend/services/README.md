@@ -53,7 +53,7 @@ A useful investigation path is:
 5. **Report results.** `EquityJob` retains the latest progress snapshot and notifies one subscriber; its `Future` holds the final result or exception.
 6. **Clean up.** `SessionManager` can expire a session on lookup or delete it explicitly, requesting cancellation for an unfinished associated job.
 
-The sequence describes the **service-level flow**. Session-job association, API routing, WebSocket delivery, and executor creation are responsibilities of code outside the two job/session service modules.
+The sequence describes the **service-level flow**. Session-job association, API routing, SSE delivery, and executor creation are responsibilities of code outside the two job/session service modules.
 
 ## Subsystem documents
 
@@ -69,4 +69,4 @@ The sequence describes the **service-level flow**. Session-job association, API 
 
 ## What belongs outside this folder?
 
-Service documentation explains **state ownership and orchestration**, not the internals of domain algorithms or transport contracts. Document API routes, request/response formats, and WebSocket messages with their respective API components; keep the equity evaluator, encoder, and filter expression implementation details in the domain documents linked above.
+Service documentation explains **state ownership and orchestration**, not the internals of domain algorithms or transport contracts. Document API routes, HTTP request/response formats, and SSE messages with their respective API components; keep the equity evaluator, encoder, and filter expression implementation details in the domain documents linked above.

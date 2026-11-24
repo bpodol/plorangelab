@@ -16,12 +16,12 @@ PLO RangeLab is a full-stack application built around a custom Python equity eng
 - **Preflop, flop, turn, and river** calculations.
 - **Interactive range filtering** with nested filter groups, individual activation controls, weighted coverage statistics, and filter management through the frontend.
 - **Board-dependent filter generation** for newly created flop, turn, and river states.
-- **WebSocket-based equity calculations** with progress updates and cancellation.
+- **HTTP + Server-Sent Events (SSE)** for equity-job submission, streamed progress/results, and cancellation.
 - **Session-based REST API** for managing player ranges and boards, returning current-street filter snapshots when ranges are added or replaced.
 
 ## Tech Stack
 
-**Backend:** Python, FastAPI, NumPy, Numba, Pydantic, WebSockets.
+**Backend:** Python, FastAPI, NumPy, Numba, Pydantic, SSE.
 
 **Frontend:** React, TypeScript, Vite.
 
@@ -33,7 +33,7 @@ The application separates its components into:
 
 - **Equity Engine:** Numba-compiled hand evaluation, exact enumeration, and Monte Carlo simulation.
 - **Services:** Session management, shared street states, automatic filter initialization, player-specific range filtering, and equity job execution.
-- **API:** FastAPI REST endpoints and WebSocket communication.
+- **API:** FastAPI HTTP endpoints for job submission/cancellation and SSE for equity updates, alongside REST routes for session/range/filter management.
 - **Frontend:** React interface for interacting with the backend.
 
 Equity calculations execute in dedicated worker threads to avoid blocking the API.
@@ -47,11 +47,11 @@ Technical documentation is organized by subsystem:
 - [Frontend Architecture](docs/frontend/README.md) — React application
   structure, component responsibilities, and workflows.
 - [Frontend State and Data Flow](docs/frontend/state-and-data-flow.md) —
-  State ownership, API communication, and WebSocket lifecycle.
+  State ownership, HTTP job requests, and SSE lifecycle.
 - [REST API](docs/api/rest.md) — Endpoints, request and response schemas,
   and error handling.
-- [WebSocket Protocol](docs/api/websocket.md) — Equity calculation
-  commands, progress updates, cancellation, and reconnection.
+- [Equity SSE Protocol](docs/api/sse.md) — Equity job submission,
+  streamed status/progress/results, cancellation, and reconnection.
 
 
 ## Getting Started

@@ -169,7 +169,7 @@ One subtlety: `Session.is_job_running()` reads `equity_job` and `future` without
 
 ## Typical application flow
 
-The following is a **conceptual caller workflow**, not an API or WebSocket contract defined by these two files:
+The following is a **conceptual caller workflow**, not an HTTP/SSE transport contract defined by these two files:
 
 ```text
 1. SessionManager.create_session()
@@ -193,7 +193,7 @@ The following is a **conceptual caller workflow**, not an API or WebSocket contr
      → unfinished job receives cooperative cancellation request
 ```
 
-This separation lets transport handlers manage how clients receive updates while the job layer remains independent of HTTP and WebSocket message formats.
+This separation lets transport handlers manage how clients receive updates while the job layer remains independent of HTTP and SSE message formats.
 
 ## Boundaries and current constraints
 
@@ -204,7 +204,7 @@ This separation lets transport handlers manage how clients receive updates while
 - **No automatic worker termination:** Session deletion requests cooperative cancellation and does not wait for completion.
 - **One subscriber:** The job keeps only one callback and one current progress value, not a broadcast fan-out or durable event stream.
 - **No automatic range-state synchronization:** Session and job locks do not make concurrent `RangeManager` mutations safe by themselves.
-- **No transport specification:** REST routes, WebSocket events, and HTTP error mappings are implemented outside these files and should be documented at their own boundary.
+- **No transport specification:** REST routes, SSE events, and HTTP error mappings are implemented outside these files and should be documented at their own boundary.
 
 ## Related documentation
 

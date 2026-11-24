@@ -9,7 +9,7 @@ It provides the user interface for managing poker ranges, applying community boa
 
 ```text
 frontend/src/
-├── api/          # REST clients and WebSocket message types
+├── api/          # HTTP clients, SSE stream adapter, and message types
 ├── components/   # UI components
 ├── hooks/        # Application state and backend communication
 ├── test/         # Shared test setup
@@ -36,7 +36,7 @@ The `api/` directory contains typed clients for backend communication.
 - `sessions.ts` — Session creation, session-wide mode changes, and board updates.
 - `players.ts` — Player range requests; PUT returns a complete `PlayerFilterSnapshot`.
 - `filters.ts` — Filter management requests.
-- `equity.ts` — Equity calculation message types.
+- `equity.ts` — HTTP equity submission/cancellation, SSE subscription, and event types.
 
 The REST clients handle request and response details rather than maintaining React state.
 
@@ -48,7 +48,7 @@ It provides operations for managing player ranges and filter trees, including cr
 
 Filter mutations share a common helper that handles loading, errors, and snapshot synchronization. Each player's range and filter snapshot are stored together in a single `PlayerState`, avoiding synchronization between separate React states.
 
-`useEquitySocket()` manages the session's WebSocket connection, reconnection, equity job lifecycle, progress messages, and calculation results.
+`useEquitySSE()` manages equity job submission, the associated SSE connection, cooperative cancellation, progress messages, and calculation results. The browser handles transient SSE reconnection.
 
 Both hooks separate application state and backend communication from UI rendering.
 
@@ -136,9 +136,9 @@ Editing the board input alone does not modify the backend session. The frontend 
 
 1. The user configures the target margin of error in `EquityPanel`.
 2. The component validates the input before enabling calculation.
-3. The calculation request is delegated to `useEquitySocket()`.
-4. The hook processes WebSocket messages and maintains calculation state.
-5. `EquityPanel` renders progress, results, or errors from that state.
+3. The request is delegated to `useEquitySSE()`, which submits `POST /api/sessions/{session_id}/equity` with the target MOE.
+4. After receiving a `job_id`, the hook opens `EventSource` on `GET /api/sessions/{session_id}/equity/{job_id}/events` and processes status/progress/result snapshots.
+5. Cancellation, when requested, uses a separate HTTP POST. `EquityPanel` displays current equity, results, or errors from the hook; it does not need an SSE connection before enabling Calculate.
 
 The equity computation itself runs in the backend.
 
@@ -170,5 +170,5 @@ Database persistence and automatic session-state restoration are not implemented
 
 - [Frontend State and Data Flow](state-and-data-flow.md)
 - [REST API](../api/rest.md)
-- [WebSocket API](../api/websocket.md)
+- [Equity SSE API](../api/sse.md)
 - [Backend Architecture](../backend/README.md)

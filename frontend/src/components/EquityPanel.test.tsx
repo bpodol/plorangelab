@@ -2,17 +2,17 @@ import type { ComponentProps } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
-import type { EquityMessage } from '../api/equity';
+import type { EquityStreamEvent } from '../api/equity';
 import { EquityPanel } from './EquityPanel';
 
 type PanelProps = ComponentProps<typeof EquityPanel>;
 
 function renderPanel(overrides: Partial<PanelProps> = {}) {
   const props: PanelProps = {
-    mode: 4,
+    hasSession: false,
     status: 'idle',
     message: null,
-    isConnected: false,
+    error: null,
     onCalculate: vi.fn(),
     onCancel: vi.fn(),
     ...overrides,
@@ -22,18 +22,30 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
   return { user: userEvent.setup(), props };
 }
 
+// These fixtures represent the panel's input props. Transport and parsing
+// behavior belongs in the equity API and hook tests, not component tests.
 const progressMessage = {
-  type: 'progress',
   job_id: 'job-123',
-  simulations: 125000,
-  margins_of_error: { '0': 0.0018, '2': 0.0023 },
-} satisfies EquityMessage;
+  status: 'running',
+  error: null,
+  details: {
+    equities: { '0': 0.653, '2': 0.347 },
+    method: 'monte-carlo',
+    margins_of_error: { '0': 0.0018, '2': 0.0023 },
+    simulations: 125000,
+    attempts: 130000,
+    stop_reason: null,
+    sampler: 'rejection',
+    effective_samples: null,
+  },
+} satisfies EquityStreamEvent;
 
 const resultMessage = {
-  type: 'result',
   job_id: 'job-123',
-  equities: { '2': 0.347, '0': 0.653 },
+  status: 'completed',
+  error: null,
   details: {
+    equities: { '2': 0.347, '0': 0.653 },
     method: 'monte-carlo',
     margins_of_error: { '2': 0.0023, '0': 0.0012 },
     simulations: 100000,
@@ -42,9 +54,9 @@ const resultMessage = {
     sampler: 'rejection',
     effective_samples: null,
   },
-} satisfies EquityMessage;
+} satisfies EquityStreamEvent;
 
-test('shows the default input and disables actions when disconnected', () => {
+test('shows the default input and disables actions without a session', () => {
   renderPanel();
 
   expect(screen.getByText('Status: idle')).toBeInTheDocument();
@@ -59,7 +71,7 @@ test.each([
   { label: 'custom', input: '0.003', expected: 0.003 },
   { label: 'maximum allowed', input: '0.005', expected: 0.005 },
 ])('sends the $label target MOE when calculating', async ({ input, expected }) => {
-  const { user, props } = renderPanel({ isConnected: true, mode: 5 });
+  const { user, props } = renderPanel({ hasSession: true });
   const moeInput = screen.getByRole('spinbutton', { name: /target moe/i });
 
   if (input !== null) {
@@ -69,11 +81,11 @@ test.each([
 
   await user.click(screen.getByRole('button', { name: /calculate equity/i }));
 
-  expect(props.onCalculate).toHaveBeenCalledExactlyOnceWith(5, expected);
+  expect(props.onCalculate).toHaveBeenCalledExactlyOnceWith(expected);
 });
 
 test.each(['', '0', '0.006'])('disables calculation for invalid MOE %j', async (input) => {
-  const { user, props } = renderPanel({ isConnected: true });
+  const { user, props } = renderPanel({ hasSession: true });
   const moeInput = screen.getByRole('spinbutton', { name: /target moe/i });
 
   await user.clear(moeInput);
@@ -83,8 +95,16 @@ test.each(['', '0', '0.006'])('disables calculation for invalid MOE %j', async (
   expect(props.onCalculate).not.toHaveBeenCalled();
 });
 
-test('allows cancellation only for a connected, running calculation', async () => {
-  const { user, props } = renderPanel({ isConnected: true, status: 'running' });
+test.each(['starting', 'running', 'cancelling'] as const)(
+  'disables calculation while status is %s',
+  (status) => {
+    renderPanel({ hasSession: true, status });
+    expect(screen.getByRole('button', { name: /calculate equity/i })).toBeDisabled();
+  },
+);
+
+test('allows cancellation for a running calculation', async () => {
+  const { user, props } = renderPanel({ hasSession: true, status: 'running' });
 
   expect(screen.getByRole('button', { name: /calculate equity/i })).toBeDisabled();
 
@@ -96,17 +116,22 @@ test('allows cancellation only for a connected, running calculation', async () =
   expect(props.onCalculate).not.toHaveBeenCalled();
 });
 
-test('disables cancellation when a running job is disconnected', () => {
-  renderPanel({ isConnected: false, status: 'running' });
+test.each(['idle', 'starting', 'cancelling', 'completed', 'cancelled', 'failed'] as const)(
+  'disables cancellation while status is %s',
+  (status) => {
+    renderPanel({ hasSession: true, status });
+    expect(screen.getByRole('button', { name: /cancel equity/i })).toBeDisabled();
+  },
+);
 
-  expect(screen.getByRole('button', { name: /cancel equity/i })).toBeDisabled();
-});
-
-test('displays simulations and the highest non-null progress MOE', () => {
+test('displays running equities, simulations, and the highest non-null progress MOE', () => {
   renderPanel({ status: 'running', message: progressMessage });
   const formattedCount = (125000).toLocaleString().replace(/\s/g, ' ');
+
   expect(screen.getByText(`Simulations: ${formattedCount}`)).toBeInTheDocument();
   expect(screen.getByText('Highest MOE: ±0.230 pp')).toBeInTheDocument();
+  expect(screen.getByText(/Player 1: 65\.30%/)).toBeInTheDocument();
+  expect(screen.getByText(/Player 3: 34\.70%/)).toBeInTheDocument();
 });
 
 const missingMoeCases: { label: string; moes: Record<string, number | null> | null }[] = [
@@ -118,10 +143,12 @@ const missingMoeCases: { label: string; moes: Record<string, number | null> | nu
 test.each(missingMoeCases)('hides the highest progress MOE for $label values', ({ moes }) => {
   renderPanel({
     status: 'running',
-    message: { ...progressMessage, margins_of_error: moes },
+    message: {
+      ...progressMessage,
+      details: { ...progressMessage.details, margins_of_error: moes },
+    },
   });
-  const formattedCount = (125000).toLocaleString().replace(/\s/g, ' ');
-  expect(screen.getByText(`Simulations: ${formattedCount}`)).toBeInTheDocument();
+
   expect(screen.queryByText(/Highest MOE:/i)).not.toBeInTheDocument();
 });
 
@@ -134,6 +161,7 @@ test('renders player equity, corresponding MOEs, and simulation count', () => {
   expect(players[1]).toHaveTextContent('Player 3: 34.70% ±0.230 pp');
   const formattedCount = (100000).toLocaleString().replace(/\s/g, ' ');
 
+  expect(screen.getByRole('heading', { name: 'Results' })).toBeInTheDocument();
   expect(screen.getByText(`Simulations: ${formattedCount}`)).toBeInTheDocument();
 });
 
@@ -152,11 +180,17 @@ test('renders results even without MOEs or a simulation count', () => {
   expect(screen.queryByText(/±/)).not.toBeInTheDocument();
 });
 
-test('displays WebSocket errors as alerts', () => {
+test('renders partial results reported by a cancelled calculation', () => {
   renderPanel({
-    status: 'error',
-    message: { type: 'error', detail: 'Calculation failed' },
+    status: 'cancelled',
+    message: { ...resultMessage, status: 'cancelled' },
   });
 
+  expect(screen.getByRole('heading', { name: 'Results' })).toBeInTheDocument();
+  expect(screen.getByText(/Player 1: 65\.30%/)).toBeInTheDocument();
+});
+
+test('displays equity errors from the hook as alerts', () => {
+  renderPanel({ status: 'failed', error: 'Calculation failed' });
   expect(screen.getByRole('alert')).toHaveTextContent('Calculation failed');
 });
