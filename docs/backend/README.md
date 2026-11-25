@@ -4,6 +4,8 @@
 
 PLO RangeLab's Python backend accepts PLO4/PLO5 player ranges, community boards, and card-based filters, then calculates multiway equity using exact enumeration or Monte Carlo estimation. It separates **transport and request validation**, **session and range state**, and **domain algorithms** so each layer has a clear responsibility.
 
+The database infrastructure defines the persistent schema and asynchronous connectivity independently of the current API runtime. Application sessions and computational state remain in memory.
+
 This page is the **entry point for investigating the backend codebase**. It maps the components and common execution paths to their detailed documentation; it does not repeat their implementations or the client-facing API contracts.
 
 ## Documentation map
@@ -12,6 +14,7 @@ This page is the **entry point for investigating the backend codebase**. It maps
 | --- | --- |
 | How FastAPI initializes resources and handles HTTP and SSE requests | [API architecture](api/README.md) |
 | Which service owns sessions, player ranges, filters, and calculation jobs | [Services overview](services/README.md) |
+| Database schema, asynchronous connectivity, migrations, and integration testing | [Database infrastructure](database.md) |
 | Player slots, board transitions, per-street ranges, filter trees, and weighted coverage | [Range management](services/range-management.md) |
 | Session expiry, equity job status, worker execution, progress, and cancellation | [Sessions and equity jobs](services/session-and-jobs.md) |
 | Card IDs, board masks, `EncodedRange`, weighted ranges, and percentage-based ranges | [Card and range encoding](encoding.md) |
@@ -61,6 +64,30 @@ Equity calculation worker
 
 `EngineResources` is prepared at application startup and shared by session range managers. Mutable player, board, and filter state belongs to individual sessions. The equity HTTP router attaches jobs to sessions; the job factory itself does not manage session ownership.
 
+The database infrastructure is currently separate from the application execution flow:
+
+```text
+Database infrastructure (db/)
+├── models.py
+│   ├── Base (shared declarative metadata)
+│   ├── User (users table)
+│   └── SavedRange (ranges table)
+└── session.py
+    ├── create_db_engine() → AsyncEngine
+    └── create_session_factory() → async_sessionmaker
+
+Schema management (alembic/)
+├── env.py → synchronous migration engine
+└── versions/ → versioned schema migrations
+
+Database integration tests (tests/integration/)
+├── disposable PostgreSQL container
+├── automatic Alembic migrations
+└── isolated asynchronous database sessions
+```
+
+PostgreSQL is not yet connected to the FastAPI application lifecycle. For schema definitions, connection management, and testing details, see [Database infrastructure](database.md).
+
 ## Follow an equity calculation
 
 1. **Start a session.** The REST API creates a `Session`, which owns an initially empty `RangeManager`.
@@ -79,6 +106,8 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 - **Services versus computation:** `RangeManager` owns the shared PLO mode, street states, board transitions, and player slots. Each `PlayerRange` owns one player's filtering state for one street. Equity algorithms remain delegated to the `equity` package.
 - **API versus services:** HTTP and SSE handlers validate requests, guard access to session state, and serialize results. They rely on services for state changes and on domain modules for evaluation.
 - **Concurrency versus failure atomicity:** Clone-based range updates avoid publishing partially modified state after a failed operation. Session locks and REST mutation guards coordinate API-mediated access; they are not a general guarantee that every backend object is safe for arbitrary concurrent mutation.
+- **Persistence versus application state:** The `db` package defines persistent user and saved range models. Application sessions, player ranges, filter states, and equity jobs remain process-local and are not persisted to PostgreSQL.
+- **Database infrastructure versus business logic:** The database layer provides ORM models and asynchronous engine and session factories. User registration, authentication, range serialization, and saved range operations are not yet implemented.
 
 ## Where to investigate a problem
 
@@ -93,6 +122,7 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 | Percentage range selection looks wrong | [Card and range encoding](encoding.md) |
 | Showdown strength or hand ordering looks wrong | [Five-card hand ranking](hand-ranking.md), then [Equity engine](equity.md) |
 | Equity precision, sample counts, or execution time needs investigation | [Equity engine](equity.md) |
+| Database connectivity, schema migration, or database integration test failure | [Database infrastructure](database.md) |
 
 ## Source directories
 
@@ -104,5 +134,8 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 | [`src/plorangelab/filters/`](../../src/plorangelab/filters/) | Filter parsing, compilation, evaluation, and board-dependent definition generation |
 | [`src/plorangelab/encoder.py`](../../src/plorangelab/encoder.py) and [`rating.py`](../../src/plorangelab/rating.py) | Card/range encoding and preflop starting-hand orderings |
 | [`src/plorangelab/rank_combination.py`](../../src/plorangelab/rank_combination.py) and [`bootstrap.py`](../../src/plorangelab/bootstrap.py) | Five-card rank tables and shared engine resource initialization |
+| [`src/plorangelab/db/`](../../src/plorangelab/db/) | ORM models, asynchronous database engine and session factories |
+| [`alembic/`](../../alembic/) | Database schema migrations |
+| [`tests/integration/`](../../tests/integration/) | PostgreSQL integration tests and disposable database fixtures |
 
-The current API uses process-local sessions and an application-owned thread pool. See the subsystem documents for specific limitations and implementation guarantees; this overview is intentionally a map, not a specification for persistence, authentication, or deployment.
+The current API uses process-local sessions and an application-owned thread pool. Database infrastructure is implemented and independently tested, but is not yet integrated into the API runtime. See the subsystem documents for specific limitations and implementation guarantees; this overview is intentionally a map, not a detailed specification of individual components.
