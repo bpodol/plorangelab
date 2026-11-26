@@ -1,0 +1,7 @@
+interface:
+  display_name: "docs-sync"
+  short_description: "Synchronize documentation with code changes"
+  default_prompt: "Use $docs-sync to update documentation and docstrings affected by current Git changes."
+
+policy:
+  allow_implicit_invocation: false
