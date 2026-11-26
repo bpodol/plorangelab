@@ -28,6 +28,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.5.0",
     "pytest-cov>=7.1.0",
+    "pytest-gremlins>=1.15.0",
     "ruff>=0.17.1",
     "testcontainers[postgres]>=4.15.0",
 ]
@@ -52,3 +53,9 @@ exclude_also = [
 
 [tool.coverage.json]
 show_contexts = true
+
+[tool.pytest-gremlins]
+paths = ["src/plorangelab"]
+workers = 4
+cache = true
+report = ["console", "json"]

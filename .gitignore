@@ -22,3 +22,7 @@ coverage-python.json
 coverage.xml
 htmlcov/
 diff-coverage.json
+
+# Mutation testing artifacts
+.gremlins_cache/
+coverage/gremlins/
