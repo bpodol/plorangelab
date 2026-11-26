@@ -36,6 +36,7 @@ dev = [
 source = ["plorangelab"]
 branch = true
 relative_files = true
+core = "ctrace"
 
 [tool.coverage.report]
 show_missing = true
