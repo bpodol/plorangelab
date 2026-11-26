@@ -21,4 +21,3 @@ coverage.json
 coverage-python.json
 coverage.xml
 htmlcov/
-diff-coverage.json
