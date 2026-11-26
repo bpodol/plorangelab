@@ -42,5 +42,12 @@ show_missing = true
 skip_empty = true
 precision = 2
 
+# Coverage.py cannot reliably measure runtime execution
+# inside Numba-compiled functions.
+# Compiled kernels are tested separately.
+exclude_also = [
+    '^\s*@(?:numba\.)?njit\b',
+]
+
 [tool.coverage.json]
 show_contexts = true
