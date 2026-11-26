@@ -23,9 +23,24 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "diff-cover>=11.0.4",
     "httpx2>=2.16.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.5.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.17.1",
     "testcontainers[postgres]>=4.15.0",
 ]
+
+[tool.coverage.run]
+source = ["plorangelab"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+precision = 2
+
+[tool.coverage.json]
+show_contexts = true

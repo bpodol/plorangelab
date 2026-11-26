@@ -13,3 +13,11 @@ temp.py
 real_ranges.txt
 
 .env
+
+# Coverage
+.coverage
+.coverage.*
+coverage.json
+coverage-python.json
+coverage.xml
+htmlcov/
