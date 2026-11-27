@@ -7,7 +7,7 @@ Mutation guards prevent changes to session state while an
 equity calculation is pending or running.
 """
 
-from collections.abc import Iterator, AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from typing import Annotated
 
@@ -129,5 +129,6 @@ async def get_db_session(
 
     async with factory() as session:
         yield session
+
 
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]

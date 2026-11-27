@@ -4,7 +4,6 @@ Loads equity engine resources, creates the session registry and
 thread pool, registers API routers, and coordinates shutdown.
 """
 
-import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
