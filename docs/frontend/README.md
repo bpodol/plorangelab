@@ -164,7 +164,7 @@ Filter panels are ordered by their original player slot, independently of the po
 
 The component supports nested filter and group creation, activation toggles, individual node deletion, and bulk deactivation. Filter operations are connected to `usePlayerRanges()` and covered by component tests.
 
-Database persistence and automatic session-state restoration are not implemented.
+Analysis-session persistence and automatic session-state restoration are not implemented. Backend user registration persists accounts, but registration and authentication are not integrated into the frontend.
 
 ## Further Documentation
 

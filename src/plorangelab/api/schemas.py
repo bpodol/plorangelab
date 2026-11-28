@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from plorangelab.equity.results import StopReason
 from plorangelab.services.equity_job import JobStatus
@@ -184,3 +184,15 @@ class EquityStreamEvent(BaseModel):
 class EquityResponseSSE(BaseModel):
     status: Literal["starting", "cancelling"]
     job_id: str
+
+
+class RegisterUserRequest(BaseModel):
+    username: str = Field(
+        min_length=3,
+        max_length=32,
+        pattern=r"^[a-zA-Z0-9_]+$",
+    )
+    password: SecretStr = Field(
+        min_length=8,
+        max_length=128,
+    )

@@ -7,11 +7,12 @@ Mutation guards prevent changes to session state while an
 equity calculation is pending or running.
 """
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Path, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from plorangelab.services.session_manager import Session, SessionManager
 
@@ -119,3 +120,15 @@ def editable_session(session: Session) -> Iterator[None]:
                 detail="Cannot modify session during equity calculation",
             )
         yield
+
+
+async def get_db_session(
+    request: Request,
+) -> AsyncIterator[AsyncSession]:
+    factory = request.app.state.db_session_factory
+
+    async with factory() as session:
+        yield session
+
+
+DbSession = Annotated[AsyncSession, Depends(get_db_session)]
