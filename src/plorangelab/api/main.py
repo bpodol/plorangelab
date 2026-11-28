@@ -9,16 +9,19 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 
 from plorangelab.bootstrap import load_resources
 from plorangelab.config import Settings
 from plorangelab.db import create_db_engine, create_session_factory
 from plorangelab.services.session_manager import SessionManager
 
+from .exception_handlers import handle_validation_error
 from .routers.equity_sse import router as equity_sse_router
 from .routers.filters import router as filters_router
 from .routers.players import router as players_router
 from .routers.sessions import router as sessions_router
+from .routers.users import router as users_router
 
 
 @asynccontextmanager
@@ -73,7 +76,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+app.add_exception_handler(
+    RequestValidationError,
+    handle_validation_error,
+)
+
 app.include_router(sessions_router)
 app.include_router(players_router)
 app.include_router(filters_router)
 app.include_router(equity_sse_router)
+app.include_router(users_router)
