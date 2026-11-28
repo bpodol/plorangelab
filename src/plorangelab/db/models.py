@@ -24,15 +24,14 @@ class User(Base):
 
     __tablename__ = "users"
 
+    __table_args__ = (UniqueConstraint("username", name="uq_users_username"),)
+
     id: Mapped[UUID] = mapped_column(
         Uuid,
         primary_key=True,
         server_default=func.gen_random_uuid(),
     )
-    username: Mapped[str] = mapped_column(
-        Text,
-        unique=True,
-    )
+    username: Mapped[str] = mapped_column(Text)
     password_hash: Mapped[str] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
