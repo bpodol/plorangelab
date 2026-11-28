@@ -277,3 +277,66 @@ async def test_register_user_rolls_back_on_commit_failure(
     user = await db_session.scalar(select(User).where(User.username == "failed_user"))
 
     assert user is None
+
+
+@pytest.mark.asyncio
+async def test_register_user_normalizes_username(
+    db_session: AsyncSession,
+) -> None:
+    user = await register_user(
+        db_session,
+        "MixedCase_User123",
+        "example_password",
+    )
+
+    assert user.username == "mixedcase_user123"
+    assert not db_session.in_transaction()
+
+    user_id = user.id
+    db_session.expunge_all()
+
+    persisted_user = await db_session.get(User, user_id)
+
+    assert persisted_user is not None
+    assert persisted_user.username == "mixedcase_user123"
+
+
+@pytest.mark.asyncio
+async def test_register_user_rejects_case_insensitive_duplicate(
+    db_session: AsyncSession,
+) -> None:
+    original_user = await register_user(
+        db_session,
+        "MixedCase_User",
+        "original_password",
+    )
+
+    original_id = original_user.id
+    original_hash = original_user.password_hash
+
+    with pytest.raises(UsernameAlreadyExistsError):
+        await register_user(
+            db_session,
+            "MIXEDCASE_USER",
+            "different_password",
+        )
+
+    assert not db_session.in_transaction()
+
+    result = await db_session.scalars(
+        select(User).where(
+            User.username.in_(
+                [
+                    "MixedCase_User",
+                    "MIXEDCASE_USER",
+                    "mixedcase_user",
+                ]
+            )
+        )
+    )
+    users = result.all()
+
+    assert len(users) == 1
+    assert users[0].id == original_id
+    assert users[0].username == "mixedcase_user"
+    assert users[0].password_hash == original_hash

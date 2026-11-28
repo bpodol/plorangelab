@@ -14,6 +14,7 @@ class UsernameAlreadyExistsError(Exception):
 
 async def register_user(session: AsyncSession, username: str, password: str) -> User:
     password_hash = await asyncio.to_thread(hash_password, password)
+    username = username.lower()
 
     try:
         async with session.begin():
