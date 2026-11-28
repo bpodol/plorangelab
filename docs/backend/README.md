@@ -4,7 +4,7 @@
 
 PLO RangeLab's Python backend accepts PLO4/PLO5 player ranges, community boards, and card-based filters, then calculates multiway equity using exact enumeration or Monte Carlo estimation. It separates **transport and request validation**, **session and range state**, and **domain algorithms** so each layer has a clear responsibility.
 
-The database infrastructure defines the persistent schema and asynchronous connectivity independently of the current API runtime. Application sessions and computational state remain in memory.
+The backend also persists user accounts through the registration service and asynchronous PostgreSQL access integrated into FastAPI. Application analysis sessions and computational state remain in memory.
 
 This page is the **entry point for investigating the backend codebase**. It maps the components and common execution paths to their detailed documentation; it does not repeat their implementations or the client-facing API contracts.
 
@@ -13,7 +13,7 @@ This page is the **entry point for investigating the backend codebase**. It maps
 | If you want to understand… | Read |
 | --- | --- |
 | How FastAPI initializes resources and handles HTTP and SSE requests | [API architecture](api/README.md) |
-| Which service owns sessions, player ranges, filters, and calculation jobs | [Services overview](services/README.md) |
+| Which service owns registration, sessions, player ranges, filters, and calculation jobs | [Services overview](services/README.md) |
 | Database schema, asynchronous connectivity, migrations, and integration testing | [Database infrastructure](database.md) |
 | Player slots, board transitions, per-street ranges, filter trees, and weighted coverage | [Range management](services/range-management.md) |
 | Session expiry, equity job status, worker execution, progress, and cancellation | [Sessions and equity jobs](services/session-and-jobs.md) |
@@ -28,10 +28,13 @@ This page is the **entry point for investigating the backend codebase**. It maps
 
 ```text
 FastAPI application (api/main.py)
+├── startup: Settings()
 ├── startup: load_resources() → EngineResources
 │   ├── PLO4/PLO5 starting-hand orderings
 │   └── five-card hand-ranking tables
-├── HTTP routers (sessions, players, filters, equity SSE)
+├── startup: database engine and session factory
+├── Users router → DbSession → register_user() → user repository → PostgreSQL
+├── Analysis HTTP routers (sessions, players, filters, equity SSE)
 │   ├── session dependencies and guards
 │   ├── POST equity submission
 │   │   ├── validate session and player configuration
@@ -64,7 +67,7 @@ Equity calculation worker
 
 `EngineResources` is prepared at application startup and shared by session range managers. Mutable player, board, and filter state belongs to individual sessions. The equity HTTP router attaches jobs to sessions; the job factory itself does not manage session ownership.
 
-The database infrastructure is currently separate from the application execution flow:
+The database infrastructure supports the registration path through the application-owned session factory:
 
 ```text
 Database infrastructure (db/)
@@ -72,9 +75,10 @@ Database infrastructure (db/)
 │   ├── Base (shared declarative metadata)
 │   ├── User (users table)
 │   └── SavedRange (ranges table)
-└── session.py
-    ├── create_db_engine() → AsyncEngine
-    └── create_session_factory() → async_sessionmaker
+├── session.py
+│   ├── create_db_engine() → AsyncEngine
+│   └── create_session_factory() → async_sessionmaker
+└── repositories/users.py → user lookups and insertion
 
 Schema management (alembic/)
 ├── env.py → synchronous migration engine
@@ -86,7 +90,7 @@ Database integration tests (tests/integration/)
 └── isolated asynchronous database sessions
 ```
 
-PostgreSQL is not yet connected to the FastAPI application lifecycle. For schema definitions, connection management, and testing details, see [Database infrastructure](database.md).
+For schema definitions, connection management, and testing details, see [Database infrastructure](database.md). For registration and password hashing, see the [services overview](services/README.md#user-registration).
 
 ## Follow an equity calculation
 
@@ -107,7 +111,7 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 - **API versus services:** HTTP and SSE handlers validate requests, guard access to session state, and serialize results. They rely on services for state changes and on domain modules for evaluation.
 - **Concurrency versus failure atomicity:** Clone-based range updates avoid publishing partially modified state after a failed operation. Session locks and REST mutation guards coordinate API-mediated access; they are not a general guarantee that every backend object is safe for arbitrary concurrent mutation.
 - **Persistence versus application state:** The `db` package defines persistent user and saved range models. Application sessions, player ranges, filter states, and equity jobs remain process-local and are not persisted to PostgreSQL.
-- **Database infrastructure versus business logic:** The database layer provides ORM models and asynchronous engine and session factories. User registration, authentication, range serialization, and saved range operations are not yet implemented.
+- **Database infrastructure versus business logic:** The database layer provides ORM models, engine/session factories, and user repositories. The registration service owns transactions and password hashing coordination. Login, authentication, range serialization, and saved-range operations are not yet implemented.
 
 ## Where to investigate a problem
 
@@ -129,13 +133,15 @@ For the detailed request paths and lock boundaries, see [API architecture](api/R
 | Location | Primary role |
 | --- | --- |
 | [`src/plorangelab/api/`](../../src/plorangelab/api/) | FastAPI app, dependencies, schemas, and HTTP/SSE routers |
-| [`src/plorangelab/services/`](../../src/plorangelab/services/) | Session lifecycle, range state, filtering state, and equity jobs |
+| [`src/plorangelab/services/`](../../src/plorangelab/services/) | User registration, session lifecycle, range state, filtering state, and equity jobs |
+| [`src/plorangelab/config.py`](../../src/plorangelab/config.py) | Application configuration |
+| [`src/plorangelab/security/`](../../src/plorangelab/security/) | Password hashing and verification |
 | [`src/plorangelab/equity/`](../../src/plorangelab/equity/) | Equity calculation algorithms and results |
 | [`src/plorangelab/filters/`](../../src/plorangelab/filters/) | Filter parsing, compilation, evaluation, and board-dependent definition generation |
 | [`src/plorangelab/encoder.py`](../../src/plorangelab/encoder.py) and [`rating.py`](../../src/plorangelab/rating.py) | Card/range encoding and preflop starting-hand orderings |
 | [`src/plorangelab/rank_combination.py`](../../src/plorangelab/rank_combination.py) and [`bootstrap.py`](../../src/plorangelab/bootstrap.py) | Five-card rank tables and shared engine resource initialization |
-| [`src/plorangelab/db/`](../../src/plorangelab/db/) | ORM models, asynchronous database engine and session factories |
+| [`src/plorangelab/db/`](../../src/plorangelab/db/) | ORM models, asynchronous database engine and session factories, and user repositories |
 | [`alembic/`](../../alembic/) | Database schema migrations |
 | [`tests/integration/`](../../tests/integration/) | PostgreSQL integration tests and disposable database fixtures |
 
-The current API uses process-local sessions and an application-owned thread pool. Database infrastructure is implemented and independently tested, but is not yet integrated into the API runtime. See the subsystem documents for specific limitations and implementation guarantees; this overview is intentionally a map, not a detailed specification of individual components.
+The current API uses process-local sessions and an application-owned thread pool. The database engine and session factory are integrated into the API runtime for user registration. See the subsystem documents for specific limitations and implementation guarantees; this overview is intentionally a map, not a detailed specification of individual components.

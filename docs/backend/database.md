@@ -2,9 +2,9 @@
 
 ## Overview
 
-PLO RangeLab uses PostgreSQL for persistent user accounts and saved poker ranges. The `db` package defines the database schema and provides factories for asynchronous database access. Alembic manages schema creation and evolution independently of the application runtime.
+PLO RangeLab uses PostgreSQL for persistent user accounts and defines a schema for future saved poker ranges. The `db` package defines the database schema and provides factories for asynchronous database access. Alembic manages schema creation and evolution independently of the application runtime.
 
-The current implementation establishes the persistence infrastructure only. Database access is not yet integrated into FastAPI request handling. User registration, authentication, saved-range operations, and range serialization are outside the current implementation.
+FastAPI owns the asynchronous engine and session factory. User registration uses request-scoped database sessions and persists user accounts through the user repository. Login, authentication sessions, saved-range operations, and range serialization are not implemented.
 
 Application sessions, player range states, boards, filter trees, and equity jobs remain in memory. Their lifecycle is described in [Sessions and equity jobs](services/session-and-jobs.md) and [Range management](services/range-management.md).
 
@@ -28,6 +28,8 @@ Database provisioning, schema migration, and runtime database access have indepe
 | --- | --- |
 | [`db/session.py`](../../src/plorangelab/db/session.py) | Asynchronous engine and session factories |
 | [`db/models.py`](../../src/plorangelab/db/models.py) | Shared SQLAlchemy declarative base (`Base`), schema metadata, and `User` and `SavedRange` ORM models |
+| [`db/repositories/users.py`](../../src/plorangelab/db/repositories/users.py) | User lookup and insertion operations |
+| [`config.py`](../../src/plorangelab/config.py) | Application settings, including the required `DATABASE_URL` |
 | [`compose.yaml`](../../compose.yaml) | Development PostgreSQL service and persistent volume |
 | [`alembic.ini`](../../alembic.ini) | Alembic configuration |
 | [`alembic/env.py`](../../alembic/env.py) | Migration environment, database URL, and target schema metadata |
@@ -58,11 +60,11 @@ ORM model: `User`. Table: `users`.
 | Column | PostgreSQL type | Constraints and defaults |
 | --- | --- | --- |
 | `id` | `UUID` | Primary key; database-generated with `gen_random_uuid()` |
-| `username` | `TEXT` | Not null; unique |
+| `username` | `TEXT` | Not null; unique (`uq_users_username`) |
 | `password_hash` | `TEXT` | Not null |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | Not null; defaults to `now()` |
 
-The table stores account identity and password hashes, not authentication sessions. Password hashing and verification will belong to the authentication and registration implementation; the database does not perform hashing or validate the hash format.
+The table stores account identity and password hashes, not authentication sessions. Password hashing and verification are implemented in `security/passwords.py`. The database does not perform hashing or validate the hash format. Registration normalizes usernames to lowercase before insertion; the database does not independently enforce lowercase storage.
 
 ### Saved ranges
 
@@ -153,9 +155,25 @@ async def check_database() -> None:
 
 The engine and session factory may be shared by tasks using the same application event loop. An `AsyncSession` must not be shared between concurrently executing tasks. The caller owns session lifetime and transaction boundaries; the factory does not automatically commit changes.
 
-Closing a session releases its ORM and transactional resources, rolling back any remaining uncommitted transaction. Disposing of the engine releases idle pooled connections. When runtime integration is introduced, the application will need to own engine initialization and disposal through its resource lifecycle.
+Closing a session releases its ORM and transactional resources, rolling back any remaining uncommitted transaction. Disposing of the engine releases idle pooled connections. FastAPI owns engine initialization and disposal through its lifespan. It loads `DATABASE_URL` from application settings, creates the engine and session factory, and exposes the factory through `app.state.db_session_factory`. Startup does not execute a database connectivity check.
 
 A SQLAlchemy session is unrelated to an application analysis session or an authentication session.
+
+### Request-scoped sessions and transaction ownership
+
+- `api/dependencies.py`: `get_db_session()` creates an `AsyncSession` from the application session factory, yields it through `DbSession`, and closes it when the request dependency exits. It does not automatically commit.
+- `services/users.py`: `register_user()` owns the transaction using `async with session.begin()`. It expects a session without an active transaction, hashes the password before starting the transaction, and returns only after successful transaction completion. Exceptions inside the transaction cause rollback; the service translates the username uniqueness violation after leaving the transaction context.
+- `db/repositories/users.py`: repository functions execute queries and flush writes without committing or rolling back the caller's transaction.
+
+### User repository
+
+| Function | Contract |
+| --- | --- |
+| `get_user_by_id(session, user_id)` | Retrieve a user by UUID or return `None`. |
+| `get_user_by_username(session, username)` | Retrieve a user by the supplied username or return `None`; does not normalize the input. |
+| `create_user(session, username, password_hash)` | Add and flush a user, then return the ORM object; does not commit. |
+
+Repositories accept already-prepared data and propagate database errors. For registration behavior, see the [services overview](services/README.md#user-registration).
 
 ## Local development setup
 
@@ -203,6 +221,12 @@ uv run --env-file .env alembic upgrade head
 
 The Docker image initializes the database and its initial role; Alembic creates the application tables. Do not create application tables manually or use `Base.metadata.create_all()` as a substitute for migrations.
 
+Start the API after applying migrations:
+
+```bash
+uv run --env-file .env uvicorn plorangelab.api.main:app --reload
+```
+
 ### Persistent storage
 
 The development database uses the named `postgres_data` volume mounted at `/var/lib/postgresql`, matching the PostgreSQL 18 image layout.
@@ -226,6 +250,8 @@ The database role initialized by the Docker image is suitable for local developm
 Alembic uses the standard synchronous migration environment. Psycopg supports both connection modes, so migrations and asynchronous application access can use the same `postgresql+psycopg://` URL while maintaining independent engines.
 
 The initial migration, `3099a3c3a476`, creates `users` before `ranges` because the latter references the former. Downgrading removes the dependent table before the referenced table. Alembic maintains the `alembic_version` table to track the applied revision.
+
+Revision `c362125c26e7` renames the username uniqueness constraint from `users_username_key` to `uq_users_username` without rebuilding the existing unique index. Its downgrade restores the original name. The explicit name is used by the registration service to distinguish username conflicts from unrelated integrity errors.
 
 ### Changing the schema
 
@@ -261,7 +287,7 @@ Integration tests use a real PostgreSQL 18 instance provisioned by Testcontainer
 With Docker running, execute:
 
 ```bash
-uv run pytest tests/integration/test_db.py -v
+uv run pytest tests/integration/ -v
 ```
 
 To run the full backend test suite:
@@ -321,7 +347,7 @@ This strategy isolates operations performed through the fixture's connection. It
 
 Asynchronous Psycopg requires a selector-based event loop on Windows. The integration test configuration implements the pytest-asyncio `pytest_asyncio_loop_factories` hook and registers `asyncio.SelectorEventLoop` as the loop factory. This allows pytest-asyncio to manage compatible event loops on Windows and Linux.
 
-The hook configures test execution only. It does not configure the event loop used by the FastAPI application, which must be addressed when asynchronous database access is integrated into the runtime.
+The hook configures test execution only; it does not configure the event loop used by the FastAPI application. Verify that the actual API runtime uses a compatible loop on Windows before relying on asynchronous database access there.
 
 ### Test coverage
 
@@ -333,6 +359,10 @@ The integration suite exercises:
 - Saved-range persistence and binary data retrieval from PostgreSQL.
 - Unique usernames, foreign keys, mode restrictions, composite uniqueness (including permitted combinations), and required non-null fields.
 - Database-level cascade deletion without affecting another user's ranges.
+- User repository lookups, flush-without-commit behavior, and uniqueness violations (`test_user_repository.py`).
+- Registration persistence, password hashing and offloading, lowercase normalization, duplicate detection, exception propagation, and transaction rollback (`test_user_service.py`).
+
+API tests use the real application with a placeholder database URL and mock the registration service, so they do not verify the full HTTP-to-PostgreSQL path. Savepoint-based service tests do not verify cross-connection commit visibility or concurrent registration requests.
 
 Constraint tests inspect PostgreSQL SQLSTATE codes and, where applicable, constraint or column names to distinguish expected violations from unrelated errors. Binary persistence tests use arbitrary bytes; they do not test a poker range serialization format.
 
@@ -344,11 +374,11 @@ Docker must be available on the runner. No separate PostgreSQL service declarati
 
 ## Key boundaries and current limitations
 
-- **Infrastructure versus business logic:** The `db` package provides schema definitions and database resource factories. Repositories, registration, authentication, saved-range services, and HTTP endpoints are not part of this implementation.
+- **Infrastructure versus business logic:** The `db` package provides schema definitions, database resource factories, and user repositories. Registration is implemented in the service and API layers; authentication and saved-range services are not implemented.
 - **Persistent data versus application state:** The database schema covers users and saved ranges only. Application analysis sessions and active equity jobs remain process-local. Authentication session storage is not implemented.
 - **Schema versus serialization:** `BYTEA` provides binary storage but does not define or validate the format of a saved poker range.
 - **Migrations versus runtime access:** Alembic owns schema evolution; the asynchronous application engine is not responsible for creating tables.
 - **Testing versus development:** Integration tests provision their own PostgreSQL database. They must not fall back to the development URL.
-- **Runtime integration versus infrastructure readiness:** FastAPI does not yet initialize a database engine, inject database sessions, or define application-level transaction boundaries. Production provisioning, database privileges, and operational recovery are also outside the current scope.
+- **Runtime integration versus infrastructure readiness:** FastAPI initializes the database engine and injects request-scoped database sessions; the registration service owns its transaction. Production provisioning, database privileges, and operational recovery remain outside the current scope.
 
 See the [backend architecture overview](README.md) for the existing application execution paths and service ownership boundaries.

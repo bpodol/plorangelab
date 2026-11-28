@@ -6,7 +6,7 @@
 
 PLO RangeLab is a full-stack application built around a custom Python equity engine. It supports weighted hand ranges, multiway equity calculations, and range filtering.
 
-**Status:** Under active development. The equity engine, backend services, REST API, equity calculation UI, filter-management UI, and database infrastructure are implemented. User authentication, saved range persistence, and further UI improvements are in progress.
+**Status:** Under active development. The equity engine, backend services, REST API, equity calculation UI, filter-management UI, database infrastructure, and backend user registration are implemented. User authentication, saved range persistence, and further UI improvements are in progress.
 
 ## Features
 
@@ -18,10 +18,11 @@ PLO RangeLab is a full-stack application built around a custom Python equity eng
 - **Board-dependent filter generation** for newly created flop, turn, and river states.
 - **HTTP + Server-Sent Events (SSE)** for equity-job submission, streamed progress/results, and cancellation.
 - **Session-based REST API** for managing player ranges and boards, returning current-street filter snapshots when ranges are added or replaced.
+- **User registration** with lowercase username normalization, Argon2id password hashing, and duplicate-username detection.
 
 ## Tech Stack
 
-**Backend:** Python, FastAPI, NumPy, Numba, Pydantic, SSE.
+**Backend:** Python, FastAPI, NumPy, Numba, Pydantic, argon2-cffi, SSE.
 
 **Database:** PostgreSQL, SQLAlchemy (async), Psycopg, Alembic.
 
@@ -36,14 +37,14 @@ PLO RangeLab is a full-stack application built around a custom Python equity eng
 The application separates its components into:
 
 - **Equity Engine:** Numba-compiled hand evaluation, exact enumeration, and Monte Carlo simulation.
-- **Services:** Session management, shared street states, automatic filter initialization, player-specific range filtering, and equity job execution.
-- **API:** FastAPI HTTP endpoints for job submission/cancellation and SSE for equity updates, alongside REST routes for session/range/filter management.
+- **Services:** User registration, session management, shared street states, automatic filter initialization, player-specific range filtering, and equity job execution.
+- **API:** FastAPI HTTP endpoints for job submission/cancellation and SSE for equity updates, alongside REST routes for user registration and session/range/filter management.
 - **Database Infrastructure:** PostgreSQL schema, asynchronous SQLAlchemy engine and session factories, and Alembic-managed migrations.
 - **Frontend:** React interface for interacting with the backend.
 
 Equity calculations execute in dedicated worker threads to avoid blocking the API.
 
-Database infrastructure is currently independent of the API runtime. Application sessions, player ranges, filter states, and equity jobs remain in memory.
+FastAPI initializes the asynchronous database engine and session factory at startup. User registration persists accounts to PostgreSQL; connections are opened lazily when needed. Application analysis sessions, player ranges, filter states, and equity jobs remain in memory.
 
 ## Documentation
 
@@ -78,16 +79,7 @@ From the repository root, install dependencies:
 uv sync
 ```
 
-Start the FastAPI development server:
-
-```bash
-uv run uvicorn plorangelab.api.main:app --reload
-```
-### Database
-
-Database infrastructure is currently independent of the running API. Setting up PostgreSQL is not yet required to start the backend.
-
-For database development, create a `.env` file in the repository root using `.env.example` as a template and configure the database credentials and connection URL.
+Configure the database before running the backend locally. Create a `.env` file in the repository root using `.env.example` as a template and configure the database credentials and `DATABASE_URL`.
 
 Start PostgreSQL:
 
@@ -100,6 +92,14 @@ Apply database migrations:
 ```bash
 uv run --env-file .env alembic upgrade head
 ```
+
+Start the FastAPI development server:
+
+```bash
+uv run --env-file .env uvicorn plorangelab.api.main:app --reload
+```
+
+`DATABASE_URL` is required at startup. Engine initialization does not check database connectivity; registration requires a reachable, migrated PostgreSQL database. If the environment is already configured, `--env-file .env` is unnecessary.
 
 For detailed configuration, migration commands, and storage behavior, see [Database Infrastructure](docs/backend/database.md).
 
@@ -178,7 +178,7 @@ npm run build
 
 ## Roadmap
 
-- Implement user accounts and authentication.
+- Implement user login, logout, and authentication.
 - Associate application sessions with authenticated users.
 - Implement range serialization and saved range persistence.
 - Add straight draw automatic filter generation.

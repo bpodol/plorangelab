@@ -215,6 +215,8 @@ All REST clients call `apiRequest<T>()`, which uses `fetch` and:
 - returns `undefined` for successful HTTP 204 responses;
 - parses JSON for other successful responses.
 
+Backend registration (`POST /api/users`) is not yet integrated into the frontend and returns an empty HTTP 201 response. When adding the registration client, account for this response rather than attempting to parse it as JSON. The backend validation handler retains `msg` and omits raw `input` and `ctx`, so the documented error-message extraction remains applicable.
+
 The generic `T` is a **compile-time TypeScript expectation**, not runtime JSON validation. Error presentation belongs to the calling hook or `App`, not the API client.
 
 ## Equity HTTP and SSE flow
